@@ -448,7 +448,7 @@ static void rope_multi_cuda(const T *            x,
     const gfx906_mrope_sections & gfx906_sects = reinterpret_cast<const gfx906_mrope_sections &>(sections);
 
     gfx906_rope_multi_cuda<forward, T>(
-        x, dst, ne0, ne1, ne2, s1, s2, n_dims, nr,
+        x, dst, ne00, ne01, ne02, s1, s2, n_dims, nr,
         pos, freq_scale, freq_base, ext_factor, attn_factor,
         gfx906_corr, freq_factors, gfx906_sects, is_imrope, stream);
 #else
