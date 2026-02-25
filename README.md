@@ -1,3 +1,5 @@
+### Fork that syncs https://github.com/iacopPBK/llama.cpp-gfx906 with https://github.com/ggml-org/llama.cpp head from time to time
+
 ### UPDATE: correctness seems better now
 
 # llama.cpp-gfx906-2602
