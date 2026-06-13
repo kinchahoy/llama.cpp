@@ -296,11 +296,6 @@ static constexpr __device__ int mmq_get_granularity_device(const int /*mmq_x*/) 
 
 #if defined(GGML_USE_HIP)
 static int mmq_get_nwarps_host(const int cc, const int warp_size) {
-#if defined(GGML_CUDA_MMQ_Q4K_GFX906_8_WAVES)
-    if (cc == GGML_CUDA_CC_VEGA20) {
-        return 8;
-    }
-#endif
     return amd_mfma_available(cc) ? 8 : 256/warp_size;
 }
 #else
@@ -311,8 +306,6 @@ static int mmq_get_nwarps_host(const int /*cc*/, const int warp_size) {
 
 static constexpr __device__ int mmq_get_nwarps_device() {
 #if defined(AMD_MFMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
-    return 8;
-#elif defined(GGML_CUDA_MMQ_Q4K_GFX906_8_WAVES) && defined(__gfx906__)
     return 8;
 #else
     return 256/ggml_cuda_get_physical_warp_size();
@@ -3536,7 +3529,9 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
 
 template <ggml_type type, int mmq_x, bool need_check>
 #if defined(GGML_USE_HIP)
-#if defined(RDNA4) || defined(RDNA3) || defined(RDNA2) || defined(CDNA) || defined(GCN)
+#if defined(GGML_CUDA_MMQ_Q4K_GFX906_MIN_BLOCKS_1) && defined(__gfx906__)
+    __launch_bounds__(ggml_cuda_get_physical_warp_size()*mmq_get_nwarps_device(), 1)
+#elif defined(RDNA4) || defined(RDNA3) || defined(RDNA2) || defined(CDNA) || defined(GCN)
     __launch_bounds__(ggml_cuda_get_physical_warp_size()*mmq_get_nwarps_device(), 2)
 #endif // defined(RDNA4) || defined(RDNA3) || defined(RDNA2) || defined(CDNA) || defined(GCN)
 #else
@@ -4180,4 +4175,3 @@ void ggml_cuda_op_mul_mat_q(
     const int64_t src1_padded_row_size, cudaStream_t stream);
 
 bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t n_experts);
-

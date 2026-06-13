@@ -9,6 +9,7 @@ CANDIDATE_BIN="${CANDIDATE_BIN:-$ROOT_DIR/build/gfx906-2026-06/bin/llama-bench}"
 DEVICE="${DEVICE:-ROCm1/ROCm0}"
 BATCH_SIZE="${BATCH_SIZE:-2048}"
 UBATCH_SIZE="${UBATCH_SIZE:-2048}"
+FORCE_LONG="${FORCE_LONG:-0}"
 
 MODELS=(
     "mtp|unsloth/Qwen3.6-27B-MTP-GGUF|q4_0|Qwen3.6-27B-Q4_0.gguf"
@@ -20,25 +21,10 @@ MODELS=(
 )
 
 usage() {
-    echo "Usage: $0 quick|long|all"
+    echo "Usage: $0 quick|long|all [--force]"
     echo "Defaults:"
     echo "  CONTROL_BIN=$CONTROL_BIN"
     echo "  CANDIDATE_BIN=$CANDIDATE_BIN"
-}
-
-setup_rocm_runtime() {
-    local sdk_root
-    local package_root
-    local sdk_libs
-
-    if ! command -v rocm-sdk >/dev/null 2>&1; then
-        return
-    fi
-
-    sdk_root="$(rocm-sdk path --root)"
-    package_root="$(dirname "$sdk_root")"
-    sdk_libs="$package_root/_rocm_sdk_devel/lib:$package_root/_rocm_sdk_libraries/lib:$package_root/_rocm_sdk_core/lib"
-    export LD_LIBRARY_PATH="$sdk_libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 }
 
 require_binaries() {
@@ -101,9 +87,64 @@ run_stage() {
 }
 
 compare_quick() {
-    "$ROOT_DIR/scripts/compare-gfx906-qwen36.py" \
+    compare_and_report quick \
         "$RESULTS_DIR/quick/control" \
         "$RESULTS_DIR/quick/candidate"
+}
+
+compare_and_report() {
+    local stage="$1"
+    local control_dir="$2"
+    local candidate_dir="$3"
+    local report="$RESULTS_DIR/$stage/report.md"
+    local comparison
+    local status
+
+    comparison="$(mktemp)"
+    set +e
+    "$ROOT_DIR/scripts/compare-gfx906-qwen36.py" \
+        "$control_dir" \
+        "$candidate_dir" > "$comparison"
+    status=$?
+    set -e
+
+    {
+        echo "# gfx906 Qwen3.6 $stage comparison"
+        echo
+        echo "Generated: $(date --iso-8601=seconds)"
+        echo
+        echo "## Test setup"
+        echo
+        echo "- Control: \`$CONTROL_BIN\`"
+        echo "- Candidate: \`$CANDIDATE_BIN\`"
+        echo "- Devices: \`$DEVICE\`"
+        echo "- GPU layers: 99"
+        echo "- Flash attention: on"
+        echo "- Batch / microbatch: \`$BATCH_SIZE / $UBATCH_SIZE\`"
+        echo "- Split mode: layer"
+        echo "- Repetitions: 1"
+        echo "- Built-in warmup: disabled"
+        if [[ "$stage" == "quick" ]]; then
+            echo "- Tests: \`pp32\`, \`pp512\`, \`pp2048\`, \`tg128\`"
+        else
+            echo "- Tests: \`pp32\`, \`pp20000+tg5000\`"
+            echo "- Quick gate override: $([[ "$FORCE_LONG" == "1" ]] && echo yes || echo no)"
+        fi
+        echo "- Models: Qwen3.6-27B and Qwen3.6-27B-MTP"
+        echo "- Quant files: Q4_0, Q4_K_M, Q8_0"
+        echo "- Gate thresholds: Q8_0 +${MIN_Q8_GAIN:-10}%, Q4_K_M +${MIN_Q4K_GAIN:-5}%, max regression ${MAX_REGRESSION:-3}%"
+        echo
+        echo "## Comparison"
+        echo
+        echo '```text'
+        cat "$comparison"
+        echo '```'
+    } > "$report"
+
+    cat "$comparison"
+    echo "Report: $report"
+    rm -f "$comparison"
+    return "$status"
 }
 
 run_quick() {
@@ -112,21 +153,38 @@ run_quick() {
 }
 
 run_long() {
-    compare_quick
+    if ! compare_quick; then
+        if [[ "$FORCE_LONG" != "1" ]]; then
+            return 1
+        fi
+        echo "Quick gate failed; continuing because the long run was forced."
+    fi
     run_stage long
-    "$ROOT_DIR/scripts/compare-gfx906-qwen36.py" \
+    compare_and_report long \
         "$RESULTS_DIR/long/control" \
         "$RESULTS_DIR/long/candidate" || true
 }
 
 main() {
-    [[ $# -eq 1 ]] || { usage; exit 2; }
-    setup_rocm_runtime
+    [[ $# -ge 1 && $# -le 2 ]] || { usage; exit 2; }
+    if [[ "${2:-}" == "--force" ]]; then
+        FORCE_LONG=1
+    elif [[ $# -eq 2 ]]; then
+        usage
+        exit 2
+    fi
     require_binaries
     case "$1" in
         quick) run_quick ;;
         long)  run_long ;;
-        all)   run_quick && run_long ;;
+        all)
+            if [[ "$FORCE_LONG" == "1" ]]; then
+                run_quick || true
+                run_long
+            else
+                run_quick && run_long
+            fi
+            ;;
         *)     usage; exit 2 ;;
     esac
 }

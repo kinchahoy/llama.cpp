@@ -35,6 +35,9 @@ def test_name(n_prompt, n_gen):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--informational", action="store_true")
+    parser.add_argument("--control-label", default="control")
+    parser.add_argument("--candidate-label", default="candidate")
     parser.add_argument("control_dir")
     parser.add_argument("candidate_dir")
     args = parser.parse_args()
@@ -52,7 +55,7 @@ def main():
         return 2
 
     quick_mode = any(n_prompt in (512, 2048) and n_gen == 0 for _, n_prompt, n_gen in common)
-    if quick_mode:
+    if quick_mode and not args.informational:
         names = {
             f"{model}__{quant}"
             for model in ("base", "mtp")
@@ -73,7 +76,10 @@ def main():
     max_regression = float(os.environ.get("MAX_REGRESSION", "3"))
     passed = True
 
-    print(f"{'model':42} {'test':16} {'control':>10} {'candidate':>10} {'change':>9}  gate")
+    print(
+        f"{'model':42} {'test':16} {args.control_label:>10} "
+        f"{args.candidate_label:>10} {'change':>9}  gate"
+    )
     for key in common:
         name, n_prompt, n_gen = key
         before = control[key]
@@ -82,7 +88,9 @@ def main():
         quant = quant_from_name(name)
         gate = "info"
 
-        if n_gen > 0 and change < -max_regression:
+        if args.informational:
+            gate = "info"
+        elif n_gen > 0 and change < -max_regression:
             gate = "FAIL"
             passed = False
         elif n_gen > 0:
@@ -103,6 +111,9 @@ def main():
             f"{name:42} {test_name(n_prompt, n_gen):16} "
             f"{before:10.2f} {after:10.2f} {change:+8.2f}%  {gate}"
         )
+
+    if args.informational:
+        return 0
 
     print("PASS: long benchmark is enabled" if passed else "FAIL: skip the long benchmark")
     return 0 if passed else 1

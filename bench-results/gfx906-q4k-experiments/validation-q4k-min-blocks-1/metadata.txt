@@ -1,0 +1,11 @@
+Delta: Q4_K gfx906: keep mmq_y=128/mmq_x=64/four waves, but change launch-bounds minimum resident blocks 2->1 to trade occupancy for zero spill
+Run ID: validation-q4k-min-blocks-1
+Generated: 2026-06-13T13:12:02-07:00
+Control: /home/raistlin/infer/llama.cpp/build/mainline/bin/llama-bench
+Candidate: /home/raistlin/infer/llama.cpp/build/gfx906-2026-06/bin/llama-bench
+Device: ROCm0
+Model: unsloth/Qwen3.6-27B-GGUF/Qwen3.6-27B-Q4_K_M.gguf
+Minimum gain: 5%
+Core test: pp8192
+Long test: pp20000
+Source: 67b6a4005a70
