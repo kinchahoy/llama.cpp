@@ -316,6 +316,10 @@ bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t
     return true;
 #endif //GGML_CUDA_FORCE_MMQ
 
+    if (cc == GGML_CUDA_CC_VEGA20 && type == GGML_TYPE_Q8_0 && n_experts == 0) {
+        return ne11 <= 256;
+    }
+
     if (GGML_CUDA_CC_IS_NVIDIA(cc)) {
         return !fp16_mma_hardware_available(cc) || ne11 < MMQ_DP4A_MAX_BATCH_SIZE;
     }

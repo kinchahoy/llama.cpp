@@ -296,6 +296,11 @@ static constexpr __device__ int mmq_get_granularity_device(const int /*mmq_x*/) 
 
 #if defined(GGML_USE_HIP)
 static int mmq_get_nwarps_host(const int cc, const int warp_size) {
+#if defined(GGML_CUDA_MMQ_Q4K_GFX906_8_WAVES)
+    if (cc == GGML_CUDA_CC_VEGA20) {
+        return 8;
+    }
+#endif
     return amd_mfma_available(cc) ? 8 : 256/warp_size;
 }
 #else
@@ -306,6 +311,8 @@ static int mmq_get_nwarps_host(const int /*cc*/, const int warp_size) {
 
 static constexpr __device__ int mmq_get_nwarps_device() {
 #if defined(AMD_MFMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
+    return 8;
+#elif defined(GGML_CUDA_MMQ_Q4K_GFX906_8_WAVES) && defined(__gfx906__)
     return 8;
 #else
     return 256/ggml_cuda_get_physical_warp_size();
