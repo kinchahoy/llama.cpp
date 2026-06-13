@@ -1,4 +1,7 @@
-# llama.cpp MUL_MAT GPU Benchmark
+# MI50 and RTX 3090 `MUL_MAT` baseline
+
+This is an isolated backend-operation comparison used to identify which gfx906
+paths were worth optimizing. It is not an end-to-end model benchmark.
 
 Benchmark command:
 
@@ -41,9 +44,11 @@ Higher throughput and lower latency are better.
 | Q4_K | 3779.61 us | 15.91 TFLOPS | 5053.89 us | 11.90 TFLOPS | 863.83 us | 69.61 TFLOPS | 4.38x | 5.85x |
 | Q6_K | 6182.09 us | 9.73 TFLOPS  | 7557.69 us | 7.96 TFLOPS  | 893.33 us | 67.31 TFLOPS | 6.92x | 8.46x |
 
-## Summary
+## Interpretation
 
 - The RTX 3090 is about 1.4x to 1.9x faster for these decode-shaped matrix-vector cases.
 - The RTX 3090 is about 4.2x to 11.4x faster for these prefill-shaped matrix-matrix cases.
 - MI50-1 is materially slower than MI50-0, especially for prefill. Its lower power cap and chipset PCIe attachment make the two MI50 results non-equivalent.
 - These are isolated backend operation results. They do not directly measure model token throughput, multi-GPU scaling, sampling, KV-cache work, or host-device transfer overhead.
+- The large Q8_0 prefill gap motivated selective rocBLAS dispatch on gfx906.
+- Q4_K already has the strongest MI50 prefill result among the tested quantized types, so its optimization keeps fused MMQ and targets register spills instead.
