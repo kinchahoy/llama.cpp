@@ -1,0 +1,29 @@
+diff --git a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
+index edf546d8f..000000000 100644
+--- a/ggml/src/ggml-cuda/mmq.cuh
++++ b/ggml/src/ggml-cuda/mmq.cuh
+@@ -3529,7 +3529,9 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
+ 
+ template <ggml_type type, int mmq_x, bool need_check>
+ #if defined(GGML_USE_HIP)
+-#if defined(RDNA4) || defined(RDNA3) || defined(RDNA2) || defined(CDNA) || defined(GCN)
++#if defined(GGML_CUDA_MMQ_Q6K_GFX906_MIN_BLOCKS_1)
++    __launch_bounds__(ggml_cuda_get_physical_warp_size()*mmq_get_nwarps_device(), 1)
++#elif defined(RDNA4) || defined(RDNA3) || defined(RDNA2) || defined(CDNA) || defined(GCN)
+     __launch_bounds__(ggml_cuda_get_physical_warp_size()*mmq_get_nwarps_device(), 2)
+ #endif // defined(RDNA4) || defined(RDNA3) || defined(RDNA2) || defined(CDNA) || defined(GCN)
+ #else
+diff --git a/ggml/src/ggml-hip/CMakeLists.txt b/ggml/src/ggml-hip/CMakeLists.txt
+index b253b21e6..000000000 100644
+--- a/ggml/src/ggml-hip/CMakeLists.txt
++++ b/ggml/src/ggml-hip/CMakeLists.txt
+@@ -77,6 +77,9 @@ if (GGML_HIP_COMPILE_TARGET_COUNT EQUAL 1 AND "gfx906" IN_LIST GGML_HIP_COMPILE
+     set_source_files_properties(
+         "../ggml-cuda/template-instances/mmq-instance-q4_k.cu"
+         PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE)
++    set_source_files_properties(
++        "../ggml-cuda/template-instances/mmq-instance-q6_k.cu"
++        PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_MMQ_Q6K_GFX906_MIN_BLOCKS_1)
+ endif()
+ file(GLOB   SRCS "../ggml-cuda/template-instances/mmf*.cu")
+ list(APPEND GGML_SOURCES_ROCM ${SRCS})

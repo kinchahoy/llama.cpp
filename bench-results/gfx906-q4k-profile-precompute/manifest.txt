@@ -1,0 +1,11 @@
+binary=/home/raistlin/infer/llama.cpp/build/gfx906-2026-06/bin/llama-bench
+device=ROCm0
+batch_size=2048
+ubatch_size=2048
+repo=unsloth/Qwen3.6-27B-GGUF
+contexts=2048
+quants=q4_k_m
+q4k_precompute=1
+repetitions=1
+warmup=disabled
+counters=SQ_INSTS_VALU SQ_INSTS_LDS SQ_INSTS_VMEM_RD SQ_INSTS_VMEM_WR SQ_WAIT_INST_LDS SQ_LDS_BANK_CONFLICT TCC_HIT_sum TCC_MISS_sum TCC_EA_RDREQ_32B_sum TCC_EA_WRREQ_64B_sum SQ_WAVES_sum

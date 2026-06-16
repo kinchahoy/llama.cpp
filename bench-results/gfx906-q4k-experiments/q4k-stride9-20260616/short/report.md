@@ -1,0 +1,13 @@
+# gfx906 Q4_K experiment: short
+
+Delta: Q4_K gfx906: stride-9 precomputed metadata rows
+
+- Alternating runs: 3
+- Maximum allowed regression: 3%
+
+```text
+test          control  candidate    change   samples  gate
+pp512          178.82     182.67    +2.15% 3/  3  pass
+pp2048         214.45     219.46    +2.34% 3/  3  pass
+tg128           17.60      17.90    +1.72% 3/  3  pass
+```
