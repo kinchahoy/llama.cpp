@@ -67,9 +67,20 @@ file(GLOB   SRCS "../ggml-cuda/template-instances/fattn-mma*.cu")
 list(APPEND GGML_SOURCES_ROCM ${SRCS})
 file(GLOB   SRCS "../ggml-cuda/template-instances/mmq*.cu")
 list(APPEND GGML_SOURCES_ROCM ${SRCS})
-set_source_files_properties(
-    "../ggml-cuda/template-instances/mmq-instance-q4_k.cu"
-    PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_MMQ_Q4K_GFX906_MIN_BLOCKS_1)
+set(GGML_HIP_COMPILE_TARGETS ${CMAKE_HIP_ARCHITECTURES})
+if (NOT GGML_HIP_COMPILE_TARGETS)
+    set(GGML_HIP_COMPILE_TARGETS ${GPU_TARGETS})
+endif()
+list(REMOVE_DUPLICATES GGML_HIP_COMPILE_TARGETS)
+list(LENGTH GGML_HIP_COMPILE_TARGETS GGML_HIP_COMPILE_TARGET_COUNT)
+if (GGML_HIP_COMPILE_TARGET_COUNT EQUAL 1 AND "gfx906" IN_LIST GGML_HIP_COMPILE_TARGETS)
+    set_source_files_properties(
+        "../ggml-cuda/template-instances/mmq-instance-q4_k.cu"
+        PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE)
+    set_source_files_properties(
+        "../ggml-cuda/template-instances/mmq-instance-q6_k.cu"
+        PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_MMQ_Q6K_GFX906_MIN_BLOCKS_1)
+endif()
 file(GLOB   SRCS "../ggml-cuda/template-instances/mmf*.cu")
 list(APPEND GGML_SOURCES_ROCM ${SRCS})
 

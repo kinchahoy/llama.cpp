@@ -6,11 +6,15 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MAINLINE_REF="${MAINLINE_REF:-origin/master}"
 MAINLINE_SOURCE="${MAINLINE_SOURCE:-$ROOT_DIR/build/.mainline-src}"
 MAINLINE_BUILD="${MAINLINE_BUILD:-$ROOT_DIR/build/mainline}"
+CONTROL_PATCH="${CONTROL_PATCH:-$ROOT_DIR/gfx906-q8-rocblas-dispatch.patch}"
 CANDIDATE_BUILD="${CANDIDATE_BUILD:-$ROOT_DIR/build/gfx906-2026-06}"
 AMDGPU_ARCH="${AMDGPU_ARCH:-gfx906}"
 BUILD_JOBS="${BUILD_JOBS:-$(nproc)}"
 CONFIGURE_ONLY="${CONFIGURE_ONLY:-0}"
-TARGETS=(llama-bench test-backend-ops llama-cli llama-server)
+TARGETS=(llama-bench test-backend-ops)
+if [[ "${BUILD_FULL:-0}" == "1" ]]; then
+    TARGETS+=(llama-cli llama-server)
+fi
 
 check_environment() {
     if [[ -z "${CC:-}" || -z "${CXX:-}" ]]; then
@@ -33,7 +37,6 @@ prepare_mainline_source() {
     if [[ ! -e "$MAINLINE_SOURCE" ]]; then
         mkdir -p "$(dirname "$MAINLINE_SOURCE")"
         git -C "$ROOT_DIR" worktree add --detach "$MAINLINE_SOURCE" "$MAINLINE_REF"
-        return
     fi
 
     top_level="$(git -C "$MAINLINE_SOURCE" rev-parse --show-toplevel 2>/dev/null || true)"
@@ -42,13 +45,22 @@ prepare_mainline_source() {
         exit 2
     fi
     if [[ -n "$(git -C "$MAINLINE_SOURCE" status --short)" ]]; then
-        echo "Error: mainline worktree is dirty: $MAINLINE_SOURCE" >&2
-        exit 2
+        if [[ -n "$CONTROL_PATCH" ]] && git -C "$MAINLINE_SOURCE" apply -R --check "$CONTROL_PATCH" >/dev/null 2>&1; then
+            git -C "$MAINLINE_SOURCE" apply -R "$CONTROL_PATCH"
+        else
+            echo "Error: mainline worktree has unexpected changes: $MAINLINE_SOURCE" >&2
+            exit 2
+        fi
     fi
 
     current_commit="$(git -C "$MAINLINE_SOURCE" rev-parse HEAD)"
     if [[ "$current_commit" != "$target_commit" ]]; then
         git -C "$MAINLINE_SOURCE" checkout --detach "$target_commit"
+    fi
+
+    if [[ -n "$CONTROL_PATCH" ]]; then
+        git -C "$MAINLINE_SOURCE" apply --check "$CONTROL_PATCH"
+        git -C "$MAINLINE_SOURCE" apply "$CONTROL_PATCH"
     fi
 }
 
@@ -99,6 +111,7 @@ main() {
     prepare_mainline_source
 
     echo "Mainline ref: $(git -C "$MAINLINE_SOURCE" rev-parse --short=12 HEAD)"
+    echo "Control patch: ${CONTROL_PATCH:-none}"
     echo "Candidate ref: $(git -C "$ROOT_DIR" rev-parse --short=12 HEAD)"
     echo "C compiler: $CC"
     echo "C++ compiler: $CXX"

@@ -9,6 +9,9 @@ REPORT="${REPORT:-$ROOT_DIR/gfx906-q4k-profile-diff.md}"
 DEVICE="${DEVICE:-ROCm0}"
 BATCH_SIZE="${BATCH_SIZE:-2048}"
 UBATCH_SIZE="${UBATCH_SIZE:-2048}"
+PROMPTS="${PROMPTS:-512 2048}"
+QUANTS="${QUANTS:-q4_0 q4_k_m}"
+Q4K_PRECOMPUTE="${Q4K_PRECOMPUTE:-0}"
 COUNTERS=(
     SQ_INSTS_VALU
     SQ_INSTS_LDS
@@ -105,7 +108,10 @@ run_cases() {
 
     for entry in "${CASES[@]}"; do
         IFS='|' read -r quant file_name <<< "$entry"
-        for prompt_tokens in 512 2048; do
+        if [[ " $QUANTS " != *" $quant "* ]]; then
+            continue
+        fi
+        for prompt_tokens in $PROMPTS; do
             if [[ "$mode" == "trace" ]]; then
                 run_trace_case "$quant" "$file_name" "$prompt_tokens"
             else
@@ -123,8 +129,9 @@ write_manifest() {
         echo "batch_size=$BATCH_SIZE"
         echo "ubatch_size=$UBATCH_SIZE"
         echo "repo=unsloth/Qwen3.6-27B-GGUF"
-        echo "contexts=512,2048"
-        echo "quants=Q4_0,Q4_K_M"
+        echo "contexts=${PROMPTS// /,}"
+        echo "quants=${QUANTS// /,}"
+        echo "q4k_precompute=$Q4K_PRECOMPUTE"
         echo "repetitions=1"
         echo "warmup=disabled"
         echo "counters=${COUNTERS[*]}"

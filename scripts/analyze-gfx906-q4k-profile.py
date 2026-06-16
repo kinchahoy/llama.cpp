@@ -16,7 +16,7 @@ def integer(row, name):
     return int(row.get(name, "0") or 0)
 
 
-def dynamic_lds_bytes(type_name, mmq_x, nwarps):
+def dynamic_lds_bytes(type_name, mmq_x, nwarps, q4k_precompute=False):
     mmq_y = MMQ_Y
     if type_name in ("Q4_0", "Q4_1"):
         qs = mmq_y * 32 + mmq_y
@@ -24,8 +24,12 @@ def dynamic_lds_bytes(type_name, mmq_x, nwarps):
         sc = 0
     elif type_name == "Q4_K":
         qs = mmq_y * 32 + mmq_y
-        dm = mmq_y * 32 // 32
-        sc = mmq_y * 32 // 8 + mmq_y // 8
+        if q4k_precompute:
+            dm = 0
+            sc = mmq_y * 8 + mmq_y // 8
+        else:
+            dm = mmq_y * 32 // 32
+            sc = mmq_y * 32 // 8 + mmq_y // 8
     elif type_name in ("Q5_K", "Q6_K"):
         qs = mmq_y * 32 * 2 + mmq_y
         dm = mmq_y * 32 // 32 + mmq_y // 32
@@ -52,7 +56,7 @@ def parse_case(path):
     return match.group(1), int(match.group(2))
 
 
-def parse_trace(path):
+def parse_trace(path, q4k_precompute=False):
     quant_label, prompt = parse_case(path)
     rows = []
     last_quant = {}
@@ -95,7 +99,7 @@ def parse_trace(path):
                 "vgpr": integer(row, "VGPR_Count"),
                 "scratch": integer(row, "Scratch_Size"),
                 "static_lds": integer(row, "LDS_Block_Size"),
-                "dynamic_lds": dynamic_lds_bytes(type_name, mmq_x, nwarps),
+                "dynamic_lds": dynamic_lds_bytes(type_name, mmq_x, nwarps, q4k_precompute),
                 "workgroup": f"{wg_x}x{wg_y}",
                 "waves": nwarps,
             })
@@ -160,6 +164,7 @@ def write_report(output, root, rows, counters, shape_counters):
             if "=" in line:
                 key, value = line.split("=", 1)
                 manifest[key] = value
+    focused_q4k = manifest.get("q4k_precompute", "0") == "1"
 
     totals = {}
     for row in rows:
@@ -214,46 +219,71 @@ def write_report(output, root, rows, counters, shape_counters):
         report.write("\n## Findings\n\n")
         q40_pp2048 = totals.get(("q4_0", 2048), 0)
         q4k_pp2048 = totals.get(("q4_k_m", 2048), 0)
-        if q40_pp2048 and q4k_pp2048:
+        if focused_q4k:
+            report.write("- This is a candidate-only profile; compare it with the saved control profile before drawing deltas.\n")
+            report.write("- The dominant Q4_K shape uses 128 VGPRs, zero scratch, and 29.8 KiB of dynamic LDS.\n")
+            report.write("- Q6_K and Q5_K are unchanged by the Q4_K translation-unit specialization and retain their existing scratch usage.\n")
+        elif q40_pp2048 and q4k_pp2048:
             delta = 100.0 * (q4k_pp2048 / q40_pp2048 - 1.0)
             report.write(f"- Q4_K_M MMQ time is {delta:.1f}% higher than Q4_0 at pp2048.\n")
-        report.write("- The dominant shape is `17408xN x5120`; it accounts for about 41% of Q4_K_M MMQ time and Q4_K is about 16-20% slower per dispatch there.\n")
-        report.write("- Q4_0 uses 100 VGPRs with no scratch. Q4_K uses 128 VGPRs and 44 bytes/thread of scratch at the same four-wave geometry. This makes register pressure and spill traffic the first hypothesis to test.\n")
-        report.write("- Q4_K uses slightly less dynamic LDS than Q4_0, so LDS capacity alone does not explain the loss. LDS instruction count, bank conflicts, and waits may still matter.\n")
-        report.write("- Q6_K contributes about one quarter of Q4_K_M MMQ time, uses 128 VGPRs, 52 bytes/thread of scratch, and 44.3 KiB of dynamic LDS. It needs its own optimization path rather than being treated as a minor tail.\n")
-        if counters:
-            report.write("- At the dominant pp2048 shape, Q4_K executes 65% more LDS instructions, 30% more VALU instructions, 21% more VMEM reads, and 31% more VMEM writes with the same wave count.\n")
-            report.write("- The dominant shape reports no LDS bank conflicts for either quant, but Q4_K has about 6.1x as many LDS wait instructions. The first LDS investigation should target dependency chains and synchronization rather than padding.\n")
-            report.write("- Q4_K has fewer total TCC accesses at the dominant shape but a much lower hit rate, about 49% versus 66%. Raw memory bandwidth is therefore unlikely to be the only limiter.\n")
+        if not focused_q4k:
+            report.write("- The dominant shape is `17408xN x5120`; it accounts for about 41% of Q4_K_M MMQ time and Q4_K is about 16-20% slower per dispatch there.\n")
+            report.write("- Q4_0 uses 100 VGPRs with no scratch. Q4_K uses 128 VGPRs and 44 bytes/thread of scratch at the same four-wave geometry. This makes register pressure and spill traffic the first hypothesis to test.\n")
+            report.write("- Q4_K uses slightly less dynamic LDS than Q4_0, so LDS capacity alone does not explain the loss. LDS instruction count, bank conflicts, and waits may still matter.\n")
+            report.write("- Q6_K contributes about one quarter of Q4_K_M MMQ time, uses 128 VGPRs, 52 bytes/thread of scratch, and 44.3 KiB of dynamic LDS. It needs its own optimization path rather than being treated as a minor tail.\n")
+            if counters:
+                report.write("- At the dominant pp2048 shape, Q4_K executes 65% more LDS instructions, 30% more VALU instructions, 21% more VMEM reads, and 31% more VMEM writes with the same wave count.\n")
+                report.write("- The dominant shape reports no LDS bank conflicts for either quant, but Q4_K has about 6.1x as many LDS wait instructions. The first LDS investigation should target dependency chains and synchronization rather than padding.\n")
+                report.write("- Q4_K has fewer total TCC accesses at the dominant shape but a much lower hit rate, about 49% versus 66%. Raw memory bandwidth is therefore unlikely to be the only limiter.\n")
 
         report.write("\n## Hardware counters\n\n")
         if counters:
             names = sorted({key[2] for key in counters})
             report.write("Counters are totals over all MMQ dispatches in each workload.\n\n")
-            report.write("| Counter | Q4_0 pp512 | Q4_K_M pp512 | Q4_0 pp2048 | Q4_K_M pp2048 | pp2048 change |\n")
-            report.write("| --- | ---: | ---: | ---: | ---: | ---: |\n")
-            for name in names:
-                values = [counters.get((quant, prompt, name), 0) for quant, prompt in (("q4_0", 512), ("q4_k_m", 512), ("q4_0", 2048), ("q4_k_m", 2048))]
-                delta = 100.0 * (values[3] / values[2] - 1.0) if values[2] else 0.0
-                report.write(f"| `{name}` | " + " | ".join(f"{value:.0f}" for value in values) + f" | {delta:+.1f}% |\n")
+            if focused_q4k:
+                report.write("| Counter | Q4_K_M pp2048 |\n")
+                report.write("| --- | ---: |\n")
+                for name in names:
+                    value = counters.get(("q4_k_m", 2048, name), 0)
+                    report.write(f"| `{name}` | {value:.0f} |\n")
+            else:
+                report.write("| Counter | Q4_0 pp512 | Q4_K_M pp512 | Q4_0 pp2048 | Q4_K_M pp2048 | pp2048 change |\n")
+                report.write("| --- | ---: | ---: | ---: | ---: | ---: |\n")
+                for name in names:
+                    values = [counters.get((quant, prompt, name), 0) for quant, prompt in (("q4_0", 512), ("q4_k_m", 512), ("q4_0", 2048), ("q4_k_m", 2048))]
+                    delta = 100.0 * (values[3] / values[2] - 1.0) if values[2] else 0.0
+                    report.write(f"| `{name}` | " + " | ".join(f"{value:.0f}" for value in values) + f" | {delta:+.1f}% |\n")
 
             q40_hits = counters.get(("q4_0", 2048, "TCC_HIT_sum"), 0)
             q40_misses = counters.get(("q4_0", 2048, "TCC_MISS_sum"), 0)
             q4k_hits = counters.get(("q4_k_m", 2048, "TCC_HIT_sum"), 0)
             q4k_misses = counters.get(("q4_k_m", 2048, "TCC_MISS_sum"), 0)
-            q40_hit_rate = 100.0 * q40_hits / (q40_hits + q40_misses)
-            q4k_hit_rate = 100.0 * q4k_hits / (q4k_hits + q4k_misses)
-            report.write(f"\nAt pp2048 the aggregate TCC hit rate falls from {q40_hit_rate:.1f}% to {q4k_hit_rate:.1f}%.\n")
+            q40_accesses = q40_hits + q40_misses
+            q4k_accesses = q4k_hits + q4k_misses
+            if q40_accesses and q4k_accesses:
+                q40_hit_rate = 100.0 * q40_hits / q40_accesses
+                q4k_hit_rate = 100.0 * q4k_hits / q4k_accesses
+                report.write(f"\nAt pp2048 the aggregate TCC hit rate falls from {q40_hit_rate:.1f}% to {q4k_hit_rate:.1f}%.\n")
+            elif q4k_accesses:
+                q4k_hit_rate = 100.0 * q4k_hits / q4k_accesses
+                report.write(f"\nAt pp2048 the aggregate Q4_K_M TCC hit rate is {q4k_hit_rate:.1f}%.\n")
 
             report.write("\n### Dominant pp2048 shape\n\n")
-            report.write("Counters below are for matching `17408x2048x5120` Q4_0 and Q4_K dispatches only.\n\n")
-            report.write("| Counter | Q4_0 | Q4_K | Change |\n")
-            report.write("| --- | ---: | ---: | ---: |\n")
-            for name in names:
-                q40 = shape_counters.get(("q4_0", 2048, "Q4_0", 17408, 2048, 5120, name), 0)
-                q4k = shape_counters.get(("q4_k_m", 2048, "Q4_K", 17408, 2048, 5120, name), 0)
-                delta = 100.0 * (q4k / q40 - 1.0) if q40 else 0.0
-                report.write(f"| `{name}` | {q40:.0f} | {q4k:.0f} | {delta:+.1f}% |\n")
+            if focused_q4k:
+                report.write("| Counter | Q4_K |\n")
+                report.write("| --- | ---: |\n")
+                for name in names:
+                    q4k = shape_counters.get(("q4_k_m", 2048, "Q4_K", 17408, 2048, 5120, name), 0)
+                    report.write(f"| `{name}` | {q4k:.0f} |\n")
+            else:
+                report.write("Counters below are for matching `17408x2048x5120` Q4_0 and Q4_K dispatches only.\n\n")
+                report.write("| Counter | Q4_0 | Q4_K | Change |\n")
+                report.write("| --- | ---: | ---: | ---: |\n")
+                for name in names:
+                    q40 = shape_counters.get(("q4_0", 2048, "Q4_0", 17408, 2048, 5120, name), 0)
+                    q4k = shape_counters.get(("q4_k_m", 2048, "Q4_K", 17408, 2048, 5120, name), 0)
+                    delta = 100.0 * (q4k / q40 - 1.0) if q40 else 0.0
+                    report.write(f"| `{name}` | {q40:.0f} | {q4k:.0f} | {delta:+.1f}% |\n")
         else:
             report.write("Not collected. Run `scripts/profile-gfx906-q4k-shapes.sh counters` after reviewing the trace.\n")
 
@@ -263,6 +293,13 @@ def write_report(output, root, rows, counters, shape_counters):
         report.write("- Exact DP4A, unpacking, and LDS instruction counts require saved compiler intermediates or targeted thread-trace/ISA analysis for the dominant kernel variants.\n")
         report.write("- `TCC_EA_RDREQ_32B_sum` is zero on this stack, so the report does not claim a global-read bandwidth value. TCC hit/miss behavior and VMEM instruction counts are still usable.\n")
         report.write("- This first pass uses the base Qwen3.6 model on one MI50 to avoid mixing unequal devices. MTP and dual-GPU validation come after dominant shapes are understood.\n")
+
+        if focused_q4k:
+            report.write("\n## Next tests\n\n")
+            report.write("1. Compare these counters with the saved control profile and retain the candidate only if the model-level prompt gates pass.\n")
+            report.write("2. Investigate any LDS bank-conflict increase before stacking another metadata-layout change.\n")
+            report.write("3. Treat Q6_K separately; this candidate does not change its larger LDS and scratch footprint.\n")
+            return
 
         report.write("\n## Next tests\n\n")
         report.write("1. Save and disassemble the Q4_0, Q4_K, and Q6_K `mmq_x=64` kernels. Count DP4A, unpack/scale, LDS, synchronization, and scratch instructions for the dominant shape variants.\n")
@@ -296,10 +333,19 @@ def main():
     parser.add_argument("--output", required=True, type=pathlib.Path)
     args = parser.parse_args()
 
+    manifest = {}
+    manifest_path = args.input / "manifest.txt"
+    if manifest_path.exists():
+        for line in manifest_path.read_text(encoding="utf-8").splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                manifest[key] = value
+    q4k_precompute = manifest.get("q4k_precompute", "0") == "1"
+
     raw_rows = []
     trace_sequences = {}
     for path in trace_files(args.input):
-        parsed = parse_trace(path)
+        parsed = parse_trace(path, q4k_precompute)
         raw_rows.extend(parsed)
         quant, prompt = parse_case(path)
         trace_sequences[(quant, prompt)] = parsed

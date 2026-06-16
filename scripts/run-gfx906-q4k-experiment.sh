@@ -8,19 +8,90 @@ CANDIDATE_BUILD="${CANDIDATE_BUILD:-$ROOT_DIR/build/gfx906-2026-06}"
 CANDIDATE_BIN="${CANDIDATE_BIN:-$CANDIDATE_BUILD/bin/llama-bench}"
 DEVICE="${DEVICE:-ROCm0}"
 MIN_GAIN="${MIN_GAIN:-5}"
+RUNS="${RUNS:-3}"
 CORE_PROMPT="${CORE_PROMPT:-8192}"
 LONG_PROMPT="${LONG_PROMPT:-20000}"
-DELTA="${DELTA:-Q4_K gfx906: keep mmq_y=128/mmq_x=64/four waves, but change launch-bounds minimum resident blocks 2->1 to trade occupancy for zero spill}"
-RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-q4k-min-blocks-1}"
+SHORT_MIN_GAIN="${SHORT_MIN_GAIN:--3}"
+DELTA="${DELTA:-Q4_K gfx906: precompute scale/min metadata in the DP4A LDS tile}"
+RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-q4k-metadata-precompute}"
 RESULTS_ROOT="${RESULTS_ROOT:-$ROOT_DIR/bench-results/gfx906-q4k-experiments}"
 RUN_DIR="$RESULTS_ROOT/$RUN_ID"
 REPO="unsloth/Qwen3.6-27B-GGUF"
 FILE_NAME="Qwen3.6-27B-Q4_K_M.gguf"
 
 usage() {
-    echo "Usage: $0 build|core|quick|long|all|profile"
+    echo "Usage: $0 build|core|quick|short|long|all|profile"
     echo "core and quick both run pp$CORE_PROMPT; long runs pp$LONG_PROMPT after the core gate passes."
     echo "Set RUN_ID to reuse a run directory across separate commands."
+}
+
+bench_short() {
+    local binary="$1"
+    local output="$2"
+
+    "$binary" \
+        -r 1 \
+        --no-warmup \
+        -o jsonl \
+        -ngl 99 \
+        -fa on \
+        -b 2048 \
+        -ub 2048 \
+        -sm none \
+        -dev "$DEVICE" \
+        -hf "$REPO" \
+        -hff "$FILE_NAME" \
+        -p 512,2048 \
+        -n 128 > "$output"
+}
+
+run_short_comparison() {
+    local stage_dir="$RUN_DIR/short"
+    local comparison="$stage_dir/comparison.txt"
+    local report="$stage_dir/report.md"
+    local run
+
+    mkdir -p "$stage_dir"
+    : > "$stage_dir/control.jsonl"
+    : > "$stage_dir/candidate.jsonl"
+    for ((run = 1; run <= RUNS; ++run)); do
+        if ((run % 2 == 1)); then
+            echo "[short][$run/$RUNS][control] pp512,pp2048,tg128"
+            bench_short "$CONTROL_BIN" "$stage_dir/control-$run.jsonl"
+            echo "[short][$run/$RUNS][candidate] pp512,pp2048,tg128"
+            bench_short "$CANDIDATE_BIN" "$stage_dir/candidate-$run.jsonl"
+        else
+            echo "[short][$run/$RUNS][candidate] pp512,pp2048,tg128"
+            bench_short "$CANDIDATE_BIN" "$stage_dir/candidate-$run.jsonl"
+            echo "[short][$run/$RUNS][control] pp512,pp2048,tg128"
+            bench_short "$CONTROL_BIN" "$stage_dir/control-$run.jsonl"
+        fi
+        cat "$stage_dir/control-$run.jsonl" >> "$stage_dir/control.jsonl"
+        cat "$stage_dir/candidate-$run.jsonl" >> "$stage_dir/candidate.jsonl"
+    done
+
+    {
+        "$ROOT_DIR/scripts/compare-gfx906-q4k-experiment.py" --prompt 512 \
+            --minimum-gain "$SHORT_MIN_GAIN" "$stage_dir/control.jsonl" "$stage_dir/candidate.jsonl"
+        "$ROOT_DIR/scripts/compare-gfx906-q4k-experiment.py" --prompt 2048 \
+            --minimum-gain "$SHORT_MIN_GAIN" "$stage_dir/control.jsonl" "$stage_dir/candidate.jsonl" | tail -n 1
+        "$ROOT_DIR/scripts/compare-gfx906-q4k-experiment.py" --generation 128 \
+            --minimum-gain "$SHORT_MIN_GAIN" "$stage_dir/control.jsonl" "$stage_dir/candidate.jsonl" | tail -n 1
+    } | tee "$comparison"
+
+    {
+        echo "# gfx906 Q4_K experiment: short"
+        echo
+        echo "Delta: $DELTA"
+        echo
+        echo "- Alternating runs: $RUNS"
+        echo "- Maximum allowed regression: ${SHORT_MIN_GAIN#-}%"
+        echo
+        echo '```text'
+        cat "$comparison"
+        echo '```'
+    } > "$report"
+    echo "Report: $report"
 }
 
 write_metadata() {
@@ -35,6 +106,7 @@ write_metadata() {
         echo "Device: $DEVICE"
         echo "Model: $REPO/$FILE_NAME"
         echo "Minimum gain: $MIN_GAIN%"
+        echo "Alternating runs: $RUNS"
         echo "Core test: pp$CORE_PROMPT"
         echo "Long test: pp$LONG_PROMPT"
         echo "Source: $(git -C "$ROOT_DIR" rev-parse --short=12 HEAD)"
@@ -46,15 +118,13 @@ require_binary() {
     [[ -x "$binary" ]] || { echo "Not executable: $binary" >&2; exit 2; }
 }
 
-build_candidate() {
+build_comparison() {
     [[ -n "${CC:-}" && -n "${CXX:-}" ]] || {
         echo "CC and CXX are not set. Source scripts/setup-therock-env.sh first." >&2
         exit 2
     }
-    export CCACHE_DIR="${CCACHE_DIR:-$ROOT_DIR/build/.ccache}"
-    mkdir -p "$CCACHE_DIR"
     echo "Delta: $DELTA"
-    cmake --build "$CANDIDATE_BUILD" --target llama-bench -j"${BUILD_JOBS:-$(nproc)}" 2>&1 | tee "$RUN_DIR/build.log"
+    "$ROOT_DIR/scripts/build-gfx906-comparison.sh" 2>&1 | tee "$RUN_DIR/build.log"
 }
 
 bench() {
@@ -85,13 +155,27 @@ run_comparison() {
     local comparison="$stage_dir/comparison.txt"
     local report="$stage_dir/report.md"
     local status
+    local run
 
     mkdir -p "$stage_dir"
     printf '%s\n' "Delta: $DELTA" > "$stage_dir/delta.txt"
-    echo "[$stage][control] pp$prompt"
-    bench "$CONTROL_BIN" "$stage_dir/control.jsonl" "$prompt"
-    echo "[$stage][candidate] pp$prompt"
-    bench "$CANDIDATE_BIN" "$stage_dir/candidate.jsonl" "$prompt"
+    : > "$stage_dir/control.jsonl"
+    : > "$stage_dir/candidate.jsonl"
+    for ((run = 1; run <= RUNS; ++run)); do
+        if ((run % 2 == 1)); then
+            echo "[$stage][$run/$RUNS][control] pp$prompt"
+            bench "$CONTROL_BIN" "$stage_dir/control-$run.jsonl" "$prompt"
+            echo "[$stage][$run/$RUNS][candidate] pp$prompt"
+            bench "$CANDIDATE_BIN" "$stage_dir/candidate-$run.jsonl" "$prompt"
+        else
+            echo "[$stage][$run/$RUNS][candidate] pp$prompt"
+            bench "$CANDIDATE_BIN" "$stage_dir/candidate-$run.jsonl" "$prompt"
+            echo "[$stage][$run/$RUNS][control] pp$prompt"
+            bench "$CONTROL_BIN" "$stage_dir/control-$run.jsonl" "$prompt"
+        fi
+        cat "$stage_dir/control-$run.jsonl" >> "$stage_dir/control.jsonl"
+        cat "$stage_dir/candidate-$run.jsonl" >> "$stage_dir/candidate.jsonl"
+    done
 
     set +e
     "$ROOT_DIR/scripts/compare-gfx906-q4k-experiment.py" \
@@ -110,7 +194,7 @@ run_comparison() {
         printf '%s\n' "- Run ID: \`$RUN_ID\`"
         printf '%s\n' "- Device: \`$DEVICE\`"
         printf '%s\n' "- Test: \`pp$prompt\`"
-        echo "- Repetitions: 1"
+        echo "- Alternating runs: $RUNS"
         echo "- Warmup: disabled"
         printf '%s\n' "- Gate: at least \`+$MIN_GAIN%\`"
         echo
@@ -145,7 +229,7 @@ main() {
     write_metadata
     case "$1" in
         build)
-            build_candidate
+            build_comparison
             ;;
         core|quick)
             require_binary "$CONTROL_BIN"
@@ -164,16 +248,22 @@ main() {
                 "$RUN_DIR/core/control.jsonl" "$RUN_DIR/core/candidate.jsonl" >/dev/null
             run_comparison long "$LONG_PROMPT"
             ;;
+        short)
+            require_binary "$CONTROL_BIN"
+            require_binary "$CANDIDATE_BIN"
+            run_short_comparison
+            ;;
         profile)
             require_binary "$CANDIDATE_BIN"
             run_profile
             ;;
         all)
+            build_comparison
             require_binary "$CONTROL_BIN"
-            build_candidate
             require_binary "$CANDIDATE_BIN"
             run_comparison core "$CORE_PROMPT"
             run_comparison long "$LONG_PROMPT"
+            run_short_comparison
             ;;
         *)
             usage
