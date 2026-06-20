@@ -1,0 +1,10 @@
+Qwen3.6-27B Q8_0, single ROCm0, tg32 d0, three timed samples:
+
+control VDR=2: 19.147 t/s
+candidate VDR=4: 19.182 t/s
+delta: +0.19 percent
+
+The difference is within run variance. VDR=4 is rejected.
+
+VDR=8 passed focused correctness but could not be benchmarked because ROCm
+execution approval was unavailable. It is not enabled in the source tree.

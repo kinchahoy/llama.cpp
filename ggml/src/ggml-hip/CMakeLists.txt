@@ -75,6 +75,9 @@ list(REMOVE_DUPLICATES GGML_HIP_COMPILE_TARGETS)
 list(LENGTH GGML_HIP_COMPILE_TARGETS GGML_HIP_COMPILE_TARGET_COUNT)
 if (GGML_HIP_COMPILE_TARGET_COUNT EQUAL 1 AND "gfx906" IN_LIST GGML_HIP_COMPILE_TARGETS)
     set_source_files_properties(
+        "../ggml-cuda/mmvq.cu"
+        PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES)
+    set_source_files_properties(
         "../ggml-cuda/template-instances/mmq-instance-q4_k.cu"
         PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE)
     set_source_files_properties(

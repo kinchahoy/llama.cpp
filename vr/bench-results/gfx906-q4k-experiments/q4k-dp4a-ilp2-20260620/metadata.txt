@@ -1,0 +1,8 @@
+Date: 2026-06-20
+Device: ROCm0, gfx906
+Source: 9388c8db9-dirty
+Control build: build/q5k-control for operator tests; build/head-candidate for model tests
+Candidate build: build/q4k-ilp2
+Change: split the gfx906 Q4_K MMQ DP4A inner loop into two dependency chains
+Correctness: focused Q4_K/F32 MUL_MAT 41/41 passed on ROCm0
+Decision: reject for PP; the n=512 operator case regressed by 2.4 percent

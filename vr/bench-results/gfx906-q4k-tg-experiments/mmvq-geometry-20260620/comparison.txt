@@ -1,0 +1,15 @@
+Q4_K/F32 MUL_MAT, m=4096, n=1, k=14336
+variant                    latency_us  tflops  conclusion
+control, two waves              69.08    1.70  retain
+one wave                        92.57    1.27  reject
+four waves                      72.23    1.63  neutral/slower
+two rows per block              70.59    1.66  neutral/slower
+
+The control ranged from 69.08 to 73.89 us across nearby runs, while the
+four-wave candidate stayed near 72.2 us. This does not establish a gain.
+
+End-to-end Qwen3.6-27B Q4_K_M tg64 d0:
+control, two waves/one row: 23.620 t/s
+two rows per block:         23.585 t/s (-0.15 percent)
+
+Decision: retain the existing GCN MMVQ geometry.

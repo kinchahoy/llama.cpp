@@ -1,0 +1,7 @@
+Date: 2026-06-20
+Device: ROCm0, gfx906
+Source: 9388c8db9-dirty
+Control: GCN Q4_K MMVQ, two waves and one output row per block
+Experiments: one wave, four waves, and two output rows per block
+Correctness: focused Q4_K/F32 MUL_MAT 41/41 passed for rows-per-block=2
+Decision: retain the existing two-wave, one-row geometry

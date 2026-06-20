@@ -1,0 +1,25 @@
+variant       run  latency_us  tflops
+control         1     4910.38   12.25
+precompute      1     4559.10   13.19
+min_blocks_1    1     5936.64   10.13
+control         2     4952.52   12.14
+precompute      2     4558.09   13.19
+precompute      3     4518.57   13.31
+control         3     4911.08   12.24
+control         4     4907.20   12.25
+precompute      4     4562.20   13.18
+
+median control:    12.245 TFLOPS
+median precompute: 13.190 TFLOPS
+median gain:       +7.72%
+min_blocks_1:      -17.31% versus first control; rejected after quick screen
+
+Qwen3.6-27B Q4_K_M dynamic-quant model gate, single ROCm0, warmup, one sample:
+test              control_t/s  candidate_t/s  candidate_delta
+pp512 first            257.266         242.199           -5.86%
+pp512 reverse          255.865         256.519           +0.26%
+pp8192                 237.818         195.099          -17.96%
+
+Conclusion: synthetic-only improvement; reject enabling the patch because the
+actual mixed-quant model was neutral/order-sensitive at pp512 and produced a
+material pp8192 regression signal.

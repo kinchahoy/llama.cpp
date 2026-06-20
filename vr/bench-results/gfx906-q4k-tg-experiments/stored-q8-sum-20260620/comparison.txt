@@ -1,0 +1,14 @@
+Qwen3.6-27B Q4_K_M, single ROCm0, tg64 d0, three timed samples:
+
+control before:  25.047 t/s
+candidate run 1: 25.304 t/s
+control after:   25.016 t/s
+candidate run 2: 25.212 t/s
+
+Mean invocation throughput:
+control:   25.031 t/s
+candidate: 25.258 t/s
+delta:     +0.91 percent
+
+The earlier aligned-dword metadata load experiment was neutral at 25.03 t/s
+candidate versus 25.05 t/s reverse-order control and was reverted.

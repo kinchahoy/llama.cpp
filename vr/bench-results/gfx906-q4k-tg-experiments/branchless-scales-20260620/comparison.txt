@@ -1,0 +1,16 @@
+Focused Q4_K/F32 MMVQ, m=4096, n=1, k=14336:
+control:   69.08, 69.45 us (about 1.69-1.70 TFLOPS)
+candidate: 66.03, 66.01 us (about 1.78 TFLOPS)
+latency delta using adjacent medians: -4.7 percent
+
+Qwen3.6-27B Q4_K_M, single ROCm0, tg64 d0, three timed samples:
+control:        23.599 t/s
+candidate run1: 25.015 t/s (+6.00 percent)
+candidate run2: 24.865 t/s (+5.36 percent, reverse order)
+
+Qwen3.6-27B Q4_K_M, single ROCm0, tg32 d8192, one sample per order:
+candidate -> control: 22.171 vs 18.090 t/s
+control -> candidate: 18.090 vs 17.762 t/s
+classification: unresolved due order/thermal instability
+
+The depth-0 gain is repeatable. The long-context magnitude is not established.

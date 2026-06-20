@@ -1,0 +1,11 @@
+Date: 2026-06-20
+Device: ROCm0, gfx906
+Source: 9388c8db9-dirty
+Control build: build/q4k-mmvq-dword
+Candidate build: build/q8-vdr4
+Scope: Q8_0 MMVQ token generation, not Q_K
+Profile: Q8_0 MMVQ was 82.03 percent of GPU kernel time
+Correctness VDR=4: focused Q8_0/F32 MUL_MAT 44/44 passed
+Correctness VDR=8: focused Q8_0/F32 MUL_MAT 44/44 passed
+Decision VDR=4: reject as neutral
+Decision VDR=8: not measured; source change reverted

@@ -1,0 +1,10 @@
+Date: 2026-06-20
+Device: ROCm0, gfx906
+Source: 9388c8db9-dirty
+Control build: build/q5k-control for operator tests; build/head-candidate for model tests
+Candidate build: build/q4k-ilp2
+Change: branch-free Q4_K MMVQ scale/min decode with safe 0/2/4 word indices
+Gate: exact single-target gfx906 HIP builds only
+Correctness focused: Q4_K/F32 MUL_MAT 41/41 passed
+Correctness full: ROCm0 MUL_MAT 1103/1103 passed
+Decision: accepted for gfx906 TG; retain depth-8192 as a noisy unresolved cell

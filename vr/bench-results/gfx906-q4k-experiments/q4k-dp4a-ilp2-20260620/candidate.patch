@@ -1,0 +1,18 @@
+diff --git a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
+--- a/ggml/src/ggml-cuda/mmq.cuh
++++ b/ggml/src/ggml-cuda/mmq.cuh
+@@
+-        int sumi_d = 0;
++        int sumi_d0 = 0;
++        int sumi_d1 = 0;
+ 
+ #pragma unroll
+-        for (int j = 0; j < QI8_1; ++j) {
+-            sumi_d = ggml_cuda_dp4a((v[j] >> (4*i)) & 0x0F0F0F0F, u[i*QI8_1 + j], sumi_d);
++        for (int j = 0; j < QI8_1; j += 2) {
++            sumi_d0 = ggml_cuda_dp4a((v[j + 0] >> (4*i)) & 0x0F0F0F0F, u[i*QI8_1 + j + 0], sumi_d0);
++            sumi_d1 = ggml_cuda_dp4a((v[j + 1] >> (4*i)) & 0x0F0F0F0F, u[i*QI8_1 + j + 1], sumi_d1);
+         }
+@@
+-        sumf += ds8f.x * (dmAf.x * sumi_d);
++        sumf += ds8f.x * (dmAf.x * (sumi_d0 + sumi_d1));

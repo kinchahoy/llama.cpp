@@ -1,0 +1,11 @@
+Qwen3.6-27B Q4_K_M, ROCm0, tg32 d0, no warmup
+Profiled throughput: 20.708 t/s
+
+Kernel share by quant type:
+Q4_K MMVQ: 53.83 percent
+Q6_K MMVQ: 19.46 percent
+Q5_K MMVQ:  4.57 percent
+
+The Q4_K fused MMVQ specialization alone accounted for 40.68 percent of GPU
+kernel time. Q4_K is therefore the primary TG optimization target for this
+model, followed by Q6_K.

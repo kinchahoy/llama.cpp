@@ -1,0 +1,15 @@
+Date: 2026-06-20
+Device: ROCm0, gfx906
+Source: 9388c8db9-dirty
+Control build: build/q5k-control
+Precompute build: build/q5k-precompute
+Min-blocks build: build/q5k-minblocks
+Shape: type_a=q5_K,type_b=f32,m=4096,n=512,k=14336
+Method: test-backend-ops perf, sequential alternating invocations
+Correctness focused: Q5_K/F32 11/11 passed on both candidates
+Correctness full: ROCm0 MUL_MAT 1103/1103 passed on precompute candidate
+Model gate: Unsloth Qwen3.6-27B Q4_K_M dynamic quant, ROCm0, -ngl 99, -fa on, -sm none
+Model composition: q5_K 48 tensors / 0.967 GiB; q4_K 294 / 10.589 GiB; q6_K 67 / 4.216 GiB
+Model control: build/head-candidate (accepted Q8_0, Q4_K, and Q6_K changes)
+Model candidate: build/q5k-precompute (control plus Q5_K precompute/stride 9)
+Decision: reject enabling Q5_K patch; synthetic gain did not pass the model gate
