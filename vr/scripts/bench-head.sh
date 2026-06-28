@@ -31,7 +31,9 @@
 #   OUT=vr/bench-results/gfx906-head-<date>
 #   SNAP=<hf snapshot dir with the gguf files>
 set -uo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_llama_root.sh"
+ROOT="$(resolve_llama_root)"
 cd "$ROOT"
 source vr/scripts/setup-therock-env.sh >/dev/null 2>&1 || { echo "ROCm env failed"; exit 2; }
 

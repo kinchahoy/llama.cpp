@@ -14,7 +14,9 @@
 #   REFRESH   seconds       (default: 5)
 #   ONCE=1    render once and exit (no loop)
 set -uo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_llama_root.sh"
+ROOT="$(resolve_llama_root)"
 TABLE_PY="$ROOT/vr/scripts/_bench_table.py"
 
 OUT="${1:-${OUT:-}}"

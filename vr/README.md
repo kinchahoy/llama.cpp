@@ -1,6 +1,6 @@
 # gfx906 optimization work
 
-Last updated: 2026-06-20
+Last updated: 2026-06-28
 
 This directory contains private-fork work for AMD Vega 20 GPUs: MI50, MI60,
 and Radeon VII. This is the sole operational and technical guide. Measured
@@ -8,6 +8,51 @@ results and their confidence levels are recorded in `RESULTS.md`.
 
 The work is for a private fork. Upstream llama.cpp contribution rules still
 apply if any part is later proposed upstream.
+
+## Current state
+
+The current best build is the exact single-target `gfx906` HIP build from this
+tree, produced by:
+
+```bash
+vr/scripts/build-gfx906-optimal.sh
+```
+
+It includes the accepted code-level changes only:
+
+- `Q8_0` selective rocBLAS dispatch for wide dense prefill.
+- `Q4_K` MMQ metadata precompute plus stride-9 LDS layout for prefill.
+- `Q6_K` MMQ `min_blocks=1` launch bound for the accepted Q6_K prefill path.
+- `Q4_K` MMVQ branch-free scale decoding plus Q8_1 sum reuse for depth-0 TG.
+
+The build script prints this list at startup, configures `gfx906` exactly, and
+checks `compile_commands.json` for the gfx906-only compile definitions before
+building. The default output is `build/gfx906-optimal`; override it with
+`BUILD_DIR=/path/to/build`. The build-tree binaries are configured with
+`CMAKE_INSTALL_RPATH=$ORIGIN`, `CMAKE_BUILD_WITH_INSTALL_RPATH=ON`, and
+`CMAKE_BUILD_RPATH_USE_ORIGIN=ON` so the final build directory can be moved and
+still find its local shared libraries. ROCm runtime libraries may still require
+the normal ROCm environment or `LD_LIBRARY_PATH`.
+
+The optimal patch order is recorded in `vr/patches/optimal-gfx906.series`:
+
+```text
+gfx906-q8-rocblas-dispatch.patch
+gfx906-q4k-metadata-precompute.patch
+gfx906-q6k-min-blocks-1.patch
+gfx906-q4k-mmvq-branchless-scales.patch
+```
+
+The rejected Q5_K metadata experiment is retained under
+`vr/archive/rejected-patches/` and is intentionally not part of the optimal
+series.
+
+Known remaining gaps:
+
+- The latest head-versus-patches run is still triage-only.
+- Long-context TG is unresolved and order-sensitive.
+- The direct Q6_K scratch-spill trace remains an open validation artifact.
+- Flash Attention tile tuning has not started; profile first.
 
 ## Scope
 
@@ -47,11 +92,10 @@ The source changes remain in upstream paths because they modify existing code:
 Everything added specifically for this work is under `vr/`:
 
 - `patches/`: standalone source changes and retained experiment patches
-- `scripts/`: build, benchmark, comparison, and profiling tools
+- `scripts/`: current build, benchmark, and monitoring tools
 - `bench-results/`: raw JSONL, text, and profiler output
-- `configs/`: server model presets
 - `assets/`: benchmark prompt fixtures
-- `archive/`: snapshots of superseded documentation
+- `archive/`: superseded documentation, historical scripts, and rejected patches
 
 The intended branch delta from upstream is the four scoped source changes plus
 the `vr/` tree. New optimization source changes should have a corresponding
@@ -66,7 +110,8 @@ For dense Q8_0 matmuls on Vega 20, `ggml_cuda_should_use_mmq` keeps MMQ through
 `MUL_MAT_ID` operations remain on MMQ.
 
 The observed benefit is in wide prefill operations. The current evidence does
-not establish a decode benefit.
+not establish a decode benefit. Patch:
+`vr/patches/gfx906-q8-rocblas-dispatch.patch`.
 
 ### Q4_K metadata precompute and stride-9 LDS layout
 
@@ -76,7 +121,8 @@ the dot-product loop. Metadata rows use stride 9 to reduce LDS bank conflicts
 for the existing wave64 geometry.
 
 Profiling showed Q4_K to be LDS-wait and occupancy sensitive. Keeping occupancy
-is important. Applying `min_blocks=1` to Q4_K caused a large regression.
+is important. Applying `min_blocks=1` to Q4_K caused a large regression. Patch:
+`vr/patches/gfx906-q4k-metadata-precompute.patch`.
 
 ### Q6_K minimum launch occupancy of one block
 
@@ -86,7 +132,8 @@ profiled Q6_K workload because that kernel was register-spill and VALU limited,
 not LDS-wait limited.
 
 The direct scratch trace that proves removal of the previously observed
-52-byte-per-thread spill remains an open validation item.
+52-byte-per-thread spill remains an open validation item. Patch:
+`vr/patches/gfx906-q6k-min-blocks-1.patch`.
 
 ### Q4_K MMVQ scale decoding and Q8_1 sum reuse
 
@@ -101,7 +148,8 @@ about 0.9 percent depth-0 TG in alternating tests.
 Focused correctness and the full ROCm0 `MUL_MAT` gate passed after both changes.
 Depth-8192 results were
 order-sensitive and do not establish a long-context gain; repeat that cell
-only when long-context behavior becomes decision-relevant.
+only when long-context behavior becomes decision-relevant. Patch:
+`vr/patches/gfx906-q4k-mmvq-branchless-scales.patch`.
 
 ## Critical build gate
 
@@ -110,29 +158,37 @@ contains exactly one target and that target is `gfx906`. A multi-architecture bu
 silently uses the generic implementations. The Q8_0 dispatch uses a runtime
 compute-capability check and is not subject to this compile gate.
 
-Configure and build with:
+Configure and build the current optimal with:
 
 ```bash
-source vr/scripts/setup-therock-env.sh
-
-cmake -S . -B build/gfx906 \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_HIP_ARCHITECTURES=gfx906 \
-  -DGGML_HIP=ON \
-  -DGGML_HIP_GRAPHS=ON \
-  -DGGML_HIP_NO_VMM=ON \
-  -DLLAMA_BUILD_TESTS=ON \
-  -DBUILD_SHARED_LIBS=ON
-
-cmake --build build/gfx906 -j --target llama-bench test-backend-ops
+vr/scripts/build-gfx906-optimal.sh
 ```
 
-Verify that the specialization was compiled rather than assuming the CMake
-option was honored:
+The `vr/scripts/*.sh` entrypoints use one rule: the `vr` directory must live
+inside the llama.cpp tree being built. The scripts derive the llama.cpp root as
+two directories above themselves, so moving `vr/` into another checkout is
+enough to make the same commands build that checkout.
+
+Shared ROCm detection, CMake options, RPATH settings, and common build helpers
+live in `vr/scripts/_gfx906_build.sh`. Edit that file when changing core build
+flags; the vanilla, optimal, and comparison build scripts all use it.
+
+Common overrides:
+
+```bash
+BUILD_DIR=/mnt/fast/gfx906-optimal vr/scripts/build-gfx906-optimal.sh
+TARGETS="llama-cli llama-server llama-bench" vr/scripts/build-gfx906-optimal.sh
+GGML_VULKAN=OFF vr/scripts/build-gfx906-optimal.sh
+CONFIGURE_ONLY=1 vr/scripts/build-gfx906-optimal.sh
+INSTALL_DIR=/opt/llama-gfx906 vr/scripts/build-gfx906-optimal.sh
+```
+
+The script verifies that the specializations were compiled rather than assuming
+the CMake option was honored. Manual verification is:
 
 ```bash
 rg 'GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE|GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES' \
-  build/gfx906/compile_commands.json
+  build/gfx906-optimal/compile_commands.json
 ```
 
 ## Correctness gate
@@ -141,7 +197,7 @@ Run the full ROCm matrix-multiplication tests before accepting any kernel
 change:
 
 ```bash
-build/gfx906/bin/test-backend-ops -b ROCm0 -o MUL_MAT
+build/gfx906-optimal/bin/test-backend-ops -b ROCm0 -o MUL_MAT
 ```
 
 For a new quant-specific implementation, first use a focused test during
@@ -154,17 +210,16 @@ A valid full-patch comparison is:
 - Control: clean selected upstream commit, with no gfx906 patches applied.
 - Candidate: the same upstream commit plus the intended patch set.
 
-`vr/scripts/build-gfx906-comparison.sh` currently defaults `CONTROL_PATCH` to
-the Q8_0 patch for older incremental comparisons. Therefore, explicitly set an
-empty value for a clean control:
+`vr/scripts/build-gfx906-comparison.sh` now defaults `CONTROL_PATCH` to empty,
+so the control is clean unless explicitly overridden. Preserve that default for
+a full head-versus-optimal comparison:
 
 ```bash
 CONTROL_PATCH="" vr/scripts/build-gfx906-comparison.sh
 ```
 
-This default is a known tooling hazard. A benchmark is not a clean head versus
-all-patches comparison unless its provenance confirms that `CONTROL_PATCH` was
-empty.
+A benchmark is not a clean head-versus-optimal comparison unless its provenance
+confirms that `CONTROL_PATCH` was empty.
 
 Before a run, also verify that `build/.mainline-src` is at the intended commit
 and contains no unexpected changes. Do not silently reuse a dirty comparison
@@ -269,18 +324,19 @@ themselves reject a distinct Q6_K decode MMVQ design.
 
 ## Script index
 
+- `_gfx906_build.sh`: shared ROCm/CMake setup and core build flags
+- `build-gfx906-optimal.sh`: build the current optimized gfx906 tree
+- `build-gfx906-vanilla.sh`: build an unpatched upstream-style gfx906 tree
 - `setup-therock-env.sh`: configure the TheRock compiler/runtime environment
 - `build-gfx906-comparison.sh`: build upstream control and current candidate
 - `bench-head.sh`: primary PP/TG A/B harness
 - `watch-bench.sh` and `_bench_table.py`: live result display
-- `profile-gfx906-q4k-shapes.sh`: rocprof capture
-- `analyze-gfx906-q4k-profile.py`: profiler output analysis
-- `run-gfx906-q4k-experiment.sh`: staged Q4_K experiment driver
-- `bench-q6k-min-blocks-1.sh`: historical Q6_K launch-bound experiment
-- `bench-gfx906-rocm-vulkan.sh`: backend comparison
+- `rocm-max-temps.sh`: simple temperature logging helper
 
-Older scripts may use one repetition with warmup disabled. Their outputs are
-historical evidence and should not define the current acceptance policy.
+Historical one-off experiment drivers were moved to
+`vr/archive/scripts-2026-06/`. They may use older repetition and warmup
+policies. Their outputs are historical evidence and should not define the
+current acceptance policy.
 
 ## Documentation archive
 
