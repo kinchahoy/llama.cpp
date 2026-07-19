@@ -52,9 +52,11 @@ current checkout.
 
 ## Current status
 
-The bigbang patch compiled at upstream commit `99f3dc322`. A 2026-07-18
-focused Q4_K/Q8_0 ROCm0 `MUL_MAT` run passed all 90 supported cases. Earlier CSV
-support probes reported all sampled shapes as supported, but contained no
-timing. Neither check directly exercises fused value-plus-gate paths. Treat the
-patch as a candidate until the post-merge correctness and benchmark checklist
-in `vr/WORKTREE-BENCHMARKS.md` is complete.
+The bigbang patch was regenerated against upstream commit `571d0d540` after
+porting the private MMQ changes across upstream's config/load/vector-dot
+refactor. A fresh exact-gfx906 build succeeded and the complete ROCm0 `MUL_MAT`
+gate passed 1134 of 1134 cases. Both series entrypoints resolve to the current
+patch, and it applies cleanly to a fresh archive of `571d0d540`. The gate does
+not directly exercise fused value-plus-gate paths. Treat the patch as a
+candidate until the remaining benchmark checklist in
+`vr/WORKTREE-BENCHMARKS.md` is complete.

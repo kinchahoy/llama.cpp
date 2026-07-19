@@ -411,25 +411,24 @@ metadata precompute, Q6_K launch bound, and Q4_K branchless decoder, it includes
 Q4_K and Q8_0 paired fused MMVQ helpers, Q8_0 wide VDR, Q4_K
 `min_blocks=3`, and DPP/FlashAttention candidates.
 
-The candidate compiled at upstream commit `99f3dc322`. A focused Q4_K/Q8_0
-ROCm0 `MUL_MAT` run passed all 90 supported cases, and earlier CSV probes
-reported every sampled shape as supported. These checks do not provide timing
-or directly exercise fused value-plus-gate paths, so the candidate is not
-accepted yet.
+The candidate was ported across upstream's MMQ refactor and built at commit
+`571d0d540`. The complete ROCm0 `MUL_MAT` gate passed 1134 of 1134 cases.
+This check does not provide timing or directly exercise fused value-plus-gate
+paths, so the candidate is not accepted yet.
 
 ### Next validation
 
-After merging upstream, follow `vr/WORKTREE-BENCHMARKS.md`:
+Follow `vr/WORKTREE-BENCHMARKS.md`:
 
-1. Rebuild clean-head and patched worktrees from the same merged commit.
-2. Run the complete ROCm0 `MUL_MAT` correctness gate.
-3. Add or identify a graph-level check that exercises Q4_K and Q8_0 fused
+1. Add or identify a graph-level check that exercises Q4_K and Q8_0 fused
    value-plus-gate MMVQ.
-4. Run alternating clean/patched Q4_K and Q8_0 model benchmarks with telemetry.
-5. Record decision-grade results in `vr/RESULTS.md`; keep single manual runs
+2. Rebuild a clean-head comparison at `571d0d540`.
+3. Run alternating clean/patched Q4_K and Q8_0 model benchmarks with telemetry.
+4. Record decision-grade results in `vr/RESULTS.md`; keep single manual runs
    classified as triage-only.
-6. Regenerate the current bigbang patch and verify both series files apply to a
-   clean checkout of the merged commit.
+
+The regenerated current patch and both series entrypoints were checked against
+a fresh archive of `571d0d540`.
 
 If the combined candidate regresses, split it along the existing compile
 definitions and test one candidate at a time. Start with Q4_K paired fusion and

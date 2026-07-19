@@ -1,5 +1,5 @@
 diff --git a/ggml/src/ggml-cuda/common.cuh b/ggml/src/ggml-cuda/common.cuh
-index 290dc4aff..c33e6ecff 100644
+index 69d7ae806..0331b5722 100644
 --- a/ggml/src/ggml-cuda/common.cuh
 +++ b/ggml/src/ggml-cuda/common.cuh
 @@ -430,6 +430,61 @@ struct ggml_cuda_unroll<1> {
@@ -88,7 +88,7 @@ index 290dc4aff..c33e6ecff 100644
  #pragma unroll
      for (int offset = width/2; offset > 0; offset >>= 1) {
          x = fmaxf(x, __shfl_xor_sync(0xffffffff, x, offset, width));
-@@ -1642,4 +1707,3 @@ static __inline__ void ggml_cuda_kernel_launch(Kernel kernel, const ggml_cuda_ke
+@@ -1646,4 +1711,3 @@ static __inline__ void ggml_cuda_kernel_launch(Kernel kernel, const ggml_cuda_ke
      kernel<<<launch_params.block_nums, launch_params.block_dims, launch_params.shmem, launch_params.stream>>>(std::forward<Args>(args)... );
      CUDA_CHECK(cudaGetLastError());
  }
@@ -134,53 +134,97 @@ index 69dd93686..d2c8851c1 100644
      constexpr int nthreads_V_q  = (D/4 < 32 ? D/4 : 32);
  #else
      constexpr int nthreads_KQ_q = (D/4 < 32 ? D/4 : 32);
-diff --git a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
-index 6b3b0d064..b505a0053 100644
---- a/ggml/src/ggml-cuda/mmq.cu
-+++ b/ggml/src/ggml-cuda/mmq.cu
-@@ -3,6 +3,8 @@
- #include "quantize.cuh"
- #include "mmid.cuh"
- 
-+#include <cstdlib>
-+
- static void ggml_cuda_mul_mat_q_switch_type(ggml_backend_cuda_context & ctx, const mmq_args & args, cudaStream_t stream) {
-     switch (args.type_x) {
-         case GGML_TYPE_Q1_0:
-@@ -316,6 +318,15 @@ bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t
-     return true;
- #endif //GGML_CUDA_FORCE_MMQ
- 
-+    if (cc == GGML_CUDA_CC_VEGA20 && type == GGML_TYPE_Q8_0 && n_experts == 0) {
-+        static const int64_t max_ne11 = [] {
-+            const char * s = std::getenv("GGML_CUDA_GFX906_Q8_MMQ_MAX_NE11");
-+            const int    v = s ? std::atoi(s) : 0;
-+            return v > 0 ? (int64_t) v : (int64_t) 256;
-+        }();
-+        return ne11 <= max_ne11;
-+    }
-+
-     if (GGML_CUDA_CC_IS_NVIDIA(cc)) {
-         return !fp16_mma_hardware_available(cc) || ne11 < MMQ_DP4A_MAX_BATCH_SIZE;
-     }
-diff --git a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
-index edf546d8f..c3181a6d1 100644
---- a/ggml/src/ggml-cuda/mmq.cuh
-+++ b/ggml/src/ggml-cuda/mmq.cuh
-@@ -185,7 +185,11 @@ static constexpr __device__ int get_mmq_y_device() {
- #define MMQ_DP4A_TXS_Q8_1    tile_x_sizes{mmq_y*MMQ_TILE_NE_K*2 + mmq_y, mmq_y*MMQ_TILE_NE_K*2/QI8_1 + mmq_y/(QI8_1/2), 0}
- #define MMQ_DP4A_TXS_Q2_K    tile_x_sizes{mmq_y*MMQ_TILE_NE_K*2 + mmq_y, mmq_y*MMQ_TILE_NE_K         + mmq_y,           0}
- #define MMQ_DP4A_TXS_Q3_K    tile_x_sizes{mmq_y*MMQ_TILE_NE_K*2 + mmq_y, mmq_y,                                         mmq_y*MMQ_TILE_NE_K/8 + mmq_y/8}
-+#if defined(GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE)
-+#define MMQ_DP4A_TXS_Q4_K    tile_x_sizes{mmq_y*MMQ_TILE_NE_K   + mmq_y, mmq_y*9,                                       0}
+diff --git a/ggml/src/ggml-cuda/mmq-config-rdna2.cuh b/ggml/src/ggml-cuda/mmq-config-rdna2.cuh
+index de4db0a3d..a97f4d118 100644
+--- a/ggml/src/ggml-cuda/mmq-config-rdna2.cuh
++++ b/ggml/src/ggml-cuda/mmq-config-rdna2.cuh
+@@ -1,3 +1,15 @@
++#if defined(GGML_CUDA_MMQ_Q4K_GFX906_MIN_BLOCKS_3)
++#define GGML_CUDA_MMQ_Q4K_OCCUPANCY 3
 +#else
- #define MMQ_DP4A_TXS_Q4_K    tile_x_sizes{mmq_y*MMQ_TILE_NE_K   + mmq_y, mmq_y*MMQ_TILE_NE_K/QI4_K,                     mmq_y*MMQ_TILE_NE_K/8 + mmq_y/8}
++#define GGML_CUDA_MMQ_Q4K_OCCUPANCY 2
 +#endif
- #define MMQ_DP4A_TXS_Q5_K    tile_x_sizes{mmq_y*MMQ_TILE_NE_K*2 + mmq_y, mmq_y*MMQ_TILE_NE_K/QI5_K   + mmq_y/QI5_K,     mmq_y*MMQ_TILE_NE_K/8 + mmq_y/8}
- #define MMQ_DP4A_TXS_Q6_K    tile_x_sizes{mmq_y*MMQ_TILE_NE_K*2 + mmq_y, mmq_y*MMQ_TILE_NE_K/QI6_K   + mmq_y/QI6_K,     mmq_y*MMQ_TILE_NE_K/8 + mmq_y/8}
++
++#if defined(GGML_CUDA_MMQ_Q6K_GFX906_MIN_BLOCKS_1)
++#define GGML_CUDA_MMQ_Q6K_OCCUPANCY 1
++#else
++#define GGML_CUDA_MMQ_Q6K_OCCUPANCY 2
++#endif
++
+ static constexpr __host__ __device__ ggml_cuda_mmq_config ggml_cuda_mmq_get_config_rdna2(ggml_type type, int J, bool fallback) {
+     CASE(GGML_TYPE_Q1_0, 256, 2, 128,   8, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_0, MMQ_ITER_K, false, true);
+     CASE(GGML_TYPE_Q1_0, 256, 2, 128,  16, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_0, MMQ_ITER_K, false, true);
+@@ -97,17 +109,17 @@ static constexpr __host__ __device__ ggml_cuda_mmq_config ggml_cuda_mmq_get_conf
+     CASE(GGML_TYPE_Q3_K, 256, 2, 128,  48, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, false, false);
+     CASE(GGML_TYPE_Q3_K, 256, 2, 128,  64, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, false, false);
  
-@@ -2102,7 +2106,9 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
-     constexpr tile_x_sizes txs = mmq_get_dp4a_tile_x_sizes(GGML_TYPE_Q4_K, mmq_y);
+-    CASE(GGML_TYPE_Q4_K, 256, 2, 128,   8, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, true);
+-    CASE(GGML_TYPE_Q4_K, 256, 2, 128,  16, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, true);
+-    CASE(GGML_TYPE_Q4_K, 256, 2, 128,  32, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, true);
+-    CASE(GGML_TYPE_Q4_K, 256, 2, 128,  64, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, true);
+-    CASE(GGML_TYPE_Q4_K, 256, 2, 128,   8, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
+-    CASE(GGML_TYPE_Q4_K, 256, 2, 128,  16, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
+-    CASE(GGML_TYPE_Q4_K, 256, 2, 128,  24, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
+-    CASE(GGML_TYPE_Q4_K, 256, 2, 128,  32, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
+-    CASE(GGML_TYPE_Q4_K, 256, 2, 128,  40, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
+-    CASE(GGML_TYPE_Q4_K, 256, 2, 128,  48, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
+-    CASE(GGML_TYPE_Q4_K, 256, 2, 128,  64, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
++    CASE(GGML_TYPE_Q4_K, 256, GGML_CUDA_MMQ_Q4K_OCCUPANCY, 128,   8, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, true);
++    CASE(GGML_TYPE_Q4_K, 256, GGML_CUDA_MMQ_Q4K_OCCUPANCY, 128,  16, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, true);
++    CASE(GGML_TYPE_Q4_K, 256, GGML_CUDA_MMQ_Q4K_OCCUPANCY, 128,  32, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, true);
++    CASE(GGML_TYPE_Q4_K, 256, GGML_CUDA_MMQ_Q4K_OCCUPANCY, 128,  64, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, true);
++    CASE(GGML_TYPE_Q4_K, 256, GGML_CUDA_MMQ_Q4K_OCCUPANCY, 128,   8, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
++    CASE(GGML_TYPE_Q4_K, 256, GGML_CUDA_MMQ_Q4K_OCCUPANCY, 128,  16, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
++    CASE(GGML_TYPE_Q4_K, 256, GGML_CUDA_MMQ_Q4K_OCCUPANCY, 128,  24, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
++    CASE(GGML_TYPE_Q4_K, 256, GGML_CUDA_MMQ_Q4K_OCCUPANCY, 128,  32, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
++    CASE(GGML_TYPE_Q4_K, 256, GGML_CUDA_MMQ_Q4K_OCCUPANCY, 128,  40, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
++    CASE(GGML_TYPE_Q4_K, 256, GGML_CUDA_MMQ_Q4K_OCCUPANCY, 128,  48, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
++    CASE(GGML_TYPE_Q4_K, 256, GGML_CUDA_MMQ_Q4K_OCCUPANCY, 128,  64, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
+ 
+     CASE(GGML_TYPE_Q5_K, 256, 2, 128,   8, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, true);
+     CASE(GGML_TYPE_Q5_K, 256, 2, 128,  16, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, true);
+@@ -121,17 +133,17 @@ static constexpr __host__ __device__ ggml_cuda_mmq_config ggml_cuda_mmq_get_conf
+     CASE(GGML_TYPE_Q5_K, 256, 2, 128,  48, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
+     CASE(GGML_TYPE_Q5_K, 256, 2, 128,  64, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1, MMQ_ITER_K, false, false);
+ 
+-    CASE(GGML_TYPE_Q6_K, 256, 2, 128,   8, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, true);
+-    CASE(GGML_TYPE_Q6_K, 256, 2, 128,  16, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, true);
+-    CASE(GGML_TYPE_Q6_K, 256, 2, 128,  32, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, true);
+-    CASE(GGML_TYPE_Q6_K, 256, 2, 128,  64, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, true);
+-    CASE(GGML_TYPE_Q6_K, 256, 2, 128,   8, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, false);
+-    CASE(GGML_TYPE_Q6_K, 256, 2, 128,  16, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, false);
+-    CASE(GGML_TYPE_Q6_K, 256, 2, 128,  24, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, false);
+-    CASE(GGML_TYPE_Q6_K, 256, 2, 128,  32, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, false);
+-    CASE(GGML_TYPE_Q6_K, 256, 2, 128,  40, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, false);
+-    CASE(GGML_TYPE_Q6_K, 256, 2, 128,  48, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, false);
+-    CASE(GGML_TYPE_Q6_K, 256, 2, 128,  64, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, false);
++    CASE(GGML_TYPE_Q6_K, 256, GGML_CUDA_MMQ_Q6K_OCCUPANCY, 128,   8, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, true);
++    CASE(GGML_TYPE_Q6_K, 256, GGML_CUDA_MMQ_Q6K_OCCUPANCY, 128,  16, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, true);
++    CASE(GGML_TYPE_Q6_K, 256, GGML_CUDA_MMQ_Q6K_OCCUPANCY, 128,  32, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, true);
++    CASE(GGML_TYPE_Q6_K, 256, GGML_CUDA_MMQ_Q6K_OCCUPANCY, 128,  64, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, true);
++    CASE(GGML_TYPE_Q6_K, 256, GGML_CUDA_MMQ_Q6K_OCCUPANCY, 128,   8, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, false);
++    CASE(GGML_TYPE_Q6_K, 256, GGML_CUDA_MMQ_Q6K_OCCUPANCY, 128,  16, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, false);
++    CASE(GGML_TYPE_Q6_K, 256, GGML_CUDA_MMQ_Q6K_OCCUPANCY, 128,  24, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, false);
++    CASE(GGML_TYPE_Q6_K, 256, GGML_CUDA_MMQ_Q6K_OCCUPANCY, 128,  32, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, false);
++    CASE(GGML_TYPE_Q6_K, 256, GGML_CUDA_MMQ_Q6K_OCCUPANCY, 128,  40, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, false);
++    CASE(GGML_TYPE_Q6_K, 256, GGML_CUDA_MMQ_Q6K_OCCUPANCY, 128,  48, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, false);
++    CASE(GGML_TYPE_Q6_K, 256, GGML_CUDA_MMQ_Q6K_OCCUPANCY, 128,  64, GGML_CUDA_MMQ_SRAM_LAYOUT_Q6_K, MMQ_ITER_K, false, false);
+ 
+ // ---------------------------------------------------------------------------------------------
+ 
+@@ -259,3 +271,6 @@ static constexpr __host__ __device__ ggml_cuda_mmq_config ggml_cuda_mmq_get_conf
+ 
+     return ggml_cuda_mmq_config(GGML_TYPE_COUNT, 256, 2, 128, 64, GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_0, 256, false, true);
+ }
++
++#undef GGML_CUDA_MMQ_Q4K_OCCUPANCY
++#undef GGML_CUDA_MMQ_Q6K_OCCUPANCY
+diff --git a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-tiles.cuh
+index 7fb242096..a6b18d2ff 100644
+--- a/ggml/src/ggml-cuda/mmq-load-tiles.cuh
++++ b/ggml/src/ggml-cuda/mmq-load-tiles.cuh
+@@ -633,7 +633,9 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
+     constexpr tile_x_sizes txs = mmq_get_dp4a_tile_x_sizes(GGML_TYPE_Q4_K, I);
      int   * x_qs = (int   *)  x_tile;
      half2 * x_dm = (half2 *) (x_qs + txs.qs);
 +#if !defined(GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE)
@@ -189,7 +233,7 @@ index edf546d8f..c3181a6d1 100644
  #endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
  
      constexpr int threads_per_row = MMQ_ITER_K / (4 * QR4_K);
-@@ -2166,6 +2172,40 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
+@@ -697,6 +699,40 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
          }
      }
  #else
@@ -197,14 +241,14 @@ index edf546d8f..c3181a6d1 100644
 +    half2 * x_dmsc = (half2 *) x_dm;
 +    constexpr int row_stride = 9;
 +
-+    static_assert(txs.dm == mmq_y*row_stride, "Wrong Q4_K precompute tile size.");
++    static_assert(txs.dm == I*row_stride, "Wrong Q4_K precompute tile size.");
 +
 +    constexpr int rows_per_warp = warp_size / 2;
 +#pragma unroll
-+    for (int i0 = 0; i0 < mmq_y; i0 += nwarps*rows_per_warp) {
-+        int i = (i0 + threadIdx.y*rows_per_warp + threadIdx.x/2) % mmq_y;
++    for (int i0 = 0; i0 < I; i0 += nwarps*rows_per_warp) {
++        int i = (i0 + threadIdx.y*rows_per_warp + threadIdx.x/2) % I;
 +
-+        if (need_check) {
++        if (fallback) {
 +            i = min(i, i_max);
 +        }
 +
@@ -228,9 +272,9 @@ index edf546d8f..c3181a6d1 100644
 +    }
 +#else
  #pragma unroll
-     for (int i0 = 0; i0 < mmq_y; i0 += nwarps*warp_size) {
-         int i = (i0 + threadIdx.y*warp_size + threadIdx.x) % mmq_y;
-@@ -2196,9 +2236,37 @@ template <int mmq_y, bool need_check> static __device__ __forceinline__ void loa
+     for (int i0 = 0; i0 < I; i0 += nwarps*warp_size) {
+         int i = (i0 + threadIdx.y*warp_size + threadIdx.x) % I;
+@@ -727,6 +763,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
  
          x_sc[i*(MMQ_TILE_NE_K/8) + i/8 + ksc] = scales8;
      }
@@ -238,11 +282,18 @@ index edf546d8f..c3181a6d1 100644
  #endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
  }
  
+diff --git a/ggml/src/ggml-cuda/mmq-vec-dot.cuh b/ggml/src/ggml-cuda/mmq-vec-dot.cuh
+index d57343386..10b08fdbb 100644
+--- a/ggml/src/ggml-cuda/mmq-vec-dot.cuh
++++ b/ggml/src/ggml-cuda/mmq-vec-dot.cuh
+@@ -910,6 +910,32 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
+     }
+ }
+ 
 +#if defined(GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE)
 +static __device__ __forceinline__ float vec_dot_q4_K_q8_1_impl_mmq_gfx906_precompute(
-+    const int * __restrict__ v, const int * __restrict__ u,
-+    const half2 * __restrict__ dmA, const half2 * __restrict__ ds8) {
-+
++        const int * __restrict__ v, const int * __restrict__ u,
++        const half2 * __restrict__ dmA, const half2 * __restrict__ ds8) {
 +    float sumf = 0.0f;
 +
 +#pragma unroll
@@ -265,11 +316,11 @@ index edf546d8f..c3181a6d1 100644
 +}
 +#endif // GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE
 +
- template <int mmq_x, int mmq_y>
- static __device__ __forceinline__ void vec_dot_q4_K_q8_1_dp4a(
-     const int * __restrict__ x, const int * __restrict__ y, float * __restrict__ sum, const int k00) {
-@@ -2208,10 +2276,38 @@ static __device__ __forceinline__ void vec_dot_q4_K_q8_1_dp4a(
-     constexpr tile_x_sizes txs = mmq_get_dp4a_tile_x_sizes(GGML_TYPE_Q4_K, mmq_y);
+ template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_vec_dot_q4_K_q8_1_dp4a(
+         const int * __restrict__ x, const int * __restrict__ y, float * __restrict__ sum, const int k00) {
+     constexpr int warp_size = ggml_cuda_get_physical_warp_size();
+@@ -919,10 +945,38 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
+     constexpr tile_x_sizes txs = mmq_get_dp4a_tile_x_sizes(GGML_TYPE_Q4_K, I);
      const int   * x_qs = (const int   *) x;
      const half2 * x_dm = (const half2 *) x_qs + txs.qs;
 +#if !defined(GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE)
@@ -285,18 +336,18 @@ index edf546d8f..c3181a6d1 100644
 +// #pragma unroll
 +    for (int k01 = 0; k01 < MMQ_TILE_NE_K; k01 += QR4_K*VDR_Q4_K_Q8_1_MMQ) {
 +        const int k0 = k00 + k01;
-+        const int ksc = (k0 / 32) & 1; // 0 for k0 in [0,32), 1 for [32,64), etc.
-+        const int sub = (k01 / 16) * 2; // 0 or 2 inside the 4-byte ksc block
++        const int ksc = (k0 / 32) & 1;
++        const int sub = (k01 / 16) * 2;
 +
 +#pragma unroll
-+        for (int j0 = 0; j0 < mmq_x; j0 += nwarps) {
++        for (int j0 = 0; j0 < J; j0 += nwarps) {
 +            const int j = j0 + threadIdx.y;
 +
 +#pragma unroll
-+            for (int i0 = 0; i0 < mmq_y; i0 += warp_size) {
++            for (int i0 = 0; i0 < I; i0 += warp_size) {
 +                const int i = i0 + threadIdx.x;
 +
-+                sum[j0/nwarps*mmq_y/warp_size + i0/warp_size] += vec_dot_q4_K_q8_1_impl_mmq_gfx906_precompute(
++                sum[j0/nwarps*I/warp_size + i0/warp_size] += vec_dot_q4_K_q8_1_impl_mmq_gfx906_precompute(
 +                    &x_qs[i*(MMQ_TILE_NE_K + 1) + k0/2], &y_qs[j*MMQ_TILE_Y_K + k01],
 +                    &x_dmsc[i*row_stride + 4*ksc + sub],
 +                    &y_ds[j*MMQ_TILE_Y_K + k01/QI8_1]);
@@ -307,35 +358,63 @@ index edf546d8f..c3181a6d1 100644
  // #pragma unroll
      for (int k01 = 0; k01 < MMQ_TILE_NE_K; k01 += QR4_K*VDR_Q4_K_Q8_1_MMQ) {
          const int k0 = k00 + k01;
-@@ -2232,6 +2328,7 @@ static __device__ __forceinline__ void vec_dot_q4_K_q8_1_dp4a(
+@@ -943,6 +997,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
              }
          }
      }
 +#endif // GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE
  }
  
- template <int mmq_y, bool need_check> static __device__ __forceinline__ void load_tiles_q5_K(
-@@ -3529,9 +3626,13 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
- 
- template <ggml_type type, int mmq_x, bool need_check>
- #if defined(GGML_USE_HIP)
--#if defined(RDNA4) || defined(RDNA3) || defined(RDNA2) || defined(CDNA) || defined(GCN)
-+#if defined(GGML_CUDA_MMQ_Q4K_GFX906_MIN_BLOCKS_3)
-+    __launch_bounds__(ggml_cuda_get_physical_warp_size()*mmq_get_nwarps_device(), 3)
-+#elif defined(GGML_CUDA_MMQ_Q6K_GFX906_MIN_BLOCKS_1)
-+    __launch_bounds__(ggml_cuda_get_physical_warp_size()*mmq_get_nwarps_device(), 1)
-+#elif defined(RDNA4) || defined(RDNA3) || defined(RDNA2) || defined(CDNA) || defined(GCN)
-     __launch_bounds__(ggml_cuda_get_physical_warp_size()*mmq_get_nwarps_device(), 2)
--#endif // defined(RDNA4) || defined(RDNA3) || defined(RDNA2) || defined(CDNA) || defined(GCN)
-+#endif // defined(GGML_CUDA_MMQ_Q4K_GFX906_MIN_BLOCKS_3)
- #else
- #if __CUDA_ARCH__ >= GGML_CUDA_CC_VOLTA
-     __launch_bounds__(ggml_cuda_get_physical_warp_size()*mmq_get_nwarps_device(), 1)
-@@ -4173,4 +4274,3 @@ void ggml_cuda_op_mul_mat_q(
-     const int64_t src1_padded_row_size, cudaStream_t stream);
- 
- bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t n_experts);
+ template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_vec_dot_q5_K_q8_1_dp4a(
+@@ -1248,4 +1303,3 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
+         }
+     }
+ }
 -
+diff --git a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
+index 0dd68ebfb..2dccf4202 100644
+--- a/ggml/src/ggml-cuda/mmq.cu
++++ b/ggml/src/ggml-cuda/mmq.cu
+@@ -4,6 +4,7 @@
+ #include "mmid.cuh"
+ 
+ #include <cstdint>
++#include <cstdlib>
+ 
+ static void ggml_cuda_mul_mat_q_switch_type(ggml_backend_cuda_context & ctx, const mmq_args & args, cudaStream_t stream) {
+     switch (args.type_x) {
+@@ -289,6 +290,15 @@ bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t
+     return true;
+ #endif //GGML_CUDA_FORCE_MMQ
+ 
++    if (cc == GGML_CUDA_CC_VEGA20 && type == GGML_TYPE_Q8_0 && n_experts == 0) {
++        static const int64_t max_ne11 = [] {
++            const char * s = std::getenv("GGML_CUDA_GFX906_Q8_MMQ_MAX_NE11");
++            const int    v = s ? std::atoi(s) : 0;
++            return v > 0 ? (int64_t) v : (int64_t) 256;
++        }();
++        return ne11 <= max_ne11;
++    }
++
+     if (GGML_CUDA_CC_IS_NVIDIA(cc)) {
+         return !fp16_mma_hardware_available(cc) || ne11 < MMQ_DP4A_MAX_BATCH_SIZE;
+     }
+diff --git a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
+index ad3d6a5a6..812f4da39 100644
+--- a/ggml/src/ggml-cuda/mmq.cuh
++++ b/ggml/src/ggml-cuda/mmq.cuh
+@@ -366,7 +366,11 @@ static constexpr __device__ int ggml_cuda_mmq_get_rows_per_warp(ggml_type type,
+ #define MMQ_DP4A_TXS_Q8_1    tile_x_sizes{I*MMQ_TILE_NE_K*2 + I, I*MMQ_TILE_NE_K*2/QI8_1 + I/(QI8_1/2), 0}
+ #define MMQ_DP4A_TXS_Q2_K    tile_x_sizes{I*MMQ_TILE_NE_K*2 + I, I*MMQ_TILE_NE_K         + I,           0}
+ #define MMQ_DP4A_TXS_Q3_K    tile_x_sizes{I*MMQ_TILE_NE_K*2 + I, I,                                     I*MMQ_TILE_NE_K/8 + I/8}
++#if defined(GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE)
++#define MMQ_DP4A_TXS_Q4_K    tile_x_sizes{I*MMQ_TILE_NE_K   + I, I*9,                                   0}
++#else
+ #define MMQ_DP4A_TXS_Q4_K    tile_x_sizes{I*MMQ_TILE_NE_K   + I, I*MMQ_TILE_NE_K/QI4_K,                 I*MMQ_TILE_NE_K/8 + I/8}
++#endif
+ #define MMQ_DP4A_TXS_Q5_K    tile_x_sizes{I*MMQ_TILE_NE_K*2 + I, I*MMQ_TILE_NE_K/QI5_K   + I/QI5_K,     I*MMQ_TILE_NE_K/8 + I/8}
+ #define MMQ_DP4A_TXS_Q6_K    tile_x_sizes{I*MMQ_TILE_NE_K*2 + I, I*MMQ_TILE_NE_K/QI6_K   + I/QI6_K,     I*MMQ_TILE_NE_K/8 + I/8}
+ 
 diff --git a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
 index e18ada537..513088106 100644
 --- a/ggml/src/ggml-cuda/mmvq.cu
@@ -376,10 +455,10 @@ index e18ada537..513088106 100644
                      vx, &y[j*stride_col_y + kby], kbx_offset + i*stride_row_x + kbx, kqs);
                  if constexpr (has_fusion) {
 diff --git a/ggml/src/ggml-cuda/quantize.cu b/ggml/src/ggml-cuda/quantize.cu
-index 39a500a17..f59169bac 100644
+index af7fe105b..8d5280356 100644
 --- a/ggml/src/ggml-cuda/quantize.cu
 +++ b/ggml/src/ggml-cuda/quantize.cu
-@@ -314,20 +314,28 @@ static __global__ void quantize_mmq_q8_1(
+@@ -353,20 +353,28 @@ static __global__ void quantize_mmq_q8_1(
      amax = fmaxf(amax, fabsf(xi.w));
  
      // Exchange max. abs. value between vals_per_scale/4 threads.
@@ -409,17 +488,15 @@ index 39a500a17..f59169bac 100644
  
      const float d_inv = 127.0f / amax;
 diff --git a/ggml/src/ggml-cuda/vecdotq.cuh b/ggml/src/ggml-cuda/vecdotq.cuh
-index d1741cc8d..7ea85f3dc 100644
+index b9932bce9..41b433efb 100644
 --- a/ggml/src/ggml-cuda/vecdotq.cuh
 +++ b/ggml/src/ggml-cuda/vecdotq.cuh
-@@ -237,7 +237,14 @@ template <int vdr> static __device__ __forceinline__ float vec_dot_q5_1_q8_1_imp
+@@ -237,7 +237,12 @@ template <int vdr> static __device__ __forceinline__ float vec_dot_q5_1_q8_1_imp
      return sumi*d5d8 + m5s8 / (QI5_1 / vdr);
  }
  
 +#if defined(GGML_CUDA_MMVQ_Q8_0_GFX906_WIDE_VDR)
-+// gfx906: four consecutive ints coalesce into one 16 byte global_load_dwordx4, the widest load
-+// the Vega20 memory path issues. Token generation is bandwidth bound, so the wider load is worth
-+// more than the two threads per block that stop cooperating (QI8_0/vdr drops from 4 to 2).
++// Use the widest Vega20 global load for bandwidth-bound token generation.
 +#define VDR_Q8_0_Q8_1_MMVQ 4
 +#else
  #define VDR_Q8_0_Q8_1_MMVQ 2
@@ -427,7 +504,7 @@ index d1741cc8d..7ea85f3dc 100644
  #define VDR_Q8_0_Q8_1_MMQ 8
  
  template <typename T, int vdr> static __device__ __forceinline__ T vec_dot_q8_0_q8_1_impl(
-@@ -504,7 +511,11 @@ static __device__ __forceinline__ float vec_dot_q3_K_q8_1_impl_mmq(
+@@ -504,7 +509,11 @@ static __device__ __forceinline__ float vec_dot_q3_K_q8_1_impl_mmq(
  // contiguous v/x values
  static __device__ __forceinline__ float vec_dot_q4_K_q8_1_impl_vmmq(
      const int * __restrict__ v, const int * __restrict__ u, const uint8_t * __restrict__ sc,
@@ -439,7 +516,7 @@ index d1741cc8d..7ea85f3dc 100644
  
      float sumf_d = 0.0f;
      float sumf_m = 0.0f;
-@@ -515,10 +526,15 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1_impl_vmmq(
+@@ -515,10 +524,15 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1_impl_vmmq(
          const int v1i = (v[1] >> (4*i)) & 0x0F0F0F0F;
  
          const int dot1 = ggml_cuda_dp4a(v1i, u[2*i+1], ggml_cuda_dp4a(v0i, u[2*i+0], 0)); // SIMD dot product
@@ -455,7 +532,7 @@ index d1741cc8d..7ea85f3dc 100644
      }
  
      const float2 dm4f = __half22float2(dm4);
-@@ -811,6 +827,33 @@ static __device__ __forceinline__ float vec_dot_q8_0_q8_1(
+@@ -816,6 +830,33 @@ static __device__ __forceinline__ float vec_dot_q8_0_q8_1(
      return vec_dot_q8_0_q8_1_impl<float, VDR_Q8_0_Q8_1_MMVQ>(v, u, bq8_0->d, __low2half(bq8_1->ds));
  }
  
@@ -489,7 +566,7 @@ index d1741cc8d..7ea85f3dc 100644
  static __device__ __forceinline__ float vec_dot_q2_K_q8_1(
      const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
  
-@@ -868,7 +911,11 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
+@@ -873,7 +914,11 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
  
      int    v[2];
      int    u[2*QR4_K];
@@ -501,7 +578,7 @@ index d1741cc8d..7ea85f3dc 100644
  
      // iqs is in 0,2..30. bq8_offset = iqs/4 -> bq8_offset = 0, 2, 4, 6
      const int bq8_offset = QR4_K * ((iqs/2) / (QI8_1/2));
-@@ -885,6 +932,21 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
+@@ -890,6 +935,21 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
      const uint16_t * scales = (const uint16_t *)bq4_K->scales;
      uint16_t aux[2];
      const int j = bq8_offset/2;
@@ -523,7 +600,7 @@ index d1741cc8d..7ea85f3dc 100644
      if (j < 2) {
          aux[0] = scales[j+0] & 0x3f3f;
          aux[1] = scales[j+2] & 0x3f3f;
-@@ -892,20 +954,93 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
+@@ -897,20 +957,88 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
          aux[0] = ((scales[j+2] >> 0) & 0x0f0f) | ((scales[j-2] & 0xc0c0) >> 2);
          aux[1] = ((scales[j+2] >> 4) & 0x0f0f) | ((scales[j-0] & 0xc0c0) >> 2);
      }
@@ -552,10 +629,7 @@ index d1741cc8d..7ea85f3dc 100644
 +}
 +
 +#if defined(GGML_CUDA_MMVQ_Q4K_GFX906_PAIRED_FUSION)
-+// gfx906 fused-gate helper: decode one Q4_K weight block given the already-loaded
-+// Q8_1 activation (u/ds8). The weight-side decode and the accumulation are
-+// identical to vec_dot_q4_K_q8_1 above; only the activation load is hoisted out
-+// so the paired call below can share it between the value and gate matrices.
++// Decode one Q4_K block while reusing an already-loaded Q8_1 activation.
 +static __device__ __forceinline__ float vec_dot_q4_K_q8_1_gfx906_from_u(
 +    const block_q4_K * __restrict__ bq4_K, const int bq8_offset, const int & iqs,
 +    const int * __restrict__ u, const float2 * __restrict__ ds8) {
@@ -588,9 +662,7 @@ index d1741cc8d..7ea85f3dc 100644
 +    return vec_dot_q4_K_q8_1_impl_vmmq(v, u, sc, m, bq4_K->dm, ds8);
 +}
 +
-+// Paired value+gate dot product for the fused Q4_K MMVQ path. Loads the shared
-+// Q8_1 activation once, then evaluates both weight matrices. The two outputs are
-+// bit-for-bit identical to two separate vec_dot_q4_K_q8_1 calls.
++// Reuse one Q8_1 activation load for the paired value and gate products.
 +static __device__ __forceinline__ void vec_dot_q4_K_q8_1_gfx906_paired(
 +    const void * __restrict__ vbq_x, const void * __restrict__ vbq_gate,
 +    const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs,

@@ -151,13 +151,25 @@ prompt rather than the controlled `llama-bench` matrix above.
 - Do not classify the `test-backend-ops --output csv` files above as
   performance evidence unless a timing-bearing output is also captured.
 
-## Next steps after upstream merge
+## Status after upstream merge
 
-1. Rebuild the clean and patched worktrees at the merged upstream commit.
-2. Run the complete ROCm0 `MUL_MAT` correctness gate before benchmarking.
-3. Verify the fused Q4_K and Q8_0 paths directly; the CSV support probes do not
+The private branch was merged with upstream commit `571d0d540` on 2026-07-18.
+Upstream's MMQ refactor moved the Q4_K precompute into
+`mmq-load-tiles.cuh` and `mmq-vec-dot.cuh`; the Q4_K/Q6_K launch bounds now use
+the RDNA2/GCN configuration table.
+
+Completed after the merge:
+
+- Fresh exact-gfx906 ROCm build with every private compile gate verified.
+- Complete ROCm0 `MUL_MAT` correctness gate: 1134 of 1134 passed.
+- Current bigbang patch regenerated against `571d0d540`.
+- Both series files resolve to the current patch, which applies cleanly to a
+  fresh archive of `571d0d540`.
+
+Remaining next steps:
+
+1. Verify the fused Q4_K and Q8_0 paths directly; the operator gate does not
    exercise value-plus-gate fusion.
-4. Run the controlled Q4_K and Q8_0 `llama-bench` matrix above in alternating
+2. Rebuild a clean-head comparison worktree at `571d0d540`.
+3. Run the controlled Q4_K and Q8_0 `llama-bench` matrix above in alternating
    order and record telemetry with each result.
-5. Regenerate `vr/patches/current/gfx906-current-bigbang.patch` from the merged
-   tree before using either series file in a fresh checkout.
