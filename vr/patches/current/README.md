@@ -1,10 +1,9 @@
-# current patch
+# current gfx906 patches
 
-`gfx906-current-bigbang.patch` targets `571d0d540` but is stale relative to
-the reduced working tree. It still contains rejected and unproven code and is
-not the accepted private candidate.
+These five patches are regenerated from the active GGML worktree against
+`571d0d540`. They deliberately exclude `/vr` tooling, results, and archived
+experiments.
 
-First isolate the combined Q4_K/Q6_K PP regression, freeze the active compile
-gates, remove disabled experiment code, and regenerate this artifact. See
-`../../README.md` for the handoff and
-`../../WORKTREE-BENCHMARKS.md` for the wall-clock-efficient procedure.
+Use the series files one directory up. `combined-gfx906.series` reproduces the
+active source composition, while `retained-gfx906.series` omits both unresolved
+PP candidates. Evidence and porting rules are in `../README.md`.

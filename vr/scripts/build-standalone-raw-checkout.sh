@@ -17,9 +17,8 @@
 #   3. From that checkout's root, run it:
 #        cd ~/infer/some-baseline-checkout
 #        ./build-gfx906.sh
-#      This builds llama-cli, llama-server, llama-bench into ./build/gfx906
-#      using the same CMake flags as this repo's build-gfx906-vanilla.sh, so
-#      the two trees are comparable.
+#      This builds llama-bench and test-backend-ops into ./build/gfx906
+#      using the same core HIP flags as this repo's comparison helper.
 #   4. Benchmark it against this repo's optimized build with bench-head.sh /
 #      _bench_table.py, pointing at:
 #        ~/infer/some-baseline-checkout/build/gfx906/bin/llama-bench
@@ -34,7 +33,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${BUILD_DIR:-$ROOT_DIR/build/gfx906}"
 AMDGPU_ARCH="${AMDGPU_ARCH:-gfx906}"
 BUILD_JOBS="${BUILD_JOBS:-$(nproc)}"
-TARGETS_STRING="${TARGETS:-llama-cli llama-server llama-bench}"
+TARGETS_STRING="${TARGETS:-llama-bench test-backend-ops}"
 read -r -a TARGETS <<< "$TARGETS_STRING"
 
 configure_rocm_environment() {
@@ -101,12 +100,16 @@ main() {
         -DCMAKE_HIP_FLAGS="-Wno-ignored-attributes -Wno-cuda-compat -Wno-unused-result" \
         -DCMAKE_BUILD_RPATH_USE_ORIGIN=ON \
         -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
         "-DCMAKE_INSTALL_RPATH=\$ORIGIN" \
         -DGGML_HIP=ON \
         -DGGML_HIP_GRAPHS=ON \
         -DGGML_HIP_NO_VMM=ON \
-        -DLLAMA_BUILD_SERVER=ON \
-        -DLLAMA_BUILD_EXAMPLES=ON \
+        -DGGML_CCACHE=ON \
+        -DLLAMA_CURL=OFF \
+        -DLLAMA_BUILD_TESTS=ON \
+        -DLLAMA_BUILD_SERVER=OFF \
+        -DLLAMA_BUILD_EXAMPLES=OFF \
         -DLLAMA_BUILD_TOOLS=ON \
         -DGGML_VULKAN=OFF \
         -DBUILD_SHARED_LIBS=ON

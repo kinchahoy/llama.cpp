@@ -353,28 +353,20 @@ static __global__ void quantize_mmq_q8_1(
     amax = fmaxf(amax, fabsf(xi.w));
 
     // Exchange max. abs. value between vals_per_scale/4 threads.
-#if defined(GGML_CUDA_Q8_1_GFX906_DPP_REDUCE)
-    amax = gfx906_dpp_reduce_max<vals_per_scale/4>(amax);
-#else
 #pragma unroll
     for (int offset = vals_per_scale/8; offset > 0; offset >>= 1) {
         amax = fmaxf(amax, __shfl_xor_sync(0xFFFFFFFF, amax, offset, WARP_SIZE));
     }
-#endif // defined(GGML_CUDA_Q8_1_GFX906_DPP_REDUCE)
 
     float sum;
     if (ds_layout != MMQ_Q8_1_DS_LAYOUT_D4) {
         sum = xi.x + xi.y + xi.z + xi.w;
 
         // Calculate sums across vals_per_sum/4 threads.
-#if defined(GGML_CUDA_Q8_1_GFX906_DPP_REDUCE)
-        sum = gfx906_dpp_reduce_sum<vals_per_sum/4>(sum);
-#else
 #pragma unroll
         for (int offset = vals_per_sum/8; offset > 0; offset >>= 1) {
             sum += __shfl_xor_sync(0xFFFFFFFF, sum, offset, WARP_SIZE);
         }
-#endif // defined(GGML_CUDA_Q8_1_GFX906_DPP_REDUCE)
     }
 
     const float d_inv = 127.0f / amax;

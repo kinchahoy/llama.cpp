@@ -1,6 +1,6 @@
 # gfx906 results
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 This ledger contains the results that still affect engineering decisions.
 Raw files under `bench-results/` are authoritative.
@@ -32,9 +32,51 @@ The tree and clean control are based on `571d0d540`. The reduced exact-gfx906
 candidate passed 203 of 203 focused ROCm0 `MUL_MAT` cases for Q4_0, Q4_1,
 Q4_K, Q5_K, Q6_K, and Q8_0.
 
-Active gates are Q4_K MMQ precompute, Q6_K `min_blocks=1`, Q4_K branchless
-MMVQ, and selective Q8_0 rocBLAS dispatch. Q4_K `min_blocks=3`, paired MMVQ,
-Q8_1 DPP, and custom Flash Attention gates are disabled.
+The live combined source contains Q4_K MMQ precompute, Q6_K `min_blocks=1`,
+Q4_K branchless MMVQ, and selective Q8_0 rocBLAS dispatch. Only the Q8_0 and
+Q4_K MMVQ patches are in the retained series; the Q4_K and Q6_K PP patches
+remain isolated candidates. Q4_K `min_blocks=3`, paired MMVQ, Q8_1 DPP,
+wide-VDR, and custom Flash Attention implementations are archived rather than
+kept compile-disabled in live source.
+
+### Source and build audit
+
+This is source evidence, not a new performance result:
+
+- Official `origin/master` and the clean base were both `571d0d540` when
+  verified on 2026-07-19. The private branch is zero commits behind and three
+  commits ahead. The intentional uncommitted worktree now includes the CMake
+  selector, `/vr` tooling/docs, modular patches, and removal of compile-disabled
+  source bodies. The cleanup changes no compiled path and adds no performance
+  evidence.
+- The portable runtime delta is five numbered patches covering seven GGML
+  files, 197 insertions, and 11 deletions. `retained-gfx906.series` contains
+  Q8 dispatch, Q4_K MMVQ, and profile wiring. `combined-gfx906.series`
+  reproduces the active worktree and additionally includes both unresolved PP
+  candidates.
+- `build/gfx906-merge-review/compile_commands.json` has the branchless Q4_K
+  MMVQ definition only on `mmvq.cu`, the Q4_K precompute definition only on
+  `mmq-instance-q4_k.cu`, and Q6_K `min_blocks=1` only on
+  `mmq-instance-q6_k.cu`. The clean control has none of them.
+- `build/gfx906-optimal/compile_commands.json` still contains disabled paired
+  MMVQ, wide-VDR, Q4_K occupancy, Q8_1 DPP, and custom FA definitions. Treat
+  that entire build directory as stale.
+- `GGML_HIP_GFX906_PROFILE` now selects `none`, `common`, `q4`, `q6`, or
+  `combined`. The build helpers run an exact source-local definition checker;
+  it accepts the clean control and reduced combined database and rejects the
+  stale `optimal` database.
+- The Q4_K PP definition selects metadata precompute and row stride 9 as one
+  bundle. A Q4_K-only build isolates that bundle from Q6_K; it does not isolate
+  precompute from stride 9.
+- The Q8_0 dispatch is source logic rather than a compile gate. On gfx906 it
+  applies to non-expert Q8_0 matmul, defaults to MMQ for `ne11 <= 256`, and
+  uses rocBLAS above that boundary.
+- Graph export stores a set keyed by operation signature. It omits phase and
+  multiplicity from the file; the logged TG number is the number of new shapes
+  added after PP, not necessarily the total number of unique TG shapes.
+- Existing pp8192 results are raw PP, not prompt ingestion into an already
+  populated KV context. The rewritten driver exposes `raw_pp`, `inc_pp`, and
+  `tg`, and groups incremental PP with TG when they share one depth.
 
 ### Matched current-head screens
 
@@ -154,9 +196,11 @@ Three alternating single-GPU runs:
 | pp8192 | 198.19 | 220.03 | 11.02 percent |
 | pp20000 | 168.56 | 177.50 | 5.31 percent |
 
-Classification: historical signal contradicted by the current combined Q4_K
-precompute/stride-9 plus Q6_K result. The current result cannot distinguish
-precompute, layout, Q6_K, or interactions. Isolate before retaining.
+Classification: historical positive signal in conflict with the current
+combined Q4_K precompute/stride-9 plus Q6_K result. The current result cannot
+distinguish the Q4_K bundle from Q6_K, so it does not directly contradict
+precompute alone. A Q4_K-only replay still cannot distinguish precompute from
+stride 9 because one definition selects both. Isolate before retaining.
 
 ### Q4_K stride-9 metadata layout
 
@@ -194,7 +238,9 @@ alone was 40.68 percent.
 Focused Q4_K correctness passed 41 of 41 and the full gate passed 1103 of
 1103. Classification: retain. The current depth-8192 result is one ordered
 sample, but its large positive direction agrees with the smaller repeated
-historical gain. Record the caveat instead of spending more full-model runs.
+historical gain. Its magnitude is much larger than the historical operator
+change and should not be used as an Amdahl prediction. Record the caveat
+instead of spending three full-model runs.
 
 ### Stored Q8_1 sum reuse
 

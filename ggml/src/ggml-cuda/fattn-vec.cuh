@@ -72,13 +72,11 @@ static __global__ void flash_attn_ext_vec(
     constexpr int cpy_ne = cpy_nb / 4;
 
 #ifdef GGML_USE_HIP
-#if defined(GGML_CUDA_FATTN_VEC_GFX906_KQ8)
-    constexpr int nthreads_KQ_q = 8;
-#elif defined(RDNA)
+#ifdef RDNA
     constexpr int nthreads_KQ_q = 2;
 #else
     constexpr int nthreads_KQ_q = 4;
-#endif // defined(GGML_CUDA_FATTN_VEC_GFX906_KQ8)
+#endif // RDNA
     constexpr int nthreads_V_q  = (D/4 < 32 ? D/4 : 32);
 #else
     constexpr int nthreads_KQ_q = (D/4 < 32 ? D/4 : 32);

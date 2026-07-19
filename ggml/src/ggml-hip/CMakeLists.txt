@@ -73,18 +73,34 @@ if (NOT GGML_HIP_COMPILE_TARGETS)
 endif()
 list(REMOVE_DUPLICATES GGML_HIP_COMPILE_TARGETS)
 list(LENGTH GGML_HIP_COMPILE_TARGETS GGML_HIP_COMPILE_TARGET_COUNT)
+set(GGML_HIP_GFX906_PROFILE "combined" CACHE STRING
+    "gfx906 private tuning profile: none, common, q4, q6, or combined")
+set_property(CACHE GGML_HIP_GFX906_PROFILE PROPERTY STRINGS
+    none common q4 q6 combined)
 if (GGML_HIP_COMPILE_TARGET_COUNT EQUAL 1 AND "gfx906" IN_LIST GGML_HIP_COMPILE_TARGETS)
-    set_source_files_properties(
-        "../ggml-cuda/mmvq.cu"
-        PROPERTIES COMPILE_DEFINITIONS
-            GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES)
-    set_source_files_properties(
-        "../ggml-cuda/template-instances/mmq-instance-q4_k.cu"
-        PROPERTIES COMPILE_DEFINITIONS
-            GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE)
-    set_source_files_properties(
-        "../ggml-cuda/template-instances/mmq-instance-q6_k.cu"
-        PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_MMQ_Q6K_GFX906_MIN_BLOCKS_1)
+    if (NOT GGML_HIP_GFX906_PROFILE MATCHES "^(none|common|q4|q6|combined)$")
+        message(FATAL_ERROR "Unknown GGML_HIP_GFX906_PROFILE=${GGML_HIP_GFX906_PROFILE}")
+    endif()
+    if (NOT GGML_HIP_GFX906_PROFILE STREQUAL "none")
+        set_source_files_properties(
+            "../ggml-cuda/mmvq.cu"
+            PROPERTIES COMPILE_DEFINITIONS
+                GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES)
+    endif()
+    if (GGML_HIP_GFX906_PROFILE STREQUAL "q4"
+            OR GGML_HIP_GFX906_PROFILE STREQUAL "combined")
+        set_source_files_properties(
+            "../ggml-cuda/template-instances/mmq-instance-q4_k.cu"
+            PROPERTIES COMPILE_DEFINITIONS
+                GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE)
+    endif()
+    if (GGML_HIP_GFX906_PROFILE STREQUAL "q6"
+            OR GGML_HIP_GFX906_PROFILE STREQUAL "combined")
+        set_source_files_properties(
+            "../ggml-cuda/template-instances/mmq-instance-q6_k.cu"
+            PROPERTIES COMPILE_DEFINITIONS
+                GGML_CUDA_MMQ_Q6K_GFX906_MIN_BLOCKS_1)
+    endif()
 endif()
 file(GLOB   SRCS "../ggml-cuda/template-instances/mmf*.cu")
 list(APPEND GGML_SOURCES_ROCM ${SRCS})

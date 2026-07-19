@@ -4,21 +4,53 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_gfx906_build.sh"
-MAINLINE_REF="${MAINLINE_REF:-origin/master}"
+
+ACTION=run
+case "${1:-}" in
+    "")
+        ;;
+    --dry-run)
+        ACTION=dry-run
+        ;;
+    -h|--help)
+        cat <<'EOF'
+Usage:
+  vr/scripts/build-gfx906-comparison.sh --dry-run
+  vr/scripts/build-gfx906-comparison.sh
+
+Defaults:
+  MAINLINE_REF=571d0d540
+  CANDIDATE_PROFILE=combined
+  TARGETS=test-backend-ops
+EOF
+        exit 0
+        ;;
+    *)
+        echo "Error: unknown argument: $1" >&2
+        exit 2
+        ;;
+esac
+
+MAINLINE_REF="${MAINLINE_REF:-571d0d540}"
 MAINLINE_SOURCE="${MAINLINE_SOURCE:-$ROOT_DIR/build/.mainline-src}"
 MAINLINE_BUILD="${MAINLINE_BUILD:-$ROOT_DIR/build/head-control}"
 CONTROL_PATCH="${CONTROL_PATCH:-}"
 CANDIDATE_BUILD="${CANDIDATE_BUILD:-$ROOT_DIR/build/head-candidate}"
-TARGETS_STRING="${TARGETS:-llama-bench}"
-if [[ "${BUILD_FULL:-0}" == "1" && -z "${TARGETS:-}" ]]; then
-    TARGETS_STRING="llama-bench test-backend-ops llama-cli llama-server"
-fi
+CANDIDATE_PROFILE="${CANDIDATE_PROFILE:-combined}"
+TARGETS_STRING="${TARGETS:-test-backend-ops}"
 read -r -a TARGETS <<< "$TARGETS_STRING"
-CANDIDATE_DEFINES=(
-    GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES
-    GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE
-    GGML_CUDA_MMQ_Q6K_GFX906_MIN_BLOCKS_1
-)
+(( ${#TARGETS[@]} > 0 )) || {
+    echo "Error: TARGETS must not be empty." >&2
+    exit 2
+}
+case "$CANDIDATE_PROFILE" in
+    none|common|q4|q6|combined)
+        ;;
+    *)
+        echo "Error: invalid CANDIDATE_PROFILE=$CANDIDATE_PROFILE" >&2
+        exit 2
+        ;;
+esac
 
 prepare_mainline_source() {
     local current_commit
@@ -60,18 +92,16 @@ build_tree() {
     local label="$1"
     local source_dir="$2"
     local build_dir="$3"
+    local profile="$4"
+    local saved_extra_args="${CMAKE_EXTRA_ARGS:-}"
 
     echo "Configuring $label from $source_dir"
-    gfx906_configure_tree "$source_dir" "$build_dir"
     if [[ "$label" == "candidate" ]]; then
-        local define
-        for define in "${CANDIDATE_DEFINES[@]}"; do
-            grep -q "$define" "$build_dir/compile_commands.json" || {
-                echo "Error: candidate build is missing $define." >&2
-                exit 2
-            }
-        done
+        CMAKE_EXTRA_ARGS="${saved_extra_args:+$saved_extra_args }-DGGML_HIP_GFX906_PROFILE=$profile"
     fi
+    gfx906_configure_tree "$source_dir" "$build_dir"
+    CMAKE_EXTRA_ARGS="$saved_extra_args"
+    python3 "$SCRIPT_DIR/check-gfx906-defines.py" "$build_dir" "$profile"
     if [[ "$CONFIGURE_ONLY" != "1" ]]; then
         echo "Building $label: ${TARGETS[*]}"
     fi
@@ -79,6 +109,17 @@ build_tree() {
 }
 
 main() {
+    if [[ "$ACTION" == "dry-run" ]]; then
+        echo "mainline_ref=$MAINLINE_REF"
+        echo "mainline_source=$MAINLINE_SOURCE"
+        echo "mainline_build=$MAINLINE_BUILD"
+        echo "candidate_source=$ROOT_DIR"
+        echo "candidate_build=$CANDIDATE_BUILD"
+        echo "candidate_profile=$CANDIDATE_PROFILE"
+        echo "targets=${TARGETS[*]}"
+        exit 0
+    fi
+
     gfx906_configure_rocm_environment
     gfx906_check_environment
     prepare_mainline_source
@@ -86,12 +127,13 @@ main() {
     echo "Mainline ref: $(git -C "$MAINLINE_SOURCE" rev-parse --short=12 HEAD)"
     echo "Control patch: ${CONTROL_PATCH:-none}"
     echo "Candidate ref: $(git -C "$ROOT_DIR" rev-parse --short=12 HEAD)"
+    echo "Candidate profile: $CANDIDATE_PROFILE"
     echo "C compiler: $CC"
     echo "C++ compiler: $CXX"
     echo "GPU architecture: $AMDGPU_ARCH"
 
-    build_tree control "$MAINLINE_SOURCE" "$MAINLINE_BUILD"
-    build_tree candidate "$ROOT_DIR" "$CANDIDATE_BUILD"
+    build_tree control "$MAINLINE_SOURCE" "$MAINLINE_BUILD" none
+    build_tree candidate "$ROOT_DIR" "$CANDIDATE_BUILD" "$CANDIDATE_PROFILE"
 
     if [[ "$CONFIGURE_ONLY" != "1" ]]; then
         echo

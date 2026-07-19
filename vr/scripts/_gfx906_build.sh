@@ -8,7 +8,7 @@ AMDGPU_ARCH="${AMDGPU_ARCH:-gfx906}"
 BUILD_JOBS="${BUILD_JOBS:-$(nproc)}"
 CONFIGURE_ONLY="${CONFIGURE_ONLY:-0}"
 INSTALL_DIR="${INSTALL_DIR:-}"
-GGML_VULKAN="${GGML_VULKAN:-ON}"
+GGML_VULKAN="${GGML_VULKAN:-OFF}"
 
 gfx906_configure_rocm_environment() {
     if [[ -n "${CC:-}" && -n "${CXX:-}" ]]; then
@@ -111,9 +111,11 @@ gfx906_configure_tree() {
         -DGGML_HIP=ON \
         -DGGML_HIP_GRAPHS=ON \
         -DGGML_HIP_NO_VMM=ON \
+        -DGGML_CCACHE=ON \
+        -DLLAMA_CURL=OFF \
         -DLLAMA_BUILD_TESTS=ON \
-        -DLLAMA_BUILD_SERVER=ON \
-        -DLLAMA_BUILD_EXAMPLES=ON \
+        -DLLAMA_BUILD_SERVER=OFF \
+        -DLLAMA_BUILD_EXAMPLES=OFF \
         -DLLAMA_BUILD_TOOLS=ON \
         -DGGML_VULKAN="$GGML_VULKAN" \
         -DBUILD_SHARED_LIBS=ON \

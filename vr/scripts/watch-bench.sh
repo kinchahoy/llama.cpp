@@ -1,70 +1,61 @@
 #!/usr/bin/env bash
-# Live dashboard for the head-vs-head+patches benchmark (or any llama-bench
-# A/B run that writes <OUT>/<build>/<config>.jsonl with -o jsonl).
-#
-# Auto-follows the newest .err (current benchmark heartbeat) and reprints the
-# parsed control-vs-candidate results table. Refreshes until the driver writes
-# "BENCH DONE" to its main log, then prints the final table and exits.
-#
-# Usage:
-#   vr/scripts/watch-bench.sh [OUT_DIR]
-# Env overrides:
-#   OUT       results dir   (default: newest vr/bench-results/gfx906-head-*)
-#   MAIN_LOG  driver log    (default: /tmp/vr-bench-main.log)
-#   REFRESH   seconds       (default: 5)
-#   ONCE=1    render once and exit (no loop)
-set -uo pipefail
+# Watch a bench-head.sh output directory without guessing process state.
+set -u
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_llama_root.sh"
 ROOT="$(resolve_llama_root)"
-TABLE_PY="$ROOT/vr/scripts/_bench_table.py"
 
 OUT="${1:-${OUT:-}}"
-if [[ -z "$OUT" ]]; then
-    OUT="$(ls -dt "$ROOT"/vr/bench-results/gfx906-head-* 2>/dev/null | head -1)"
-fi
-MAIN_LOG="${MAIN_LOG:-/tmp/vr-bench-main.log}"
-REFRESH="${REFRESH:-5}"
+REFRESH="${REFRESH:-3}"
+ONCE="${ONCE:-0}"
 
 if [[ -z "$OUT" ]]; then
-    echo "No results dir found. Pass one: watch-bench.sh <OUT_DIR>" >&2
+    OUT="$(ls -dt "$ROOT"/vr/bench-results/gfx906-model-* 2>/dev/null | head -1)"
+fi
+[[ -n "$OUT" && -d "$OUT" ]] || {
+    echo "Error: pass a bench output directory." >&2
     exit 2
-fi
-
-render() {
-    local newest_err
-    newest_err="$(ls -t "$OUT"/*/*.jsonl.err 2>/dev/null | head -1)"
-    clear 2>/dev/null
-    echo "=== bench watch  ($(date +%T))  OUT=$OUT"
-    if pgrep -f 'vr-bench\.sh|bench-head\.sh' >/dev/null 2>&1; then
-        echo "driver: RUNNING (pid $(pgrep -f 'vr-bench\.sh|bench-head\.sh' | head -1))"
-    elif grep -q "BENCH DONE" "$MAIN_LOG" 2>/dev/null; then
-        echo "driver: FINISHED"
-    else
-        echo "driver: NOT RUNNING (no DONE marker - may have died; check $MAIN_LOG)"
-    fi
-    echo
-    echo "--- driver log (last 2) ---"
-    tail -n 2 "$MAIN_LOG" 2>/dev/null | sed 's/^/  /'
-    echo
-    echo "--- current benchmark heartbeat: $(basename "${newest_err:-none}") ---"
-    [[ -n "$newest_err" ]] && tail -n 5 "$newest_err" 2>/dev/null | sed 's/^/  /'
-    echo
-    echo "--- results so far ---"
-    python3 "$TABLE_PY" "$OUT"
 }
 
-if [[ "${ONCE:-0}" == "1" ]]; then
+status_value() {
+    local key="$1"
+    sed -n "s/^${key}=//p" "$OUT/status" 2>/dev/null | head -1
+}
+
+render() {
+    local state current completed total newest_error
+    state="$(status_value state)"
+    current="$(status_value current)"
+    completed="$(status_value completed)"
+    total="$(status_value total)"
+    newest_error="$(ls -t "$OUT"/*/*.jsonl.err 2>/dev/null | head -1)"
+
+    [[ -t 1 ]] && clear 2>/dev/null || true
+    printf 'bench=%s state=%s progress=%s/%s\n' \
+        "$OUT" "${state:-unknown}" "${completed:-0}" "${total:-?}"
+    printf 'current=%s\n\n' "${current:-unknown}"
+    if [[ -n "$newest_error" ]]; then
+        printf 'latest=%s\n' "$newest_error"
+        tail -n 5 "$newest_error" 2>/dev/null | sed 's/^/  /'
+        printf '\n'
+    fi
+    python3 "$SCRIPT_DIR/_bench_table.py" "$OUT"
+}
+
+if [[ "$ONCE" == "1" ]]; then
     render
     exit 0
 fi
 
-trap 'echo; echo "(stopped watching - bench keeps running in the background)"; exit 0' INT
+trap 'echo; exit 0' INT
 while true; do
     render
-    if grep -q "BENCH DONE" "$MAIN_LOG" 2>/dev/null && ! pgrep -f 'vr-bench\.sh|bench-head\.sh' >/dev/null 2>&1; then
-        echo
-        echo "*** BENCH DONE - final table above ***"
+    if [[ ! -r "$OUT/status" ]]; then
+        exit 0
+    fi
+    state="$(status_value state)"
+    if [[ "$state" == "complete" || "$state" == "failed" ]]; then
         exit 0
     fi
     sleep "$REFRESH"
