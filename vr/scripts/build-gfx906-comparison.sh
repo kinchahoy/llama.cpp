@@ -6,14 +6,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_gfx906_build.sh"
 MAINLINE_REF="${MAINLINE_REF:-origin/master}"
 MAINLINE_SOURCE="${MAINLINE_SOURCE:-$ROOT_DIR/build/.mainline-src}"
-MAINLINE_BUILD="${MAINLINE_BUILD:-$ROOT_DIR/build/mainline}"
+MAINLINE_BUILD="${MAINLINE_BUILD:-$ROOT_DIR/build/head-control}"
 CONTROL_PATCH="${CONTROL_PATCH:-}"
-CANDIDATE_BUILD="${CANDIDATE_BUILD:-$ROOT_DIR/build/gfx906-2026-06}"
-TARGETS_STRING="${TARGETS:-llama-bench test-backend-ops}"
+CANDIDATE_BUILD="${CANDIDATE_BUILD:-$ROOT_DIR/build/head-candidate}"
+TARGETS_STRING="${TARGETS:-llama-bench}"
 if [[ "${BUILD_FULL:-0}" == "1" && -z "${TARGETS:-}" ]]; then
     TARGETS_STRING="llama-bench test-backend-ops llama-cli llama-server"
 fi
 read -r -a TARGETS <<< "$TARGETS_STRING"
+CANDIDATE_DEFINES=(
+    GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES
+    GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE
+    GGML_CUDA_MMQ_Q6K_GFX906_MIN_BLOCKS_1
+)
 
 prepare_mainline_source() {
     local current_commit
@@ -58,6 +63,15 @@ build_tree() {
 
     echo "Configuring $label from $source_dir"
     gfx906_configure_tree "$source_dir" "$build_dir"
+    if [[ "$label" == "candidate" ]]; then
+        local define
+        for define in "${CANDIDATE_DEFINES[@]}"; do
+            grep -q "$define" "$build_dir/compile_commands.json" || {
+                echo "Error: candidate build is missing $define." >&2
+                exit 2
+            }
+        done
+    fi
     if [[ "$CONFIGURE_ONLY" != "1" ]]; then
         echo "Building $label: ${TARGETS[*]}"
     fi
@@ -76,8 +90,8 @@ main() {
     echo "C++ compiler: $CXX"
     echo "GPU architecture: $AMDGPU_ARCH"
 
-    build_tree mainline "$MAINLINE_SOURCE" "$MAINLINE_BUILD"
-    build_tree gfx906-2026-06 "$ROOT_DIR" "$CANDIDATE_BUILD"
+    build_tree control "$MAINLINE_SOURCE" "$MAINLINE_BUILD"
+    build_tree candidate "$ROOT_DIR" "$CANDIDATE_BUILD"
 
     if [[ "$CONFIGURE_ONLY" != "1" ]]; then
         echo

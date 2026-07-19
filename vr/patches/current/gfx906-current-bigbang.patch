@@ -690,7 +690,7 @@ index b9932bce9..41b433efb 100644
  static __device__ __forceinline__ float vec_dot_q5_K_q8_1(
      const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
 diff --git a/ggml/src/ggml-hip/CMakeLists.txt b/ggml/src/ggml-hip/CMakeLists.txt
-index 7121193f1..293cc272d 100644
+index 7121193f1..1bb174ec2 100644
 --- a/ggml/src/ggml-hip/CMakeLists.txt
 +++ b/ggml/src/ggml-hip/CMakeLists.txt
 @@ -67,6 +67,33 @@ file(GLOB   SRCS "../ggml-cuda/template-instances/fattn-mma*.cu")
@@ -712,7 +712,7 @@ index 7121193f1..293cc272d 100644
 +    set_source_files_properties(
 +        "../ggml-cuda/mmvq.cu"
 +        PROPERTIES COMPILE_DEFINITIONS
-+            "GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES;GGML_CUDA_MMVQ_Q4K_GFX906_PAIRED_FUSION;GGML_CUDA_MMVQ_Q8_0_GFX906_WIDE_VDR;GGML_CUDA_MMVQ_Q8_0_GFX906_PAIRED_FUSION")
++            "GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES;GGML_CUDA_MMVQ_Q4K_GFX906_PAIRED_FUSION;GGML_CUDA_MMVQ_Q8_0_GFX906_PAIRED_FUSION")
 +    set_source_files_properties(
 +        "../ggml-cuda/quantize.cu"
 +        PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_Q8_1_GFX906_DPP_REDUCE)

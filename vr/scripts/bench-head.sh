@@ -1,67 +1,86 @@
 #!/usr/bin/env bash
-# Reusable head-vs-head+patches benchmark for Qwen3.6-27B MTP on gfx906.
-# Fast by default (REPS=1); bump reps to confirm a specific result.
+# Reusable head-vs-candidate benchmark for Qwen3.6-27B on gfx906.
 #
-# Defaults are tuned for SPEED: one repetition. llama-bench still does a warmup
-# run, so r=1 is a usable single-sample. When a delta looks real or noisy,
-# re-run just that config with more reps (examples below) instead of paying for
-# high reps on every cell.
+# The default screen runs UD-Q4_K_XL on one GPU and Q8_0 on two GPUs at pp8192
+# and tg128@d8192. Each build pays for one repetition plus warmup.
 #
 # Usage:
 #   vr/scripts/bench-head.sh [FILTER]      # run configs whose label matches FILTER (default: all)
 #   vr/scripts/bench-head.sh --list        # list config labels and exit
+#   vr/scripts/bench-head.sh --dry-run     # print selected jobs and exit
 #
 # Examples:
-#   vr/scripts/bench-head.sh                       # full matrix, r=1 (fast)
-#   REPS=5 vr/scripts/bench-head.sh q4_k_m_dual    # double-check ONE config at r=5
-#   BUILDS=candidate vr/scripts/bench-head.sh q8_0 # only the candidate build, q8_0 configs
+#   vr/scripts/bench-head.sh
+#   BUILDS="candidate control" REPS=1 MODES=tg vr/scripts/bench-head.sh
+#   CONFIGS="ud_q4_k_xl_single q8_0_dual" vr/scripts/bench-head.sh
 #
 # Env overrides:
 #   REPS=1                  llama-bench repetitions
 #   BUILDS="control candidate"
-#   DEPTHS="8192 16384"     high-context TG depths (short TG @ d0 always included)
-#   PROMPTS="512,8192"      prompt sizes for the depth-0 PP sweep
+#   CONFIGS="ud_q4_k_xl_single q8_0_dual"
+#   MODES="pp tg"           select prompt processing, token generation, or both
+#   DEPTHS="8192"           TG depths
+#   PROMPTS="8192"          PP sizes
+#   GEN_TOKENS=128          tokens per TG cell
+#   BENCH_EXTRA_ARGS=""     extra llama-bench arguments, recorded in the manifest
 #   COOLDOWN=0              seconds idle between every run (e.g. 30) to relieve heat-soak
 #   COOL_TEMP=              if set (e.g. 60), wait before each run until the hottest GPU
 #                          reaches this temp. Overrides COOLDOWN. COOL_SENSOR=edge|junction|
 #                          memory (default edge), COOL_TIMEOUT=300 caps the wait.
 #   RANDOMIZE=0             1 = shuffle test order
-# A/B note: control and candidate are interleaved per test, so the delta stays
-# unbiased under thermal drift even at COOLDOWN=0.
-#   OUT=vr/bench-results/gfx906-head-<date>
-#   SNAP=<hf snapshot dir with the gguf files>
-set -uo pipefail
+# A/B note: control and candidate are adjacent per test to limit drift. Reverse
+# the build order only when confirming a winning screen.
+#   OUT=vr/bench-results/gfx906-head-<timestamp>
+#   CONTROL_BIN_DIR=build/head-control/bin
+#   CANDIDATE_BIN_DIR=build/head-candidate/bin
+#   SNAP=<snapshot containing UD-Q4_K_XL and Q8_0>
+#   LEGACY_SNAP=<snapshot containing Q4_0, Q4_1, and Q4_K_M>
+set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_llama_root.sh"
 ROOT="$(resolve_llama_root)"
 cd "$ROOT"
-source vr/scripts/setup-therock-env.sh >/dev/null 2>&1 || { echo "ROCm env failed"; exit 2; }
 
 REPS="${REPS:-1}"
 BUILDS="${BUILDS:-control candidate}"
-# Lean, high-context-weighted defaults. TG is the priority, so we keep two TG
-# depths and only a minimal PP set. Expand via env when you want more:
-#   high-context PP too:  PROMPTS=512,8192,16384
-#   deeper TG:            DEPTHS="8192 16384 32768"   (check VRAM fits)
-#   max-lean smoke test:  PROMPTS=8192 DEPTHS=16384
-DEPTHS="${DEPTHS:-8192 16384}"     # high-context TG depths (the focus)
-PROMPTS="${PROMPTS:-512,8192}"     # short ref (512) + 8K high-context prefill
-SNAP="${SNAP:-$HOME/.cache/huggingface/hub/models--unsloth--Qwen3.6-27B-MTP-GGUF/snapshots/5cb35eb3dcbf52dbce5f87dbc64df6aaffadcace}"
-OUT="${OUT:-$ROOT/vr/bench-results/gfx906-head-$(date +%Y-%m-%d)}"
-Q4KM="$SNAP/Qwen3.6-27B-Q4_K_M.gguf"
+CONFIGS="${CONFIGS:-ud_q4_k_xl_single q8_0_dual}"
+MODES="${MODES:-pp tg}"
+DEPTHS="${DEPTHS:-8192}"
+PROMPTS="${PROMPTS:-8192}"
+GEN_TOKENS="${GEN_TOKENS:-128}"
+BENCH_EXTRA_ARGS="${BENCH_EXTRA_ARGS:-}"
+read -r -a BENCH_EXTRA_ARGV <<< "$BENCH_EXTRA_ARGS"
+SNAP="${SNAP:-$HOME/.cache/huggingface/hub/models--unsloth--Qwen3.6-27B-MTP-GGUF/snapshots/ac393bc3d23fd5a929a85e2f33c7c4fd5be02d43}"
+LEGACY_SNAP="${LEGACY_SNAP:-$HOME/.cache/huggingface/hub/models--unsloth--Qwen3.6-27B-MTP-GGUF/snapshots/5cb35eb3dcbf52dbce5f87dbc64df6aaffadcace}"
+OUT="${OUT:-$ROOT/vr/bench-results/gfx906-head-$(date +%Y-%m-%d-%H%M%S)}"
+CONTROL_BIN_DIR="${CONTROL_BIN_DIR:-$ROOT/build/head-control/bin}"
+CANDIDATE_BIN_DIR="${CANDIDATE_BIN_DIR:-$ROOT/build/head-candidate/bin}"
+UDQ4KXL="$SNAP/Qwen3.6-27B-UD-Q4_K_XL.gguf"
 Q8="$SNAP/Qwen3.6-27B-Q8_0.gguf"
+Q40="$LEGACY_SNAP/Qwen3.6-27B-Q4_0.gguf"
+Q41="$LEGACY_SNAP/Qwen3.6-27B-Q4_1.gguf"
+Q4KM="$LEGACY_SNAP/Qwen3.6-27B-Q4_K_M.gguf"
 
 # label | model | split-mode | devices  (single-GPU only where the model fits in 32 GiB)
 SPECS=(
+  "ud_q4_k_xl_single|$UDQ4KXL|none|ROCm0"
+  "q8_0_dual|$Q8|tensor|ROCm0/ROCm1"
+  "q4_0_single|$Q40|none|ROCm0"
+  "q4_1_single|$Q41|none|ROCm0"
   "q4_k_m_dual|$Q4KM|layer|ROCm0/ROCm1"
   "q4_k_m_single|$Q4KM|none|ROCm0"
-  "q8_0_dual|$Q8|layer|ROCm0/ROCm1"
 )
 
 if [[ "${1:-}" == "--list" ]]; then
   printf '%s\n' "${SPECS[@]%%|*}"; exit 0
 fi
-FILTER="${1:-}"
+DRY_RUN=0
+if [[ "${1:-}" == "--dry-run" ]]; then
+  DRY_RUN=1
+  FILTER=""
+else
+  FILTER="${1:-}"
+fi
 
 COOLDOWN="${COOLDOWN:-0}"     # seconds to idle between every llama-bench run (thermal soak relief)
 RANDOMIZE="${RANDOMIZE:-0}"   # 1 = shuffle the test order
@@ -90,43 +109,79 @@ wait_for_cool() {
   [[ -n "$t" ]] && echo "  [cool] ${COOL_SENSOR} ${t}C <= ${target}C (waited ${waited}s)"
 }
 
-# Expand specs x invocations into a flat job list: "label|model|sm|dev|testargs".
-# Depth runs use -p 0 so we don't pay for a pointless pp512 timing at depth.
+# Expand selected specs into separate PP and TG jobs. Keeping them separate
+# avoids the cross-product that llama-bench creates between -p, -n, and -d.
 JOBS=()
 for spec in "${SPECS[@]}"; do
   IFS='|' read -r label model sm dev <<< "$spec"
+  [[ " $CONFIGS " != *" $label "* ]] && continue
   [[ -n "$FILTER" && "$label" != *"$FILTER"* ]] && continue
-  JOBS+=("$label|$model|$sm|$dev|-p $PROMPTS -n 128")          # PP sweep + short TG @ d0
-  for d in $DEPTHS; do
-    JOBS+=("$label|$model|$sm|$dev|-p 0 -n 128 -d $d")         # TG @ depth (high-context, the focus)
-  done
+  if [[ " $MODES " == *" pp "* ]]; then
+    JOBS+=("$label|$model|$sm|$dev|-p $PROMPTS -n 0 -d 0")
+  fi
+  if [[ " $MODES " == *" tg "* ]]; then
+    for d in $DEPTHS; do
+      JOBS+=("$label|$model|$sm|$dev|-p 0 -n $GEN_TOKENS -d $d")
+    done
+  fi
 done
+[[ ${#JOBS[@]} -gt 0 ]] || { echo "No benchmark configurations selected."; exit 2; }
 [[ "$RANDOMIZE" == "1" ]] && mapfile -t JOBS < <(printf '%s\n' "${JOBS[@]}" | shuf)
+if [[ "$DRY_RUN" == "1" ]]; then
+  printf '%s\n' "${JOBS[@]}"
+  exit 0
+fi
+source vr/scripts/setup-therock-env.sh >/dev/null 2>&1 || { echo "ROCm env failed"; exit 2; }
 
 gap_desc=$([[ -n "$COOL_TEMP" ]] && echo "cool-to-${COOL_TEMP}C(${COOL_SENSOR})" || echo "cooldown=${COOLDOWN}s")
-echo "REPS=$REPS BUILDS='$BUILDS' PROMPTS=$PROMPTS DEPTHS='$DEPTHS' gap=$gap_desc RANDOMIZE=$RANDOMIZE"
+echo "REPS=$REPS BUILDS='$BUILDS' CONFIGS='$CONFIGS' MODES='$MODES' PROMPTS=$PROMPTS DEPTHS='$DEPTHS' GEN_TOKENS=$GEN_TOKENS gap=$gap_desc RANDOMIZE=$RANDOMIZE EXTRA='$BENCH_EXTRA_ARGS'"
 echo "OUT=$OUT FILTER='${FILTER:-<all>}'  jobs=${#JOBS[@]} x builds"
 echo "Models:"
 for s in "${SPECS[@]}"; do
   IFS='|' read -r l m _ _ <<< "$s"
+  [[ " $CONFIGS " != *" $l "* ]] && continue
   [[ -n "$FILTER" && "$l" != *"$FILTER"* ]] && continue
+  [[ -r "$m" ]] || { echo "missing model: $m"; exit 2; }
   printf '  %-16s %s\n' "$l" "$(basename "$m")"
 done
+binary_for_build() {
+  case "$1" in
+    control)   printf '%s/llama-bench\n' "$CONTROL_BIN_DIR" ;;
+    candidate) printf '%s/llama-bench\n' "$CANDIDATE_BIN_DIR" ;;
+    *) echo "unknown build label: $1" >&2; return 2 ;;
+  esac
+}
+
 for b in $BUILDS; do
-  [[ -x "$ROOT/build/head-$b/bin/llama-bench" ]] || { echo "missing binary: build/head-$b/bin/llama-bench"; exit 2; }
+  bin="$(binary_for_build "$b")"
+  [[ -x "$bin" ]] || { echo "missing binary: $bin"; exit 2; }
   mkdir -p "$OUT/$b"
 done
+{
+  date --iso-8601=seconds
+  printf 'branch_commit=%s\n' "$(git rev-parse HEAD)"
+  printf 'builds=%s\nconfigs=%s\nmodes=%s\nprompts=%s\ndepths=%s\ngen_tokens=%s\nreps=%s\nbench_extra_args=%s\n' \
+    "$BUILDS" "$CONFIGS" "$MODES" "$PROMPTS" "$DEPTHS" "$GEN_TOKENS" "$REPS" "$BENCH_EXTRA_ARGS"
+  for b in $BUILDS; do
+    bin="$(binary_for_build "$b")"
+    sha256sum "$bin"
+    for lib in libllama.so libggml.so libggml-hip.so; do
+      [[ -r "$(dirname "$bin")/$lib" ]] && sha256sum "$(dirname "$bin")/$lib"
+    done
+  done
+  rocm-smi -c -P -t 2>/dev/null || true
+} > "$OUT/manifest.txt"
 
 # Run each job on control AND candidate back-to-back (interleaved) so both builds
-# see near-identical thermal/clock state — the A/B delta stays unbiased even if
-# absolute throughput drifts as the cards heat-soak over a long run. (The old
-# all-control-then-all-candidate ordering biased whichever build ran second.)
+# see similar thermal/clock state. This limits drift but does not remove
+# fixed-order bias, which is why only a winning screen is repeated in reverse
+# order.
 declare -A SEEN
 first=1
 for job in "${JOBS[@]}"; do
   IFS='|' read -r label model sm dev targs <<< "$job"
   for build in $BUILDS; do
-    BIN="$ROOT/build/head-$build/bin/llama-bench"
+    BIN="$(binary_for_build "$build")"
     of="$OUT/$build/${label}.jsonl"
     [[ -z "${SEEN[$build/$label]:-}" ]] && { : > "$of"; : > "$of.err"; SEEN[$build/$label]=1; }
     if [[ $first -eq 0 ]]; then
@@ -135,6 +190,7 @@ for job in "${JOBS[@]}"; do
     fi
     first=0
     common=(-ngl 99 -fa on -o jsonl -r "$REPS" --progress -m "$model" -sm "$sm" -dev "$dev")
+    common+=("${BENCH_EXTRA_ARGV[@]}")
     # Keep the warmup run (default): absorbs HIP-graph capture, rocBLAS init,
     # weight page-in, -d KV prefill, clock ramp. Most important at REPS=1.
     [[ "${WARMUP:-1}" == "1" ]] || common+=(--no-warmup)

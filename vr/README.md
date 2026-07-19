@@ -1,436 +1,296 @@
-# gfx906 optimization work
+# gfx906 kernel optimization
 
-Last updated: 2026-06-28
+Last updated: 2026-07-18
 
-This directory contains private-fork work for AMD Vega 20 GPUs: MI50, MI60,
-and Radeon VII. This is the sole operational and technical guide. Measured
-results and their confidence levels are recorded in `RESULTS.md`.
+This directory tracks private llama.cpp work for Vega 20 (`gfx906`): MI50,
+MI60, and Radeon VII. The scope is raw GPU implementation performance:
+quantized matmul kernels, launch geometry, data layout, and dispatch. Runtime
+techniques that change the workload are out of scope.
 
-The work is for a private fork. Upstream llama.cpp contribution rules still
-apply if any part is later proposed upstream.
+## Goal
 
-## Current state
+Maximize real agentic inference speed for 25B-35B models on one MI60 plus one
+MI50 at the longest practical context. Q8_0 and UD-Q4_K_XL are the primary
+formats because model publishers commonly provide them and they preserve
+useful quality. Track prompt processing, incremental prompt ingestion, and
+long-context token generation separately; all matter.
 
-The current best build is the exact single-target `gfx906` HIP build from this
-tree, produced by:
+Keep MTP and similar workload-changing features out of core optimization
+measurements. They can be enabled later in production, after the underlying
+PP, TG, attention, KV, dispatch, and multi-GPU paths are understood.
 
-```bash
-vr/scripts/build-gfx906-optimal.sh
-```
+## Read this first
 
-It includes the accepted code-level changes only:
+- `RESULTS.md`: measured results and rejected ideas.
+- `WORKTREE-BENCHMARKS.md`: the cheapest useful A/B procedure.
+- `bench-results/gfx906-pp8192-kernel-profile-2026-07-02/FINDINGS.md`:
+  profiler evidence behind the PP diagnosis.
+- `patches/README.md`: current patch contents and status.
 
-- `Q8_0` selective rocBLAS dispatch for wide dense prefill.
-- `Q4_K` MMQ metadata precompute plus stride-9 LDS layout for prefill.
-- `Q6_K` MMQ `min_blocks=1` launch bound for the accepted Q6_K prefill path.
-- `Q4_K` MMVQ branch-free scale decoding plus Q8_1 sum reuse for depth-0 TG.
+Raw benchmark and profiler output stays under `bench-results/`. Old code
+experiments stay under `patches/legacy/` and `archive/rejected-patches/`.
+Historical prose snapshots and handoff documents were removed because they
+duplicated or contradicted these live documents.
 
-The build script prints this list at startup, configures `gfx906` exactly, and
-checks `compile_commands.json` for the gfx906-only compile definitions before
-building. The default output is `build/gfx906-optimal`; override it with
-`BUILD_DIR=/path/to/build`. The build-tree binaries are configured with
-`CMAKE_INSTALL_RPATH=$ORIGIN`, `CMAKE_BUILD_WITH_INSTALL_RPATH=ON`, and
-`CMAKE_BUILD_RPATH_USE_ORIGIN=ON` so the final build directory can be moved and
-still find its local shared libraries. ROCm runtime libraries may still require
-the normal ROCm environment or `LD_LIBRARY_PATH`.
+## Current tree
 
-The optimal patch order is recorded in `vr/patches/optimal-gfx906.series`:
-
-```text
-gfx906-q8-rocblas-dispatch.patch
-gfx906-q4k-metadata-precompute.patch
-gfx906-q6k-min-blocks-1.patch
-gfx906-q4k-mmvq-branchless-scales.patch
-```
-
-The rejected Q5_K metadata experiment is retained under
-`vr/archive/rejected-patches/` and is intentionally not part of the optimal
-series.
-
-Known remaining gaps:
-
-- The latest head-versus-patches run is still triage-only.
-- Long-context TG is unresolved and order-sensitive.
-- The direct Q6_K scratch-spill trace remains an open validation artifact.
-- Flash Attention: profiled 2026-07-02, only 4% of pp8192 kernel time, so
-  deprioritized for prefill (see `vr/bench-results/`).
-- pp8192 prefill is 80% quantized matmul and register-occupancy bound (Q4_K
-  2 waves/SIMD, Q6_K 1), not LDS or bandwidth bound. See
-  `vr/bench-results/gfx906-pp8192-kernel-profile-2026-07-02/FINDINGS.md`.
-
-## Scope
-
-gfx906 has no MFMA matrix cores. Quantized matrix multiplication uses the
-vector ALU, principally `V_DOT4_I32_I8` through `ggml_cuda_dp4a`.
-
-This creates two distinct optimization problems:
-
-- Prompt processing (PP or prefill) uses MMQ and is usually limited by DP4A,
-  LDS behavior, register pressure, or occupancy.
-- Token generation (TG or decode) normally uses MMVQ and is usually limited by
-  effective HBM2 bandwidth plus long-context attention and KV-cache traffic.
-
-Do not transfer occupancy conclusions between quant types without profiling.
-The accepted Q4_K and Q6_K changes deliberately make opposite tradeoffs.
-
-The active scope is code-level GPU optimization:
-
-- Quantized MMQ/MMVQ kernels, launch geometry, memory layout, and fusion.
-- Flash Attention kernel and tile tuning.
-- Profiling and correctness work required to validate those changes.
-
-Runtime or model configuration changes are out of scope for now. This includes
-KV-cache type or precision changes, speculative decoding, layer/row split
-tuning, tensor placement, and similar settings-only comparisons. Existing
-historical results may mention them, but they are not current work items.
-
-## Repository layout
-
-The source changes remain in upstream paths because they modify existing code:
-
-- `ggml/src/ggml-cuda/mmq.cu`: selective Q8_0 rocBLAS dispatch
-- `ggml/src/ggml-cuda/mmq.cuh`: Q4_K and Q6_K gfx906 specializations
-- `ggml/src/ggml-cuda/vecdotq.cuh`: Q4_K MMVQ branch-free scale decoding
-- `ggml/src/ggml-hip/CMakeLists.txt`: exact-gfx906 compile gates
-
-Everything added specifically for this work is under `vr/`:
-
-- `patches/`: standalone source changes and retained experiment patches
-- `scripts/`: current build, benchmark, and monitoring tools
-- `bench-results/`: raw JSONL, text, and profiler output
-- `WORKTREE-BENCHMARKS.md`: current head-versus-patched worktree build and
-  benchmark command notes
-- `assets/`: benchmark prompt fixtures
-- `archive/`: superseded documentation, historical scripts, and rejected patches
-
-The intended branch delta from upstream is the four scoped source changes plus
-the `vr/` tree. New optimization source changes should have a corresponding
-standalone patch under `vr/patches/`.
-
-## Accepted source changes
-
-### Q8_0 selective rocBLAS dispatch
-
-For dense Q8_0 matmuls on Vega 20, `ggml_cuda_should_use_mmq` keeps MMQ through
-`ne11 <= 256` and uses the existing rocBLAS path above that threshold. Expert
-`MUL_MAT_ID` operations remain on MMQ.
-
-The observed benefit is in wide prefill operations. The current evidence does
-not establish a decode benefit. Patch:
-`vr/patches/gfx906-q8-rocblas-dispatch.patch`.
-
-### Q4_K metadata precompute and stride-9 LDS layout
-
-The gfx906 Q4_K MMQ specialization computes final `dm * scale` and `dm * min`
-metadata while loading the weight tile instead of repeatedly unpacking it in
-the dot-product loop. Metadata rows use stride 9 to reduce LDS bank conflicts
-for the existing wave64 geometry.
-
-Profiling showed Q4_K to be occupancy sensitive. Keeping occupancy is
-important. Applying `min_blocks=1` (looser, more registers) to Q4_K caused a
-large regression. Counter profiling on 2026-07-02 refined this: Q4_K MMQ is
-register-pressure-limited (128 VGPR -> 2 waves/SIMD), not LDS-wait bound (bank
-conflicts ~0.1%). The untested lever is the opposite direction - forcing FEWER
-registers (min_blocks>=3) to raise occupancy. Patch:
-`vr/patches/gfx906-q4k-metadata-precompute.patch`.
-
-### Q6_K minimum launch occupancy of one block
-
-The gfx906 Q6_K MMQ specialization uses `__launch_bounds__(..., 1)`. This gives
-the compiler more VGPR headroom at the cost of occupancy. It improved the
-profiled Q6_K workload because that kernel was register-spill and VALU limited,
-not LDS-wait limited.
-
-The direct scratch trace that proves removal of the previously observed
-52-byte-per-thread spill remains an open validation item. Patch:
-`vr/patches/gfx906-q6k-min-blocks-1.patch`.
-
-### Q4_K MMVQ scale decoding and Q8_1 sum reuse
-
-The TG specialization replaces the per-lane Q4_K scale-layout branch with safe
-0/2/4 word loads and a mask select. It also reuses the scaled Q8_1 sum already
-stored in `ds.y` for the minimum term instead of recomputing partial sums with
-four DP4A operations per vec-dot call. It is compiled only for an exact single
-gfx906 HIP target. The original branch-free decoder improved n=1 latency by
-about 4.7 percent and depth-0 TG by 5.4 to 6.0 percent. Q8_1 sum reuse added
-about 0.9 percent depth-0 TG in alternating tests.
-
-Focused correctness and the full ROCm0 `MUL_MAT` gate passed after both changes.
-Depth-8192 results were
-order-sensitive and do not establish a long-context gain; repeat that cell
-only when long-context behavior becomes decision-relevant. Patch:
-`vr/patches/gfx906-q4k-mmvq-branchless-scales.patch`.
-
-## Critical build gate
-
-The Q4_K MMQ/MMVQ and Q6_K specializations compile only when the HIP target list
-contains exactly one target and that target is `gfx906`. A multi-architecture build
-silently uses the generic implementations. The Q8_0 dispatch uses a runtime
-compute-capability check and is not subject to this compile gate.
-
-Configure and build the current optimal with:
+The private branch is based on upstream commit `571d0d540`. Build the exact
+single-target candidate with:
 
 ```bash
 vr/scripts/build-gfx906-optimal.sh
 ```
 
-The `vr/scripts/*.sh` entrypoints use one rule: the `vr` directory must live
-inside the llama.cpp tree being built. The scripts derive the llama.cpp root as
-two directories above themselves, so moving `vr/` into another checkout is
-enough to make the same commands build that checkout.
+The historical name `optimal` is only a build-directory name. The matched
+review builds are `build/head-control` (clean `571d0d540`) and
+`build/gfx906-merge-review` (private candidate).
 
-Shared ROCm detection, CMake options, RPATH settings, and common build helpers
-live in `vr/scripts/_gfx906_build.sh`. Edit that file when changing core build
-flags; the vanilla, optimal, and comparison build scripts all use it.
+The active candidate retains selective Q8_0 MMQ/rocBLAS dispatch, Q4_K MMQ
+metadata precompute and stride 9, Q6_K MMQ `min_blocks=1`, and Q4_K branchless
+MMVQ scale decode with stored Q8_1 sum reuse. Q4_K `min_blocks=3`, paired
+MMVQ, Q8_1 DPP, and custom Flash Attention experiments are disabled. Focused
+ROCm0 correctness passed 203 of 203 target `MUL_MAT` cases after this
+reduction.
 
-Common overrides:
+The current model screen proves the Q8_0 PP dispatch win. It shows that the
+combined Q4_K MMQ precompute/stride-9 plus Q6_K `min_blocks=1` PP candidate
+regresses on current head; it does not identify which component is responsible.
+Disabled experimental implementation code still exists in the patch and
+should be removed after the retained set is frozen.
 
-```bash
-BUILD_DIR=/mnt/fast/gfx906-optimal vr/scripts/build-gfx906-optimal.sh
-TARGETS="llama-cli llama-server llama-bench" vr/scripts/build-gfx906-optimal.sh
-GGML_VULKAN=OFF vr/scripts/build-gfx906-optimal.sh
-CONFIGURE_ONLY=1 vr/scripts/build-gfx906-optimal.sh
-INSTALL_DIR=/opt/llama-gfx906 vr/scripts/build-gfx906-optimal.sh
-```
+## What the current code does
 
-The script verifies that the specializations were compiled rather than assuming
-the CMake option was honored. Manual verification is:
+### Prompt processing
 
-```bash
-rg 'GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE|GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES' \
-  build/gfx906-optimal/compile_commands.json
-```
+- Q4_K uses DP4A MMQ with Q8_1 activations.
+- Q8_0 uses MMQ only through a configurable batch threshold. Wide dense
+  matrices dequantize Q8_0 weights to F16 and use rocBLAS.
+- At pp8192 on the profiled Q4_K_M model, quantized matmul is 80 percent of GPU
+  kernel time: Q4_K 54 percent, Q6_K 20 percent, and Q5_K 6 percent.
+- Upstream Flash Attention remains enabled for every model benchmark and graph
+  export with `-fa on`. Only experimental custom FA patch changes are disabled.
+  FA was about 4.1 percent of PP8192 kernel time, so custom FA optimization is
+  lower priority than quantized matmul.
 
-## Correctness gate
+An older Q4_K_M build measured Q4_K at 128 VGPR per lane, two waves per SIMD,
+60 percent VALU busy, about 11 percent memory-unit busy, and negligible LDS
+bank conflicts. This supports an occupancy/dependency-latency hypothesis for
+that build. It does not prove the current UD-Q4_K_XL kernel is register-limited;
+recheck current ISA resources and one counter trace before designing around it.
 
-Run the full ROCm matrix-multiplication tests before accepting any kernel
-change:
+### Token generation
 
-```bash
-build/gfx906-optimal/bin/test-backend-ops -b ROCm0 -o MUL_MAT
-```
+- Q4_K and Q8_0 use MMVQ for the small-column path.
+- At one generated token, each weight matrix is streamed once. Q4_K costs
+  about 0.5625 bytes per weight and Q8_0 about 1.0625 bytes per weight before
+  cache-line and other model traffic.
+- The fused gate/value MMVQ path already quantizes the shared activation once.
+  Sharing another activation load cannot remove weight bytes, but fusion may
+  still reduce activation traffic, launches, and synchronization. Measure its
+  total share before estimating the ceiling.
 
-For a new quant-specific implementation, first use a focused test during
-development, then run the full gate before recording an accepted result.
+Q8_0 TG has a large unavoidable weight-traffic floor, but achieved HBM
+bandwidth has not been measured. Do not label it bandwidth-bound yet: launch
+latency, dependency chains, tensor-mode synchronization, or insufficient
+memory-level parallelism may explain the gap to the byte roofline.
+Wider VDR was neutral in one implementation. Q4_K TG also decodes packed 6-bit
+scale/min metadata and therefore has additional instruction-side opportunities.
 
-## A/B build rules
+## Current decision state
 
-A valid full-patch comparison is:
+| Change | Status | Reason |
+| --- | --- | --- |
+| Q8_0 MMQ/rocBLAS crossover | Proven on current head | Two pp8192 screens: +29.0 and +27.9 percent; earlier TG neutral |
+| Q4_K MMQ precompute plus stride 9 | Combined result rejects current form | Reduced PP candidate including Q6_K is -5.5 percent; attribution is unresolved |
+| Q6_K `min_blocks=1` | Historical support; unresolved on head | Must be replayed alone on current Qwen shapes |
+| Q4_K branchless MMVQ plus stored sum | Retain with caveat | Current tg128@d8192 is +21.7 percent in one ordered sample; historical depth-zero tests were +5 to +6 percent |
+| Q4_K `min_blocks=3` | Unproven/disabled | Present in a combined set that lost 17.1 percent; it was not isolated |
+| Paired MMVQ, Q8_1 DPP, custom FA | Unproven/disabled | Removed from active compile gates |
+| Q8_0 VDR 4 | Rejected/disabled | `+0.19%` TG is neutral |
 
-- Control: clean selected upstream commit, with no gfx906 patches applied.
-- Candidate: the same upstream commit plus the intended patch set.
+## Important unknowns
 
-The current `/tmp` worktree comparison setup and exact benchmark commands are
-recorded in `vr/WORKTREE-BENCHMARKS.md`.
+- Current UD-Q4_K_XL operation frequencies and kernel counters have not been
+  profiled; old Q4_K_M shares are only directional.
+- Achieved HBM bandwidth, launch share, and split synchronization cost are
+  unknown for long-context TG.
+- Tensor split mode is already established as the fastest production mode.
+  Internal asymmetric layer/shard placement remains a possible later question.
+- Graph replay covers exact dense shapes but not a populated long-context KV
+  cache.
+- Q4_0/Q4_1 files are from an older snapshot; no fair speed/quality comparison
+  exists yet.
 
-`vr/scripts/build-gfx906-comparison.sh` now defaults `CONTROL_PATCH` to empty,
-so the control is clean unless explicitly overridden. Preserve that default for
-a full head-versus-optimal comparison:
+## Immediate handoff
 
-```bash
-CONTROL_PATCH="" vr/scripts/build-gfx906-comparison.sh
-```
+Do these in order:
 
-A benchmark is not a clean head-versus-optimal comparison unless its provenance
-confirms that `CONTROL_PATCH` was empty.
+1. Build Q4_K-only and Q6_K-only PP variants. Keep the independent Q4_K MMVQ
+   and Q8_0 dispatch changes identical. The existing control and combined
+   result complete the four-way ablation.
+2. Replay current UD-Q4_K_XL Q4_K and Q6_K shapes for both singletons. This
+   separates individual effects and reveals whether the combined set has an
+   interaction. Do not assign the old -5.5 percent result to precompute,
+   stride 9, or Q6_K without this isolation.
+3. Combine only singleton winners, replay once, then run one UD-Q4_K_XL
+   `pp8192` cell if the predicted net result is positive. Do not rerun Q8_0
+   pp8192: its 28-29 percent dispatch gain has repeated.
+4. Retain Q4_K branchless MMVQ with a one-sample/order caveat. Its +21.7
+   percent current result is directionally supported by historical +5 to +6
+   percent depth-zero tests; do not spend three runs reconfirming it.
+5. Treat Q8_0 TG as neutral with a caveat. The reduced-candidate cell was
+   interrupted, but the earlier current-head pair was -1.5 percent and the
+   Q8_0 dispatch change targets PP. Rerun TG only if its code path changes.
+6. Freeze the set, delete disabled experiment code from the generated patch,
+   rebuild, run the full ROCm0 `MUL_MAT` gate once, then one final production
+   `-sm tensor` configuration at a long context that actually fits.
 
-Before a run, also verify that `build/.mainline-src` is at the intended commit
-and contains no unexpected changes. Do not silently reuse a dirty comparison
-worktree.
+Commands are in `WORKTREE-BENCHMARKS.md`. Current raw data is under
+`bench-results/gfx906-head-{core-screen,q8-screen,retained-screen}-2026-07-18/`.
 
-## Benchmark policy
+## Separate PP and TG paths
 
-Use `-p N -d D` for prompt processing and `-n M -d D` for generation. Do not use
-a blended prompt-plus-generation result when evaluating a PP- or TG-specific
-change.
+Separate optimized paths are appropriate, but dispatch is a continuum rather
+than a binary PP/TG split. Large PP selects MMQ or rocBLAS, single-sequence TG
+selects MMVQ at `n=1`, and incremental/batched agent work exercises boundary
+sizes between them. The old PP trace suggests occupancy/dependency latency;
+TG has a weight-traffic floor plus metadata and launch costs.
 
-The primary harness is `vr/scripts/bench-head.sh`. Optimize for short feedback
-cycles:
+Keep the public dispatch and quant formats shared, but use narrowly gated PP
+and TG kernels. A PP-only MMQ change does not justify rerunning TG, and an
+MMVQ-only change does not justify rerunning PP. Test both only when changing
+shared quantization, vec-dot helpers, type layout, or the MMQ/MMVQ crossover.
 
-- Use `REPS=1` plus warmup for the default screen.
-- Run one relevant operator sample and one end-to-end sample when both paths
-  exercise the change.
-- Repeat only a promising result, an ambiguous result near the decision line,
-  or a result being promoted to accepted.
-- Use alternating independent invocations and telemetry only when noise is
-  preventing a decision.
-- Always run the appropriate correctness gate before accepting source changes.
+## Further improvements
 
-The current harness interleaves control and candidate and keeps warmup enabled.
-It does not yet write a complete provenance and telemetry manifest. Until that
-is added, record the source commits, patch hashes, command-line environment,
-and `rocm-smi` state beside each accepted result.
+### 1. Reduce Q4_K/Q6_K PP live state
 
-### Single-GPU and dual-GPU measurements
+This was the highest-share kernel in an older Q4_K_M trace, but the current
+UD-Q4_K_XL shares are unknown. Do not treat stronger `launch_bounds` or an
+84-VGPR target as a solution by itself; either can force spills or
+recomputation when values remain live.
 
-Use single GPU with `-sm none -dev ROCm0` as the primary kernel baseline.
-Dual-GPU measurements are only needed as a regression check when a code change
-affects multi-GPU execution.
+Use exported Qwen shapes rather than the generic `4096 x 14336` built-in
+performance case. Dominant dimensions are approximately `5120 <-> 17408`,
+with `n=512` for PP because pp8192 is executed as `-ub 512` microbatches.
+Compile the dominant Q4_K and Q6_K specializations and record VGPR, SGPR, LDS,
+scratch, and waves/SIMD. Then compare two structural variants:
 
-Do not spend optimization cycles comparing layer, row, or tensor split modes.
-Those are configuration choices and currently out of scope.
+1. A larger workgroup that distributes the same output tile over more lanes,
+   reducing accumulators per lane while preserving weight reuse.
+2. A smaller output-column tile, accepting less weight reuse in exchange for
+   fewer live accumulators and more resident blocks.
 
-Q8_0 does not fit the same long-context single-GPU matrix used by the current
-benchmark, so its present end-to-end baseline is dual GPU.
+Lower VGPR without scratch is a useful experiment only if current ISA and
+counters confirm occupancy is limiting. A variant with more resident waves but
+more instructions, barriers, or dependencies may still lose. Test only the
+dominant current operator shape first, then pay for one model cell.
 
-### Thermal and power controls
+Defer double-buffering, larger tiles, or more independent accumulators until
+current counters show enough register and occupancy headroom. They add live
+state and were poor fits for the older measured kernel.
 
-The two installed cards are not equivalent. MI50-0 has a 225 W cap and direct
-CPU PCIe attachment; MI50-1 has a 178 W cap and chipset PCIe attachment. Do not
-average them as interchangeable devices.
+Also compare the existing integer DP4A path with one tile-local
+dequantize-to-half2 design if current instruction counters justify it. gfx906
+does not use llama.cpp's `AMD_MFMA_AVAILABLE` path; that starts at CDNA
+gfx908. It does provide packed FP16 `v_dot2`. The previously rejected
+whole-matrix Q4-to-F16 rocBLAS path paid global conversion and scratch traffic,
+so it does not rule out fused tile-local conversion. Estimate conversion,
+LDS, and `v_dot2` cost against DP4A before implementing a full kernel.
 
-Measure active memory clock and power before comparing a TG result with a
-theoretical 1024 GB/s HBM2 figure. Use measured sustainable bandwidth at the
-actual clock as the practical roofline. Any power-limit change requires normal
-hardware safety review and should be reported separately from kernel results.
+### 2. Make Q4_K TG metadata wave-cooperative
 
-## Current plan
+Within each Q4_K block, many lanes load and decode overlapping scale/min words.
+First confirm redundant scale/min loads and decode instructions in current ISA.
+If material, test selected lanes loading and decoding the eight pairs, then
+broadcasting within each 32-lane half wave using DPP or `ds_bpermute`.
 
-The current focus is stable, measurable PP and TG improvement from code-level
-GPU changes, primarily Q4_K before extending proven techniques to Q5_K or
-Q6_K.
+This keeps the compressed format and attacks redundant instructions without
+adding weight bytes. It is preferable to a decoded sidecar, which increases
+TG traffic. Check generated ISA and VGPR count before any model run; a shuffle
+sequence that raises VGPR pressure can erase the decode saving.
 
-1. Establish a reproducible TG baseline.
-   - Build a verified clean control and candidate from the same upstream commit.
-   - Add or manually capture a provenance manifest.
-   - Use one timed sample for screening and repeat only ambiguous or promoted
-     results.
-2. Profile the actual decode kernels.
-   - Confirm which MMVQ kernels dominate Q8_0 and Q4_K_M generation.
-   - Measure effective bandwidth, occupancy, and memory-clock state.
-   - Inventory the model's Q4_K and Q6_K tensor bytes before sizing Q6_K work.
-   - Repeat depth-8192 only if a later change makes long-context behavior
-     decision-relevant.
-3. Evaluate Q4_K MMVQ first.
-   - Start from the existing wave64 GCN path and profile the actual Q4_K decode
-     shapes before changing vector width or launch geometry.
-   - Gate any specialization to exact gfx906 builds.
-   - Require full correctness and a repeatable depth-0 TG gain. Test long
-     context only when it is decision-relevant.
-4. Extend a validated MMVQ technique to Q5_K or Q6_K only when their profile
-   shows the same bottleneck.
-5. Tune Flash Attention tiles when profiling shows attention is material to
-   the target workload.
-6. Revisit Q8_0 MMVQ separately; it has different storage and model-fit
-   constraints.
+If counters show unused HBM bandwidth after this change, test a two-way
+strip-mined K loop with independent partial sums to expose more outstanding
+loads. Do not retry VDR 4: that reduced participating work groups and was
+already neutral.
 
-The practical bandwidth target should be derived from a measured bandwidth
-microbenchmark. The previous aspirational target of more than 85 percent of
-advertised peak is not an acceptance gate.
+### 3. Refine Q8_0 PP dispatch, not the 8K GEMM
 
-## Do not reopen without new evidence
+At pp8192, one Q8_0-to-F16 conversion is amortized across a large rocBLAS GEMM.
+A new compressed GEMM must beat tuned F16 rocBLAS, not merely remove the
+conversion kernel. The likely near-term gain is a shape-aware crossover using
+`M`, `N`, and `K`, replacing the current scalar `ne11` threshold.
 
-- Q4_K `min_blocks=1`: pp8192 regressed by 33.74 percent.
-- Q4_K y64 tile: pp8192 regressed by 9.27 percent.
-- Forced Q4_K rocBLAS/F16 conversion: operator-level regression of 30 to 34
-  percent.
-- Q4_K stride 10 or 11: both lost in the tested configurations.
-- Q4_K group2pad1 layout: LDS conflicts returned to the original level.
-- Q6_K prefill metadata precompute: pp8192 regressed by 5.3 percent.
-- Q5_K `min_blocks=1`: representative n=512 operator throughput regressed by
-  about 17 percent.
-- Q4_K two-accumulator DP4A: narrow MMQ improved, but the n=512 PP operator
-  regressed by 2.4 percent.
+The current default is MMQ at `ne11 <= 256` and rocBLAS above it. Only the
+pp8192/`n=512` side is proven; agentic incremental prompt sizes near the
+boundary are not. Measure a few exact Qwen shapes around 128/256/512 under
+forced-MMQ and forced-rocBLAS dispatch. A persistent F16 weight cache nearly
+doubles weight storage and is unsuitable as the long-context default. A direct
+block-scaled Q8 GEMM is justified only if profiling shows conversion and
+scratch traffic remain material.
 
-These conclusions apply to the recorded prefill experiments. They do not by
-themselves reject a distinct Q6_K decode MMVQ design.
+### 4. Measure the Q8_0 TG roofline
 
-## Script index
+Strict single-token Q8_0 TG cannot avoid reading roughly 1.0625 bytes per
+weight. First calculate effective bytes/s from model traffic and measure HBM
+counters. Then choose among:
 
-- `_gfx906_build.sh`: shared ROCm/CMake setup and core build flags
-- `build-gfx906-optimal.sh`: build the current optimized gfx906 tree
-- `build-gfx906-vanilla.sh`: build an unpatched upstream-style gfx906 tree
-- `setup-therock-env.sh`: configure the TheRock compiler/runtime environment
-- `build-gfx906-comparison.sh`: build upstream control and current candidate
-- `bench-head.sh`: primary PP/TG A/B harness
-- `watch-bench.sh` and `_bench_table.py`: live result display
-- `rocm-max-temps.sh`: simple temperature logging helper
+- verify aligned, fully coalesced Q8 block loads and achieved HBM bandwidth;
+- load and broadcast the per-block scale cooperatively if it reduces
+  instructions without extra shuffles or registers;
+- try a two-way prefetched K loop only when memory-level parallelism is low;
+- use streaming cache policy only if weight traffic is evicting useful
+  activation or KV data.
 
-Historical one-off experiment drivers were moved to
-`vr/archive/scripts-2026-06/`. They may use older repetition and warmup
-policies. Their outputs are historical evidence and should not define the
-current acceptance policy.
+Do not assume only incremental gains remain until the measured roofline rules
+out launch, synchronization, split balance, and memory-level-parallelism gaps.
+Fusion of different projection matrices does not reduce their weight bytes,
+but it may still reduce activation traffic and launches; value it with an
+Amdahl calculation rather than rejecting it categorically.
 
-## Documentation archive
+### 5. Decide whether Q4_0 or Q4_1 is worth the quality trade
 
-The complete pre-consolidation Markdown tree is preserved at:
+Do not assume a simpler quant is faster enough to matter. Export and replay
+the Q4_0 and Q4_1 model graphs on the same candidate build, then compare their
+PP `n=512` and TG `n=1` shapes with UD-Q4_K_XL. Load only the best predicted
+format for one `pp8192` and one `tg128@d8192` model screen.
 
-```text
-vr/archive/docs-pre-consolidation-2026-06-20.tar.gz
-```
+Report PP, incremental PP, long-context TG, memory use, and quality together;
+do not impose a fixed speed threshold in advance. UD-Q4_K_XL is expected to be
+more accurate, so the magnitude and location of any Q4_0/Q4_1 speed advantage
+determines the trade. Compare only matching model revisions.
 
-SHA-256:
+## Exact implementations closed by evidence
 
-```text
-8dcbf659820e9cac33ba7caae6155d0558cb4544f5ca97a84fbc1f6d3f521c2e
-```
+- Q4_K forced rocBLAS/F16: large PP regression.
+- Q4_K `min_blocks=1`, the larger activation K tile, and two-accumulator PP
+  variants: the tested mappings regressed; this does not close other tile or
+  accumulator mappings.
+- Q4_K stride 10/11 and group2 padding: regressions.
+- Q6_K metadata precompute: regression.
+- Q5_K metadata precompute: synthetic win did not survive the model gate.
+- Q8_0 VDR 4: neutral TG.
+- The tested custom Flash Attention changes: unproven and disabled. Upstream
+  FA remains on. The old trace assigned FA about 4 percent at pp8192, but its
+  share can grow with context.
 
-List or extract it from the repository root with:
+Do not retry an identical implementation without new evidence. The broader
+optimization areas remain open when current target traces or rooflines justify
+them.
 
-```bash
-tar -tzf vr/archive/docs-pre-consolidation-2026-06-20.tar.gz
-tar -xzf vr/archive/docs-pre-consolidation-2026-06-20.tar.gz -C /tmp
-```
+## Acceptance rule
 
-The archive contains the previous guides, benchmark document, optimization
-summary, plan, and generated Markdown reports. Raw benchmark and profiler data
-remain in their original `vr/bench-results/` locations.
+Use `WORKTREE-BENCHMARKS.md`. Reject candidates first with exact graph-derived
+operator shapes. Pay for a full-model cell only after the profiler-weighted
+operator result predicts a useful gain. Accept a large, coherent signal with
+an explicit sample/order caveat. Use one reversed sample only for borderline
+or contradictory evidence, not three repetitions by default. Run focused
+correctness during development and the full ROCm0 `MUL_MAT` gate only after
+the final candidate is frozen.
 
-For future material rewrites, create a new dated archive before editing these
-two files. Do not replace an existing archive; each archive is a documentation
-checkpoint for resolving later discrepancies.
-
-The stable PP ledger immediately before beginning the Q4_K TG phase is stored
-in `vr/archive/docs-pp-stable-pre-tg-2026-06-20.tar.gz`, SHA-256
-`005ff52bfae076783fa9a3d2045309d95afdc036f782cd0772418f7a37978ccc`.
-
-The candidate-stage ledger before the Q4_K TG change passed its full gate is
-stored in `vr/archive/docs-pre-q4k-tg-acceptance-2026-06-20.tar.gz`, SHA-256
-`cf99dd6a0db8af3c8b69415ce62de62d2076da719ada2f6ff3966168936b1393`.
-
-The ledger before adopting the kernel-only optimization scope is stored in
-`vr/archive/docs-pre-kernel-only-scope-2026-06-20.tar.gz`, SHA-256
-`3ec7c6f18b499a2b74129a0b828a85ef0481c8a847caf28d012223794ed7cf67`.
-
-The human-oriented guide and ledger before adding the following restart
-handoff are stored in
-`vr/archive/docs-pre-fused-q4k-handoff-2026-06-20.tar.gz`, SHA-256
-`a75d336d418a12690a3e2176f122f43f56a94d6a3009c3f8092b9a68136b4c19`.
-
-## Fresh-session execution handoff
-
-This section is an execution checklist for the next engineer or LLM. The
-earlier sections are the design and evidence context and should remain the
-primary human-readable guide.
-
-### Current candidate
-
-The worktree now contains the full gfx906 bigbang candidate described in
-`vr/patches/README.md`. In addition to the accepted Q8_0 dispatch, Q4_K
-metadata precompute, Q6_K launch bound, and Q4_K branchless decoder, it includes
-Q4_K and Q8_0 paired fused MMVQ helpers, Q8_0 wide VDR, Q4_K
-`min_blocks=3`, and DPP/FlashAttention candidates.
-
-The candidate was ported across upstream's MMQ refactor and built at commit
-`571d0d540`. The complete ROCm0 `MUL_MAT` gate passed 1134 of 1134 cases.
-This check does not provide timing or directly exercise fused value-plus-gate
-paths, so the candidate is not accepted yet.
-
-### Next validation
-
-Follow `vr/WORKTREE-BENCHMARKS.md`:
-
-1. Add or identify a graph-level check that exercises Q4_K and Q8_0 fused
-   value-plus-gate MMVQ.
-2. Rebuild a clean-head comparison at `571d0d540`.
-3. Run alternating clean/patched Q4_K and Q8_0 model benchmarks with telemetry.
-4. Record decision-grade results in `vr/RESULTS.md`; keep single manual runs
-   classified as triage-only.
-
-The regenerated current patch and both series entrypoints were checked against
-a fresh archive of `571d0d540`.
-
-If the combined candidate regresses, split it along the existing compile
-definitions and test one candidate at a time. Start with Q4_K paired fusion and
-`min_blocks=3`, then Q8_0 paired fusion and wide VDR, then the DPP and
-FlashAttention changes.
+Small repeatable wins are valid. If a theoretically meaningful optimization
+produces a tiny result, compare predicted and observed impact before moving on:
+verify the executed path, operation share, resource change, launch count,
+clocks, and roofline assumption. The discrepancy is evidence about the real
+bottleneck.

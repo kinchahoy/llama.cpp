@@ -1,11 +1,5 @@
-# legacy 2026-06 old-base patches
+# legacy patches
 
-These are the older per-feature gfx906 patches and handoff notes. They are
-kept for attribution, measurements, and design history.
-
-Do not use this directory as the current runnable series. These patches target
-an older upstream base and were superseded by:
-
-```text
-../../current/gfx906-current-bigbang.patch
-```
+These patches target the June 2026 source layout. Keep them only as mechanical
+porting references. Performance status and next work are documented in
+`../../../RESULTS.md` and `../../../README.md`.

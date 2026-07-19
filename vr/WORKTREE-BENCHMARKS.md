@@ -1,175 +1,303 @@
-# gfx906 worktree benchmark notes
+# gfx906 A/B runbook
 
-Last updated: 2026-07-13
+Last updated: 2026-07-18
 
-This note records the current head-versus-patched worktree setup for the
-private gfx906 branch. The comparison is for local MI50/MI60 testing only.
+This is the minimal validation path for a raw kernel or dispatch change. The
+production goal is fast 25B-35B agentic inference on one MI60 plus one MI50 at
+long context, not merely the highest isolated pp8192 number.
 
-## Built worktrees
+## Build matched trees
 
-Both worktrees were created from upstream commit `99f3dc32296f825fec94f202da1e9fede1e78cf9`.
-
-| Role | Source tree | Build dir | Binaries |
-| --- | --- | --- | --- |
-| Clean head | `/tmp/llama-gfx906-head` | `/tmp/llama-gfx906-head/build/gfx906-vanilla` | `bin/llama-bench`, `bin/test-backend-ops`, `bin/llama-cli` |
-| Patched candidate | `/tmp/llama-gfx906-patched` | `/tmp/llama-gfx906-patched/build/gfx906-optimal` | `bin/llama-bench`, `bin/test-backend-ops`, `bin/llama-cli` |
-
-The patched tree has `vr/patches/current/gfx906-current-bigbang.patch` applied.
-The patch also appears through `vr/patches/optimal-gfx906.series` and
-`vr/patches/all-gfx906.series`.
-
-The build commands used the `vr/scripts` gfx906 helpers with:
+Build clean upstream and the current candidate from `571d0d540`:
 
 ```bash
-TARGETS="llama-bench test-backend-ops llama-cli"
-BUILD_JOBS=24
-GGML_VULKAN=OFF
-CMAKE_EXTRA_ARGS="-DGGML_CCACHE=OFF"
+TARGETS=llama-bench \
+GGML_VULKAN=OFF \
+CANDIDATE_BUILD="$PWD/build/gfx906-merge-review" \
+CMAKE_EXTRA_ARGS="-DGGML_CCACHE=OFF -DLLAMA_CURL=OFF -DLLAMA_BUILD_SERVER=OFF" \
+vr/scripts/build-gfx906-comparison.sh
 ```
 
-`GGML_CCACHE=OFF` was required because ccache tried to write through a
-read-only cache path. `GGML_VULKAN=OFF` avoids unrelated Vulkan compilation
-and keeps this comparison focused on ROCm/HIP.
+Current review outputs:
 
-The optional embedded UI asset download failed in the sandbox due DNS/network
-restriction. The builds continued with no embedded UI; that does not affect the
-benchmark binaries listed above.
+```text
+build/head-control/bin/llama-bench
+build/gfx906-merge-review/bin/llama-bench
+```
 
-## Shell setup
+Build only `llama-bench` for screening. Add `test-backend-ops` when focused
+correctness or the final gate is due.
+
+## Cheap correctness
+
+For Q4_K/Q8_0 matmul changes:
 
 ```bash
-HEAD=/tmp/llama-gfx906-head/build/gfx906-vanilla/bin
-PATCH=/tmp/llama-gfx906-patched/build/gfx906-optimal/bin
-
-MODEL_Q4K=/path/to/your/Q4_K_M.gguf
-MODEL_Q8=/path/to/your/Q8_0.gguf
+source vr/scripts/setup-therock-env.sh
+build/gfx906-merge-review/bin/test-backend-ops test \
+  -b ROCm0 -o MUL_MAT \
+  -p 'q4_0|q4_1|q4_K|q5_K|q6_K|q8_0' -j 1
 ```
 
-Replace the model paths with the actual benchmark models. A local search under
-`/home/raistlin` found only vocab GGUFs, not full model files.
+Use a narrower type or shape filter while iterating. Plain `MUL_MAT` does not
+exercise fused gate/value graph paths; test those separately before retaining
+a fusion change.
 
-## Operator smoke and perf checks
+Never accept a run that reports the ROCm backend as skipped. The reduced
+candidate passed 203 of 203 cases with the command above.
 
-Run correctness first on the patched tree:
+## Exact model-shape replay
+
+The built-in performance shapes are generic and do not match Qwen3.6-27B.
+Export the real PP and TG graph without loading weight data:
 
 ```bash
-"$PATCH/test-backend-ops" test -b ROCm0 -o MUL_MAT -p 'q4_K|q8_0' -j 1
+cmake --build build/head-control \
+  --target test-export-graph-ops test-backend-ops -j"$(nproc)"
+cmake --build build/gfx906-merge-review \
+  --target test-backend-ops -j"$(nproc)"
+
+MODEL="$HOME/.cache/huggingface/hub/models--unsloth--Qwen3.6-27B-MTP-GGUF/snapshots/ac393bc3d23fd5a929a85e2f33c7c4fd5be02d43/Qwen3.6-27B-UD-Q4_K_XL.gguf"
+OPS=/tmp/qwen36-ud-q4-k-xl-pp8192-ub512-ops.txt
+
+build/head-control/bin/test-export-graph-ops \
+  -m "$MODEL" -c 8192 -b 8192 -ub 512 -fa on \
+  -o "$OPS"
+
+for BUILD in build/head-control build/gfx906-merge-review; do
+  "$BUILD/bin/test-backend-ops" perf -b ROCm0 \
+    --test-file "$OPS" -o MUL_MAT \
+    -p 'q4_0|q4_1|q4_K|q5_K|q6_K|q8_0' \
+    --output csv
+done
 ```
 
-The CSV commands below are useful as support/path probes, but in the current
-`test-backend-ops` output they do not include timing columns:
+The checked export produced 57 unique PP operations, 48 unique TG operations,
+and 105 total. It preserves tensor types, dimensions, strides, and operation
+parameters. It deduplicates operations, so it does not preserve layer or call
+frequency. The exporter is CPU-only; `-ngl` has no effect.
+
+For PP8192, dense matmul runs at physical microbatch size `n=512`, not
+`n=8192`. Single-sequence TG uses `n=1`; context depth 8192 changes attention
+and KV work, not dense weight matrix shapes. Use `n=2/4/8` only for batched
+decode or parallel sequences.
+
+The TG reserve graph does not contain a populated depth-8192 KV cache. Replay
+is exact for dense `n=1` shapes, but it cannot measure the growing attention,
+KV, or graph-scheduling share at long context.
+
+The old Q4_K_M trace gives rough prioritization only: Q4_K MMQ 54.07 percent,
+Q6_K MMQ 19.80 percent, Q5_K MMQ 6.16 percent, and about 80 percent quantized
+matmul total. Do not use those shares as precise UD-Q4_K_XL Amdahl weights.
+Graph replay is a cheap rejection and attribution tool; one final target-model
+cell is required for operation frequency, long-context, and whole-graph effects.
+
+For the current PP regression, use four variants: upstream control, Q4_K-only,
+Q6_K-only, and the existing combined build. Replay both singleton types before
+another model load. Source-specific compile definitions should rebuild the
+affected MMQ instance; verify `compile_commands.json` rather than assuming the
+gate changed. Combine only singleton winners, replay that combination once,
+then pay for one UD-Q4_K_XL PP model cell.
+
+When refining the Q8_0 crossover, export the Q8_0 model at only `-ub 128`,
+`-ub 256`, and `-ub 512`. Run each PP shape in a separate process with:
 
 ```bash
-"$HEAD/test-backend-ops"  perf -b ROCm0 -o MUL_MAT -p 'q4_K|q8_0' --output csv > head-mulmat.csv
-"$PATCH/test-backend-ops" perf -b ROCm0 -o MUL_MAT -p 'q4_K|q8_0' --output csv > patch-mulmat.csv
+# Force rocBLAS for PP shapes above n=1.
+GGML_CUDA_GFX906_Q8_MMQ_MAX_NE11=1 \
+  build/gfx906-merge-review/bin/test-backend-ops perf \
+  -b ROCm0 --test-file "$OPS" -o MUL_MAT -p q8_0 --output csv
+
+# Force MMQ for the tested PP shapes.
+GGML_CUDA_GFX906_Q8_MMQ_MAX_NE11=1048576 \
+  build/gfx906-merge-review/bin/test-backend-ops perf \
+  -b ROCm0 --test-file "$OPS" -o MUL_MAT -p q8_0 --output csv
 ```
 
-Observed output from the first run:
+The threshold is read once per process. MMVQ dispatch still takes precedence
+for its small-column range. Tune from these exact boundary shapes instead of
+sweeping full-model prompt sizes.
 
-- The captured
-  `vr/bench-results/worktree-comparison-2026-07-13/head-mulmat.csv` and
-  `patch-mulmat.csv` files are identical.
-- Each file has 15 lines: one header plus 14 `MUL_MAT` support records.
-- Every row is `supported=1` with an empty `error_message`.
-- Covered shapes are `type_a=q8_0` and `type_a=q4_K`, `type_b=f32`,
-  `m=4096`, `k=14336`, and `n=1,2,3,4,5,8,512`.
-- No latency or throughput fields are present, so this pair does not measure a
-  head-versus-patch speed delta.
+## Minimal model screen
 
-Review validation on 2026-07-18 rebuilt the modified gfx906 HIP library and ran
-the focused Q4_K/Q8_0 ROCm0 `MUL_MAT` correctness filter. All 90 supported
-cases passed. This is pre-merge evidence and does not replace the complete
-post-merge gate.
-
-Use `llama-bench` for the primary performance comparison. If operator-level
-timing is needed, use console perf output or a profiling tool that exposes
-durations, then record the exact command and output format beside the result.
-
-## Primary model benchmarks
-
-Use `-fa on` for these runs because the current patch series includes
-FlashAttention vector changes and the target workload uses that path.
-
-Single GPU:
+Inspect the jobs, then run them:
 
 ```bash
-"$HEAD/llama-bench"  -m "$MODEL_Q4K" -ngl 99 -fa on -dev ROCm0 -sm none -p 8192,16384 -n 0,256 -b 8192 -ub 512 -r 5 -o jsonl > head-q4k-single.jsonl
-"$PATCH/llama-bench" -m "$MODEL_Q4K" -ngl 99 -fa on -dev ROCm0 -sm none -p 8192,16384 -n 0,256 -b 8192 -ub 512 -r 5 -o jsonl > patch-q4k-single.jsonl
-
-"$HEAD/llama-bench"  -m "$MODEL_Q8" -ngl 99 -fa on -dev ROCm0 -sm none -p 8192,16384 -n 0,256 -b 8192 -ub 512 -r 5 -o jsonl > head-q8-single.jsonl
-"$PATCH/llama-bench" -m "$MODEL_Q8" -ngl 99 -fa on -dev ROCm0 -sm none -p 8192,16384 -n 0,256 -b 8192 -ub 512 -r 5 -o jsonl > patch-q8-single.jsonl
+vr/scripts/bench-head.sh --dry-run
+vr/scripts/bench-head.sh
 ```
 
-Dual GPU:
+Current defaults:
+
+- UD-Q4_K_XL on ROCm0 and Q8_0 on ROCm0/ROCm1;
+- pp8192;
+- tg128 at depth 8192;
+- control followed by candidate;
+- one timed repetition with built-in warmup.
+
+This is a cheap core screen, not the production workload definition. For a
+frozen candidate, add one incremental prompt size representative of tool
+turns and one TG depth near the longest production context that fits. Do not
+sweep many contexts.
+
+Use a 55 C edge-temperature gate and explicit matched build directories:
 
 ```bash
-"$HEAD/llama-bench"  -m "$MODEL_Q4K" -ngl 99 -fa on -dev ROCm0/ROCm1 -sm tensor -ts 1/1 -p 8192,16384 -n 0,256 -b 8192 -ub 512 -r 5 -o jsonl > head-q4k-dual.jsonl
-"$PATCH/llama-bench" -m "$MODEL_Q4K" -ngl 99 -fa on -dev ROCm0/ROCm1 -sm tensor -ts 1/1 -p 8192,16384 -n 0,256 -b 8192 -ub 512 -r 5 -o jsonl > patch-q4k-dual.jsonl
-
-"$HEAD/llama-bench"  -m "$MODEL_Q8" -ngl 99 -fa on -dev ROCm0/ROCm1 -sm tensor -ts 1/1 -p 8192,16384 -n 0,256 -b 8192 -ub 512 -r 5 -o jsonl > head-q8-dual.jsonl
-"$PATCH/llama-bench" -m "$MODEL_Q8" -ngl 99 -fa on -dev ROCm0/ROCm1 -sm tensor -ts 1/1 -p 8192,16384 -n 0,256 -b 8192 -ub 512 -r 5 -o jsonl > patch-q8-dual.jsonl
+COOL_TEMP=55 REPS=1 \
+CONTROL_BIN_DIR="$PWD/build/head-control/bin" \
+CANDIDATE_BIN_DIR="$PWD/build/gfx906-merge-review/bin" \
+vr/scripts/bench-head.sh
 ```
 
-Short-context baseline:
+Run only the path an edit can affect:
 
 ```bash
-"$HEAD/llama-bench"  -m "$MODEL_Q4K" -ngl 99 -fa on -dev ROCm0 -sm none -p 128 -n 256 -r 5 -o jsonl > head-q4k-short.jsonl
-"$PATCH/llama-bench" -m "$MODEL_Q4K" -ngl 99 -fa on -dev ROCm0 -sm none -p 128 -n 256 -r 5 -o jsonl > patch-q4k-short.jsonl
+# MMQ or PP dispatch
+CONFIGS=ud_q4_k_xl_single MODES=pp vr/scripts/bench-head.sh --dry-run
+
+# MMVQ
+CONFIGS=ud_q4_k_xl_single MODES=tg vr/scripts/bench-head.sh --dry-run
+
+# Q8_0 MMVQ
+CONFIGS=q8_0_dual MODES=tg vr/scripts/bench-head.sh --dry-run
 ```
 
-Interpret `-n 0` rows as prompt-processing evidence and `-n 256` rows as
-generation evidence after the requested prompt length.
+PP selects MMQ or rocBLAS at larger `n`; single-sequence TG selects MMVQ at
+`n=1`. Separate optimized implementations are sensible. Test both PP and TG
+only when shared quantization, vec-dot helpers, layouts, or crossover dispatch
+change.
 
-## Ad hoc CLI observation
-
-One manual Q8_0 dual-GPU `llama-cli` run used:
+For the Q4_0/Q4_1 format question, first verify that the older files match the
+current model revision. Export each graph and replay it on the candidate build.
+These are different quantized models, so a control/candidate A/B is not the
+relevant comparison. Load only a materially different candidate:
 
 ```bash
-BIN -hf unsloth/Qwen3.6-27B-MTP-GGUF:Q8_0 -ngl 99 -fa on -np 3 -b 2048 \
-  --ubatch-size 2048 --device rocm0,rocm1 -f flake.nix -st -c 200000 \
-  --mlock -dio -sm tensor --spec-type draft-mtp --spec-draft-n-max 4 --temp 0
+BUILDS=candidate REPS=1 COOL_TEMP=55 \
+CONFIGS="q4_0_single q4_1_single" MODES="pp tg" \
+CANDIDATE_BIN_DIR="$PWD/build/gfx906-merge-review/bin" \
+vr/scripts/bench-head.sh
 ```
 
-with `BIN` replaced by each worktree's `llama-cli`.
+Report the PP and TG deltas without a fixed threshold. Quantization quality,
+memory use, and the magnitude of the speed difference determine whether the
+UD-Q4_K_XL accuracy advantage is worth its cost.
 
-| Build | Prompt | Generation | Classification |
-| --- | ---: | ---: | --- |
-| Patched | 244.8 t/s | 44.7 t/s | Triage-only |
-| Head | 192.6 t/s | 44.6 t/s | Triage-only |
+## Production split mode
 
-This is a strong Q8_0 prompt-processing signal and a neutral generation signal.
-Do not treat it as an accepted result because it is one manual ordered pair and
-uses speculative MTP, three parallel sequences, tensor split, and a real CLI
-prompt rather than the controlled `llama-bench` matrix above.
+Use `-sm tensor`; it is already established as fastest on this MI60+MI50
+system. Do not spend time resweeping layer, row, main-GPU placement, or basic
+topology.
 
-## Result hygiene
+A later experiment may be worthwhile only if tensor mode can assign layers or
+shards asymmetrically while preserving its execution model. Verify what
+`--tensor-split` changes before treating it as layer placement, and test one or
+two justified ratios rather than a broad sweep. The current Q8_0 result files
+used layer mode, so confirm the final candidate once in tensor mode.
 
-- Keep head and patched commands identical except for the binary path.
-- Run alternating invocations when a delta is near the noise floor.
-- Record `rocm-smi` clocks, power limits, temperatures, and which physical card
-  maps to `ROCm0` and `ROCm1` beside promoted results.
-- Do not classify the `test-backend-ops --output csv` files above as
-  performance evidence unless a timing-bearing output is also captured.
+## Resolve only uncertain results
 
-## Status after upstream merge
+Do not run three repetitions by default. A large result that agrees with
+operator data or prior model evidence can be accepted with a one-sample/order
+caveat. For a borderline result or a conflict with prior evidence, run one
+reversed sample of only the affected cell:
 
-The private branch was merged with upstream commit `571d0d540` on 2026-07-18.
-Upstream's MMQ refactor moved the Q4_K precompute into
-`mmq-load-tiles.cuh` and `mmq-vec-dot.cuh`; the Q4_K/Q6_K launch bounds now use
-the RDNA2/GCN configuration table.
+```bash
+COOL_TEMP=55 BUILDS="candidate control" REPS=1 \
+CONFIGS=ud_q4_k_xl_single MODES=tg \
+CONTROL_BIN_DIR="$PWD/build/head-control/bin" \
+CANDIDATE_BIN_DIR="$PWD/build/gfx906-merge-review/bin" \
+vr/scripts/bench-head.sh
+```
 
-Completed after the merge:
+Accept only when:
 
-- Fresh exact-gfx906 ROCm build with every private compile gate verified.
-- Complete ROCm0 `MUL_MAT` correctness gate: 1134 of 1134 passed.
-- Current bigbang patch regenerated against `571d0d540`.
-- Both series files resolve to the current patch, which applies cleanly to a
-  fresh archive of `571d0d540`.
+- the delta exceeds within-build spread;
+- exact-shape operator data or prior model evidence supports the direction;
+- the executed kernel path is known.
 
-Remaining next steps:
+For a small win, retain it when focused correctness passes, exact-shape
+operator replay repeats, and resource use does not worsen. If its full-model
+effect is below benchmark noise, record it as operator-proven with unresolved
+model impact instead of paying for repeated model runs. If a reversed run
+changes the conclusion, classify the result unresolved. Add clock, power, and
+temperature capture only then; do not add prompt sizes to average away drift.
 
-1. Verify the fused Q4_K and Q8_0 paths directly; the operator gate does not
-   exercise value-plus-gate fusion.
-2. Rebuild a clean-head comparison worktree at `571d0d540`.
-3. Run the controlled Q4_K and Q8_0 `llama-bench` matrix above in alternating
-   order and record telemetry with each result.
+## Wall-clock order
+
+Use this order and stop at the first failed gate:
+
+1. Inspect the source diff and active compile definitions.
+2. Compile only changed targets and inspect VGPR, SGPR, LDS, and scratch.
+3. Run focused correctness for changed types and representative shapes.
+4. Replay exported operations for only the changed type/path.
+5. Run one full-model cell only if weighted replay predicts a useful gain.
+6. Run one reversed affected cell only when the evidence is borderline or
+   contradictory; otherwise record the sample/order caveat and proceed.
+7. Run the full ROCm0 `MUL_MAT` gate once after the candidate is frozen.
+8. Run one production split and long-context scenario before calling the set
+   complete.
+
+Do not sweep contexts or matrix sizes. Batch independent operator cases in one
+`test-backend-ops` invocation. Keep upstream `-fa on` for graph export and all
+model runs; disabling custom FA code does not mean benchmarking with FA off.
+The 55 C gate controls gross thermal bias without the long waits caused by the
+old 45 C gate.
+
+## Operator attribution
+
+Use an operator benchmark before a model run when the code changes one kernel
+specialization. Select the dominant real shape and one dispatch-boundary shape.
+Do not sweep every matrix size.
+
+For PP resource work, record compiler output before using the GPU:
+
+- VGPR and SGPR per lane;
+- LDS per workgroup;
+- scratch bytes;
+- workgroup size;
+- expected waves per SIMD.
+
+For TG loader work, use one counter run only when end-to-end data cannot tell
+whether the kernel is latency or bandwidth limited. Record achieved HBM
+bandwidth, memory busy/stall, VALU busy, and occupancy.
+
+Use rooflines to choose work, not to declare a bottleneck from format size.
+For TG, compare effective streamed bytes per token times tokens/s with measured
+HBM traffic/bandwidth. For PP, compare measured operation throughput with both
+compute and memory ceilings. If a small optimization underperforms its Amdahl
+prediction, investigate path selection, actual operation share, launch count,
+dependencies, clocks, and split synchronization before discarding the idea.
+
+## Final gate
+
+After the candidate set is frozen:
+
+```bash
+build/gfx906-merge-review/bin/test-backend-ops -b ROCm0 -o MUL_MAT
+```
+
+Then run one affected model cell and one production long-context/split scenario
+once more. Do not run the full matrix gate after each edit.
+
+## Result record
+
+Store new output under:
+
+```text
+vr/bench-results/<experiment>-<date>/
+```
+
+Include:
+
+- control and candidate commit IDs;
+- exact build flags and compile definitions;
+- binary paths;
+- model path and hash;
+- GPU identity;
+- commands and raw output;
+- resource report or profiler CSV when used;
+- one short conclusion: retain, reject, or unresolved.
+
+Do not call support-only CSV from `test-backend-ops` a performance result when
+it lacks timing columns.
