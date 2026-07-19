@@ -1,0 +1,33 @@
+diff --git a/ggml/src/ggml-cuda/vecdotq.cuh b/ggml/src/ggml-cuda/vecdotq.cuh
+index 37f20fd9a..77d801e0b 100644
+--- a/ggml/src/ggml-cuda/vecdotq.cuh
++++ b/ggml/src/ggml-cuda/vecdotq.cuh
+@@ -237,7 +237,14 @@ template <int vdr> static __device__ __forceinline__ float vec_dot_q5_1_q8_1_imp
+     return sumi*d5d8 + m5s8 / (QI5_1 / vdr);
+ }
+ 
++#if defined(GGML_CUDA_MMVQ_Q8_0_GFX906_WIDE_VDR)
++// gfx906: four consecutive ints coalesce into one 16 byte global_load_dwordx4, the widest load
++// the Vega20 memory path issues. Token generation is bandwidth bound, so the wider load is worth
++// more than the two threads per block that stop cooperating (QI8_0/vdr drops from 4 to 2).
++#define VDR_Q8_0_Q8_1_MMVQ 4
++#else
+ #define VDR_Q8_0_Q8_1_MMVQ 2
++#endif // GGML_CUDA_MMVQ_Q8_0_GFX906_WIDE_VDR
+ #define VDR_Q8_0_Q8_1_MMQ 8
+ 
+ template <typename T, int vdr> static __device__ __forceinline__ T vec_dot_q8_0_q8_1_impl(
+diff --git a/ggml/src/ggml-hip/CMakeLists.txt b/ggml/src/ggml-hip/CMakeLists.txt
+index 61ae5b3ba..cc95e64e0 100644
+--- a/ggml/src/ggml-hip/CMakeLists.txt
++++ b/ggml/src/ggml-hip/CMakeLists.txt
+@@ -76,7 +76,8 @@ list(LENGTH GGML_HIP_COMPILE_TARGETS GGML_HIP_COMPILE_TARGET_COUNT)
+ if (GGML_HIP_COMPILE_TARGET_COUNT EQUAL 1 AND "gfx906" IN_LIST GGML_HIP_COMPILE_TARGETS)
+     set_source_files_properties(
+         "../ggml-cuda/mmvq.cu"
+-        PROPERTIES COMPILE_DEFINITIONS "GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES;GGML_CUDA_MMVQ_Q4K_GFX906_PAIRED_FUSION")
++        PROPERTIES COMPILE_DEFINITIONS
++            "GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES;GGML_CUDA_MMVQ_Q4K_GFX906_PAIRED_FUSION;GGML_CUDA_MMVQ_Q8_0_GFX906_WIDE_VDR")
+     set_source_files_properties(
+         "../ggml-cuda/template-instances/mmq-instance-q4_k.cu"
+         PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE)

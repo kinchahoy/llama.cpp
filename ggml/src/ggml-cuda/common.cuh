@@ -430,6 +430,61 @@ struct ggml_cuda_unroll<1> {
     }
 };
 
+#if defined(GGML_USE_HIP) && defined(__gfx906__)
+#define GFX906_DPP_QUAD_PERM_XOR1  0xb1
+#define GFX906_DPP_QUAD_PERM_XOR2  0x4e
+#define GFX906_DPP_ROW_MIRROR      0x140
+#define GFX906_DPP_ROW_HALF_MIRROR 0x141
+
+template <int dpp_ctrl>
+static __device__ __forceinline__ float gfx906_dpp_mov(float x) {
+    const int dst = __builtin_amdgcn_update_dpp(0, __float_as_int(x), dpp_ctrl, 0xf, 0xf, true);
+    return __int_as_float(dst);
+}
+#endif // defined(GGML_USE_HIP) && defined(__gfx906__)
+
+template <int width>
+static __device__ __forceinline__ float gfx906_dpp_reduce_max(float x) {
+    static_assert(width == 4 || width == 8 || width == 16, "DPP reduction must stay inside one row");
+#if defined(GGML_USE_HIP) && defined(__gfx906__)
+    x = fmaxf(x, gfx906_dpp_mov<GFX906_DPP_QUAD_PERM_XOR1>(x));
+    x = fmaxf(x, gfx906_dpp_mov<GFX906_DPP_QUAD_PERM_XOR2>(x));
+    if (width >= 8) {
+        x = fmaxf(x, gfx906_dpp_mov<GFX906_DPP_ROW_HALF_MIRROR>(x));
+    }
+    if (width >= 16) {
+        x = fmaxf(x, gfx906_dpp_mov<GFX906_DPP_ROW_MIRROR>(x));
+    }
+#else
+#pragma unroll
+    for (int offset = width/2; offset > 0; offset >>= 1) {
+        x = fmaxf(x, __shfl_xor_sync(0xFFFFFFFF, x, offset, WARP_SIZE));
+    }
+#endif // defined(GGML_USE_HIP) && defined(__gfx906__)
+    return x;
+}
+
+template <int width>
+static __device__ __forceinline__ float gfx906_dpp_reduce_sum(float x) {
+    static_assert(width == 4 || width == 8 || width == 16, "DPP reduction must stay inside one row");
+#if defined(GGML_USE_HIP) && defined(__gfx906__)
+    x += gfx906_dpp_mov<GFX906_DPP_QUAD_PERM_XOR1>(x);
+    x += gfx906_dpp_mov<GFX906_DPP_QUAD_PERM_XOR2>(x);
+    if (width >= 8) {
+        x += gfx906_dpp_mov<GFX906_DPP_ROW_HALF_MIRROR>(x);
+    }
+    if (width >= 16) {
+        x += gfx906_dpp_mov<GFX906_DPP_ROW_MIRROR>(x);
+    }
+#else
+#pragma unroll
+    for (int offset = width/2; offset > 0; offset >>= 1) {
+        x += __shfl_xor_sync(0xFFFFFFFF, x, offset, WARP_SIZE);
+    }
+#endif // defined(GGML_USE_HIP) && defined(__gfx906__)
+    return x;
+}
+
 template<int width = WARP_SIZE>
 static __device__ __forceinline__ int warp_reduce_sum(int x) {
 #if !defined(GGML_USE_HIP) && __CUDA_ARCH__ >= GGML_CUDA_CC_AMPERE
@@ -445,6 +500,11 @@ static __device__ __forceinline__ int warp_reduce_sum(int x) {
 
 template<int width = WARP_SIZE>
 static __device__ __forceinline__ float warp_reduce_sum(float x) {
+#if defined(GGML_USE_HIP) && defined(__gfx906__)
+    if constexpr (width == 4 || width == 8 || width == 16) {
+        return gfx906_dpp_reduce_sum<width>(x);
+    }
+#endif // defined(GGML_USE_HIP) && defined(__gfx906__)
 #pragma unroll
     for (int offset = width/2; offset > 0; offset >>= 1) {
         x += __shfl_xor_sync(0xffffffff, x, offset, width);
@@ -505,6 +565,11 @@ static __device__ __forceinline__ int warp_reduce_any(int x) {
 
 template<int width = WARP_SIZE>
 static __device__ __forceinline__ float warp_reduce_max(float x) {
+#if defined(GGML_USE_HIP) && defined(__gfx906__)
+    if constexpr (width == 4 || width == 8 || width == 16) {
+        return gfx906_dpp_reduce_max<width>(x);
+    }
+#endif // defined(GGML_USE_HIP) && defined(__gfx906__)
 #pragma unroll
     for (int offset = width/2; offset > 0; offset >>= 1) {
         x = fmaxf(x, __shfl_xor_sync(0xffffffff, x, offset, width));
@@ -1642,4 +1707,3 @@ static __inline__ void ggml_cuda_kernel_launch(Kernel kernel, const ggml_cuda_ke
     kernel<<<launch_params.block_nums, launch_params.block_dims, launch_params.shmem, launch_params.stream>>>(std::forward<Args>(args)... );
     CUDA_CHECK(cudaGetLastError());
 }
-

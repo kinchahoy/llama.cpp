@@ -237,7 +237,12 @@ template <int vdr> static __device__ __forceinline__ float vec_dot_q5_1_q8_1_imp
     return sumi*d5d8 + m5s8 / (QI5_1 / vdr);
 }
 
+#if defined(GGML_CUDA_MMVQ_Q8_0_GFX906_WIDE_VDR)
+// Use the widest Vega20 global load for bandwidth-bound token generation.
+#define VDR_Q8_0_Q8_1_MMVQ 4
+#else
 #define VDR_Q8_0_Q8_1_MMVQ 2
+#endif // GGML_CUDA_MMVQ_Q8_0_GFX906_WIDE_VDR
 #define VDR_Q8_0_Q8_1_MMQ 8
 
 template <typename T, int vdr> static __device__ __forceinline__ T vec_dot_q8_0_q8_1_impl(
@@ -504,7 +509,11 @@ static __device__ __forceinline__ float vec_dot_q3_K_q8_1_impl_mmq(
 // contiguous v/x values
 static __device__ __forceinline__ float vec_dot_q4_K_q8_1_impl_vmmq(
     const int * __restrict__ v, const int * __restrict__ u, const uint8_t * __restrict__ sc,
+#if defined(GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES)
+    const uint8_t * __restrict__ m, const half2 & dm4, const float2 * __restrict__ ds8) {
+#else
     const uint8_t * __restrict__ m, const half2 & dm4, const float * __restrict__ d8) {
+#endif
 
     float sumf_d = 0.0f;
     float sumf_m = 0.0f;
@@ -515,10 +524,15 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1_impl_vmmq(
         const int v1i = (v[1] >> (4*i)) & 0x0F0F0F0F;
 
         const int dot1 = ggml_cuda_dp4a(v1i, u[2*i+1], ggml_cuda_dp4a(v0i, u[2*i+0], 0)); // SIMD dot product
+#if defined(GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES)
+        sumf_d += ds8[i].x * (dot1 * sc[i]);
+        sumf_m += 0.25f * ds8[i].y * m[i];
+#else
         const int dot2 = ggml_cuda_dp4a(0x01010101, u[2*i+1], ggml_cuda_dp4a(0x01010101, u[2*i+0], 0)); // sum of u
 
         sumf_d += d8[i] * (dot1 * sc[i]);
         sumf_m += d8[i] * (dot2 * m[i]);  // multiply constant part of q4_K with sum of q8_1 values
+#endif
     }
 
     const float2 dm4f = __half22float2(dm4);
@@ -811,6 +825,33 @@ static __device__ __forceinline__ float vec_dot_q8_0_q8_1(
     return vec_dot_q8_0_q8_1_impl<float, VDR_Q8_0_Q8_1_MMVQ>(v, u, bq8_0->d, __low2half(bq8_1->ds));
 }
 
+#if defined(GGML_CUDA_MMVQ_Q8_0_GFX906_PAIRED_FUSION)
+static __device__ __forceinline__ void vec_dot_q8_0_q8_1_gfx906_paired(
+    const void * __restrict__ vbq_x, const void * __restrict__ vbq_gate,
+    const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs,
+    float * __restrict__ sum_x, float * __restrict__ sum_gate) {
+
+    const block_q8_0 * bq8_0_x    = (const block_q8_0 *) vbq_x    + kbx;
+    const block_q8_0 * bq8_0_gate = (const block_q8_0 *) vbq_gate + kbx;
+
+    int v_x[VDR_Q8_0_Q8_1_MMVQ];
+    int v_gate[VDR_Q8_0_Q8_1_MMVQ];
+    int u[VDR_Q8_0_Q8_1_MMVQ];
+
+#pragma unroll
+    for (int i = 0; i < VDR_Q8_0_Q8_1_MMVQ; ++i) {
+        v_x[i]    = get_int_b2(bq8_0_x->qs,    iqs + i);
+        v_gate[i] = get_int_b2(bq8_0_gate->qs, iqs + i);
+        u[i]      = get_int_b4(bq8_1->qs, iqs + i);
+    }
+
+    const half d8_1 = __low2half(bq8_1->ds);
+
+    *sum_x    = vec_dot_q8_0_q8_1_impl<float, VDR_Q8_0_Q8_1_MMVQ>(v_x,    u, bq8_0_x->d,    d8_1);
+    *sum_gate = vec_dot_q8_0_q8_1_impl<float, VDR_Q8_0_Q8_1_MMVQ>(v_gate, u, bq8_0_gate->d, d8_1);
+}
+#endif // GGML_CUDA_MMVQ_Q8_0_GFX906_PAIRED_FUSION
+
 static __device__ __forceinline__ float vec_dot_q2_K_q8_1(
     const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
 
@@ -868,7 +909,11 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
 
     int    v[2];
     int    u[2*QR4_K];
+#if defined(GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES)
+    float2 ds8[QR4_K];
+#else
     float d8[QR4_K];
+#endif
 
     // iqs is in 0,2..30. bq8_offset = iqs/4 -> bq8_offset = 0, 2, 4, 6
     const int bq8_offset = QR4_K * ((iqs/2) / (QI8_1/2));
@@ -885,6 +930,21 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
     const uint16_t * scales = (const uint16_t *)bq4_K->scales;
     uint16_t aux[2];
     const int j = bq8_offset/2;
+#if defined(GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES)
+    const int j01 = j & 1;
+    const uint16_t s0 = scales[j01 + 0];
+    const uint16_t s2 = scales[j01 + 2];
+    const uint16_t s4 = scales[j01 + 4];
+    const uint16_t high_mask = -(j >> 1);
+
+    const uint16_t low0  = s0 & 0x3f3f;
+    const uint16_t low1  = s2 & 0x3f3f;
+    const uint16_t high0 = (s4 & 0x0f0f) | ((s0 & 0xc0c0) >> 2);
+    const uint16_t high1 = ((s4 >> 4) & 0x0f0f) | ((s2 & 0xc0c0) >> 2);
+
+    aux[0] = (low0 & ~high_mask) | (high0 & high_mask);
+    aux[1] = (low1 & ~high_mask) | (high1 & high_mask);
+#else
     if (j < 2) {
         aux[0] = scales[j+0] & 0x3f3f;
         aux[1] = scales[j+2] & 0x3f3f;
@@ -892,20 +952,88 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
         aux[0] = ((scales[j+2] >> 0) & 0x0f0f) | ((scales[j-2] & 0xc0c0) >> 2);
         aux[1] = ((scales[j+2] >> 4) & 0x0f0f) | ((scales[j-0] & 0xc0c0) >> 2);
     }
+#endif
     const uint8_t * sc = (const uint8_t *)aux;
     const uint8_t * m  = sc + 2;
 
     for (int i = 0; i < QR4_K; ++i) {
         const block_q8_1 * bq8i = bq8_1 + bq8_offset + i;
+#if defined(GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES)
+        ds8[i] = __half22float2(bq8i->ds);
+#else
         d8[i] = __low2float(bq8i->ds);
+#endif
 
         const int * q8 = (const int *)bq8i->qs + ((iqs/2)%4);
         u[2*i+0] = q8[0];
         u[2*i+1] = q8[4];
     }
 
+#if defined(GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES)
+    return vec_dot_q4_K_q8_1_impl_vmmq(v, u, sc, m, bq4_K->dm, ds8);
+#else
     return vec_dot_q4_K_q8_1_impl_vmmq(v, u, sc, m, bq4_K->dm, d8);
+#endif
 }
+
+#if defined(GGML_CUDA_MMVQ_Q4K_GFX906_PAIRED_FUSION)
+// Decode one Q4_K block while reusing an already-loaded Q8_1 activation.
+static __device__ __forceinline__ float vec_dot_q4_K_q8_1_gfx906_from_u(
+    const block_q4_K * __restrict__ bq4_K, const int bq8_offset, const int & iqs,
+    const int * __restrict__ u, const float2 * __restrict__ ds8) {
+
+    int v[2];
+    const int * q4 = (const int *)(bq4_K->qs + 16 * bq8_offset + 4 * ((iqs/2)%4));
+    v[0] = q4[0];
+    v[1] = q4[4];
+
+    const uint16_t * scales = (const uint16_t *)bq4_K->scales;
+    uint16_t aux[2];
+    const int j = bq8_offset/2;
+    const int j01 = j & 1;
+    const uint16_t s0 = scales[j01 + 0];
+    const uint16_t s2 = scales[j01 + 2];
+    const uint16_t s4 = scales[j01 + 4];
+    const uint16_t high_mask = -(j >> 1);
+
+    const uint16_t low0  = s0 & 0x3f3f;
+    const uint16_t low1  = s2 & 0x3f3f;
+    const uint16_t high0 = (s4 & 0x0f0f) | ((s0 & 0xc0c0) >> 2);
+    const uint16_t high1 = ((s4 >> 4) & 0x0f0f) | ((s2 & 0xc0c0) >> 2);
+
+    aux[0] = (low0 & ~high_mask) | (high0 & high_mask);
+    aux[1] = (low1 & ~high_mask) | (high1 & high_mask);
+
+    const uint8_t * sc = (const uint8_t *)aux;
+    const uint8_t * m  = sc + 2;
+
+    return vec_dot_q4_K_q8_1_impl_vmmq(v, u, sc, m, bq4_K->dm, ds8);
+}
+
+// Reuse one Q8_1 activation load for the paired value and gate products.
+static __device__ __forceinline__ void vec_dot_q4_K_q8_1_gfx906_paired(
+    const void * __restrict__ vbq_x, const void * __restrict__ vbq_gate,
+    const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs,
+    float * __restrict__ sum_x, float * __restrict__ sum_gate) {
+
+    const int bq8_offset = QR4_K * ((iqs/2) / (QI8_1/2));
+
+    int    u[2*QR4_K];
+    float2 ds8[QR4_K];
+
+    for (int i = 0; i < QR4_K; ++i) {
+        const block_q8_1 * bq8i = bq8_1 + bq8_offset + i;
+        ds8[i] = __half22float2(bq8i->ds);
+
+        const int * q8 = (const int *)bq8i->qs + ((iqs/2)%4);
+        u[2*i+0] = q8[0];
+        u[2*i+1] = q8[4];
+    }
+
+    *sum_x    = vec_dot_q4_K_q8_1_gfx906_from_u((const block_q4_K *) vbq_x    + kbx, bq8_offset, iqs, u, ds8);
+    *sum_gate = vec_dot_q4_K_q8_1_gfx906_from_u((const block_q4_K *) vbq_gate + kbx, bq8_offset, iqs, u, ds8);
+}
+#endif // GGML_CUDA_MMVQ_Q4K_GFX906_PAIRED_FUSION
 
 static __device__ __forceinline__ float vec_dot_q5_K_q8_1(
     const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {

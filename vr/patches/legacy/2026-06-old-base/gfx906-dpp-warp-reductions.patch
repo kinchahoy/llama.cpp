@@ -1,0 +1,82 @@
+diff --git a/ggml/src/ggml-cuda/common.cuh b/ggml/src/ggml-cuda/common.cuh
+index 290dc4aff..c8cf8b423 100644
+--- a/ggml/src/ggml-cuda/common.cuh
++++ b/ggml/src/ggml-cuda/common.cuh
+@@ -430,6 +430,77 @@ struct ggml_cuda_unroll<1> {
+     }
+ };
+ 
++// Sub-wavefront reductions over a group of lanes that fits inside one 16 lane DPP row.
++//
++// On GCN __shfl_xor_sync lowers to ds_bpermute_b32, which round-trips the value through the
++// LDS crossbar. DPP instead permutes the operand inside the VALU, so one reduction step is a
++// single VALU instruction and costs no LDS bandwidth.
++//
++// DPP has no lane-XOR mode, so the XOR butterfly is replaced by permutations that are
++// equivalent for an associative and commutative reduction, in the sense that every
++// participating lane still ends up holding the reduced value:
++//   width  4: two quad_perm swaps fold the quad together.
++//   width  8: the quad is uniform after the swaps, so row_half_mirror (lane i reads 7-i within
++//             each group of 8) reaches the other quad and folds the two quads together.
++//   width 16: likewise row_mirror (lane i reads 15-i within the row) folds the two halves.
++//
++// bound_ctrl=true makes a read from an inactive lane return 0. Callers must therefore use 0 as
++// the identity of the reduction, which holds for the sum and the non-negative amax below.
++#if defined(GGML_USE_HIP) && defined(__gfx906__)
++#define GFX906_DPP_QUAD_PERM_XOR1  0xb1  // {1,0,3,2}
++#define GFX906_DPP_QUAD_PERM_XOR2  0x4e  // {2,3,0,1}
++#define GFX906_DPP_ROW_MIRROR      0x140
++#define GFX906_DPP_ROW_HALF_MIRROR 0x141
++
++template <int dpp_ctrl>
++static __device__ __forceinline__ float gfx906_dpp_mov(float x) {
++    const int dst = __builtin_amdgcn_update_dpp(0, __float_as_int(x), dpp_ctrl, 0xf, 0xf, true);
++    return __int_as_float(dst);
++}
++#endif // defined(GGML_USE_HIP) && defined(__gfx906__)
++
++template <int width>
++static __device__ __forceinline__ float gfx906_dpp_reduce_max(float x) {
++    static_assert(width == 4 || width == 8 || width == 16, "DPP reduction must stay inside one row");
++#if defined(GGML_USE_HIP) && defined(__gfx906__)
++    x = fmaxf(x, gfx906_dpp_mov<GFX906_DPP_QUAD_PERM_XOR1>(x));
++    x = fmaxf(x, gfx906_dpp_mov<GFX906_DPP_QUAD_PERM_XOR2>(x));
++    if (width >= 8) {
++        x = fmaxf(x, gfx906_dpp_mov<GFX906_DPP_ROW_HALF_MIRROR>(x));
++    }
++    if (width >= 16) {
++        x = fmaxf(x, gfx906_dpp_mov<GFX906_DPP_ROW_MIRROR>(x));
++    }
++#else
++#pragma unroll
++    for (int offset = width/2; offset > 0; offset >>= 1) {
++        x = fmaxf(x, __shfl_xor_sync(0xFFFFFFFF, x, offset, WARP_SIZE));
++    }
++#endif // defined(GGML_USE_HIP) && defined(__gfx906__)
++    return x;
++}
++
++template <int width>
++static __device__ __forceinline__ float gfx906_dpp_reduce_sum(float x) {
++    static_assert(width == 4 || width == 8 || width == 16, "DPP reduction must stay inside one row");
++#if defined(GGML_USE_HIP) && defined(__gfx906__)
++    x += gfx906_dpp_mov<GFX906_DPP_QUAD_PERM_XOR1>(x);
++    x += gfx906_dpp_mov<GFX906_DPP_QUAD_PERM_XOR2>(x);
++    if (width >= 8) {
++        x += gfx906_dpp_mov<GFX906_DPP_ROW_HALF_MIRROR>(x);
++    }
++    if (width >= 16) {
++        x += gfx906_dpp_mov<GFX906_DPP_ROW_MIRROR>(x);
++    }
++#else
++#pragma unroll
++    for (int offset = width/2; offset > 0; offset >>= 1) {
++        x += __shfl_xor_sync(0xFFFFFFFF, x, offset, WARP_SIZE);
++    }
++#endif // defined(GGML_USE_HIP) && defined(__gfx906__)
++    return x;
++}
++
+ template<int width = WARP_SIZE>
+ static __device__ __forceinline__ int warp_reduce_sum(int x) {
+ #if !defined(GGML_USE_HIP) && __CUDA_ARCH__ >= GGML_CUDA_CC_AMPERE

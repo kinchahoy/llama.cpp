@@ -599,6 +599,34 @@ static __global__ void mul_mat_vec_q(
         for (int j = 0; j < ncols_dst; ++j) {
 #pragma unroll
             for (int i = 0; i < rows_per_cuda_block; ++i) {
+#if defined(GGML_CUDA_MMVQ_Q8_0_GFX906_PAIRED_FUSION)
+                if constexpr (type == GGML_TYPE_Q8_0 && ncols_dst == 1 && has_fusion) {
+                    if (use_gate) {
+                        float sum_x    = 0.0f;
+                        float sum_gate = 0.0f;
+                        vec_dot_q8_0_q8_1_gfx906_paired(
+                            vx, vgate, &y[j*stride_col_y + kby],
+                            kbx_offset + i*stride_row_x + kbx, kqs, &sum_x, &sum_gate);
+                        tmp[j][i]      += sum_x;
+                        tmp_gate[j][i] += sum_gate;
+                        continue;
+                    }
+                }
+#endif // GGML_CUDA_MMVQ_Q8_0_GFX906_PAIRED_FUSION
+#if defined(GGML_CUDA_MMVQ_Q4K_GFX906_PAIRED_FUSION)
+                if constexpr (type == GGML_TYPE_Q4_K && ncols_dst == 1 && has_fusion) {
+                    if (use_gate) {
+                        float sum_x    = 0.0f;
+                        float sum_gate = 0.0f;
+                        vec_dot_q4_K_q8_1_gfx906_paired(
+                            vx, vgate, &y[j*stride_col_y + kby],
+                            kbx_offset + i*stride_row_x + kbx, kqs, &sum_x, &sum_gate);
+                        tmp[j][i]      += sum_x;
+                        tmp_gate[j][i] += sum_gate;
+                        continue;
+                    }
+                }
+#endif // GGML_CUDA_MMVQ_Q4K_GFX906_PAIRED_FUSION
                 tmp[j][i] += vec_dot_q_cuda(
                     vx, &y[j*stride_col_y + kby], kbx_offset + i*stride_row_x + kbx, kqs);
                 if constexpr (has_fusion) {

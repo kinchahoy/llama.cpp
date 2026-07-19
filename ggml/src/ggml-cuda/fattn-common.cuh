@@ -345,11 +345,16 @@ static __device__ __forceinline__ void quantize_q8_1_to_shared(
         amax = fmaxf(amax, fabsf(vals[l]));
         sum += vals[l];
     }
+#if defined(GGML_CUDA_FATTN_VEC_GFX906_DPP_Q8_1)
+    amax = gfx906_dpp_reduce_max<QI8_1>(amax);
+    sum  = gfx906_dpp_reduce_sum<QI8_1>(sum);
+#else
 #pragma unroll
     for (int mask = QI8_1/2; mask > 0; mask >>= 1) {
         amax = fmaxf(amax, __shfl_xor_sync(0xFFFFFFFF, amax, mask, 32));
         sum +=             __shfl_xor_sync(0xFFFFFFFF, sum,  mask, 32);
     }
+#endif // defined(GGML_CUDA_FATTN_VEC_GFX906_DPP_Q8_1)
 
     const float d = amax / 127;
     int q32 = 0;

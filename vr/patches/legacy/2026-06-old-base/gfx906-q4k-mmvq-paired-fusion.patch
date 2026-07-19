@@ -1,0 +1,113 @@
+diff --git a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
+index fe44a58da..f4fd9cdce 100644
+--- a/ggml/src/ggml-cuda/mmvq.cu
++++ b/ggml/src/ggml-cuda/mmvq.cu
+@@ -579,6 +579,20 @@ static __global__ void mul_mat_vec_q(
+         for (int j = 0; j < ncols_dst; ++j) {
+ #pragma unroll
+             for (int i = 0; i < rows_per_cuda_block; ++i) {
++#if defined(GGML_CUDA_MMVQ_Q4K_GFX906_PAIRED_FUSION)
++                if constexpr (type == GGML_TYPE_Q4_K && ncols_dst == 1 && has_fusion) {
++                    if (use_gate) {
++                        float sum_x    = 0.0f;
++                        float sum_gate = 0.0f;
++                        vec_dot_q4_K_q8_1_gfx906_paired(
++                            vx, vgate, &y[j*stride_col_y + kby],
++                            kbx_offset + i*stride_row_x + kbx, kqs, &sum_x, &sum_gate);
++                        tmp[j][i]      += sum_x;
++                        tmp_gate[j][i] += sum_gate;
++                        continue;
++                    }
++                }
++#endif // GGML_CUDA_MMVQ_Q4K_GFX906_PAIRED_FUSION
+                 tmp[j][i] += vec_dot_q_cuda(
+                     vx, &y[j*stride_col_y + kby], kbx_offset + i*stride_row_x + kbx, kqs);
+                 if constexpr (has_fusion) {
+diff --git a/ggml/src/ggml-cuda/vecdotq.cuh b/ggml/src/ggml-cuda/vecdotq.cuh
+index b52e3ccd1..37f20fd9a 100644
+--- a/ggml/src/ggml-cuda/vecdotq.cuh
++++ b/ggml/src/ggml-cuda/vecdotq.cuh
+@@ -944,6 +944,70 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
+ #endif
+ }
+ 
++#if defined(GGML_CUDA_MMVQ_Q4K_GFX906_PAIRED_FUSION)
++// gfx906 fused-gate helper: decode one Q4_K weight block given the already-loaded
++// Q8_1 activation (u/ds8). The weight-side decode and the accumulation are
++// identical to vec_dot_q4_K_q8_1 above; only the activation load is hoisted out
++// so the paired call below can share it between the value and gate matrices.
++static __device__ __forceinline__ float vec_dot_q4_K_q8_1_gfx906_from_u(
++    const block_q4_K * __restrict__ bq4_K, const int bq8_offset, const int & iqs,
++    const int * __restrict__ u, const float2 * __restrict__ ds8) {
++
++    int v[2];
++    const int * q4 = (const int *)(bq4_K->qs + 16 * bq8_offset + 4 * ((iqs/2)%4));
++    v[0] = q4[0];
++    v[1] = q4[4];
++
++    const uint16_t * scales = (const uint16_t *)bq4_K->scales;
++    uint16_t aux[2];
++    const int j = bq8_offset/2;
++    const int j01 = j & 1;
++    const uint16_t s0 = scales[j01 + 0];
++    const uint16_t s2 = scales[j01 + 2];
++    const uint16_t s4 = scales[j01 + 4];
++    const uint16_t high_mask = -(j >> 1);
++
++    const uint16_t low0  = s0 & 0x3f3f;
++    const uint16_t low1  = s2 & 0x3f3f;
++    const uint16_t high0 = (s4 & 0x0f0f) | ((s0 & 0xc0c0) >> 2);
++    const uint16_t high1 = ((s4 >> 4) & 0x0f0f) | ((s2 & 0xc0c0) >> 2);
++
++    aux[0] = (low0 & ~high_mask) | (high0 & high_mask);
++    aux[1] = (low1 & ~high_mask) | (high1 & high_mask);
++
++    const uint8_t * sc = (const uint8_t *)aux;
++    const uint8_t * m  = sc + 2;
++
++    return vec_dot_q4_K_q8_1_impl_vmmq(v, u, sc, m, bq4_K->dm, ds8);
++}
++
++// Paired value+gate dot product for the fused Q4_K MMVQ path. Loads the shared
++// Q8_1 activation once, then evaluates both weight matrices. The two outputs are
++// bit-for-bit identical to two separate vec_dot_q4_K_q8_1 calls.
++static __device__ __forceinline__ void vec_dot_q4_K_q8_1_gfx906_paired(
++    const void * __restrict__ vbq_x, const void * __restrict__ vbq_gate,
++    const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs,
++    float * __restrict__ sum_x, float * __restrict__ sum_gate) {
++
++    const int bq8_offset = QR4_K * ((iqs/2) / (QI8_1/2));
++
++    int    u[2*QR4_K];
++    float2 ds8[QR4_K];
++
++    for (int i = 0; i < QR4_K; ++i) {
++        const block_q8_1 * bq8i = bq8_1 + bq8_offset + i;
++        ds8[i] = __half22float2(bq8i->ds);
++
++        const int * q8 = (const int *)bq8i->qs + ((iqs/2)%4);
++        u[2*i+0] = q8[0];
++        u[2*i+1] = q8[4];
++    }
++
++    *sum_x    = vec_dot_q4_K_q8_1_gfx906_from_u((const block_q4_K *) vbq_x    + kbx, bq8_offset, iqs, u, ds8);
++    *sum_gate = vec_dot_q4_K_q8_1_gfx906_from_u((const block_q4_K *) vbq_gate + kbx, bq8_offset, iqs, u, ds8);
++}
++#endif // GGML_CUDA_MMVQ_Q4K_GFX906_PAIRED_FUSION
++
+ static __device__ __forceinline__ float vec_dot_q5_K_q8_1(
+     const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
+ 
+diff --git a/ggml/src/ggml-hip/CMakeLists.txt b/ggml/src/ggml-hip/CMakeLists.txt
+index 047300cac..c791d1b4f 100644
+--- a/ggml/src/ggml-hip/CMakeLists.txt
++++ b/ggml/src/ggml-hip/CMakeLists.txt
+@@ -76,7 +76,7 @@ list(LENGTH GGML_HIP_COMPILE_TARGETS GGML_HIP_COMPILE_TARGET_COUNT)
+ if (GGML_HIP_COMPILE_TARGET_COUNT EQUAL 1 AND "gfx906" IN_LIST GGML_HIP_COMPILE_TARGETS)
+     set_source_files_properties(
+         "../ggml-cuda/mmvq.cu"
+-        PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES)
++        PROPERTIES COMPILE_DEFINITIONS "GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES;GGML_CUDA_MMVQ_Q4K_GFX906_PAIRED_FUSION")
+     set_source_files_properties(
+         "../ggml-cuda/template-instances/mmq-instance-q4_k.cu"
+         PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE)

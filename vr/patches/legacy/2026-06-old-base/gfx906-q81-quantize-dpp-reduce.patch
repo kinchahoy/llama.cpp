@@ -1,0 +1,47 @@
+diff --git a/ggml/src/ggml-cuda/quantize.cu b/ggml/src/ggml-cuda/quantize.cu
+index 39a500a17..1b1faefc5 100644
+--- a/ggml/src/ggml-cuda/quantize.cu
++++ b/ggml/src/ggml-cuda/quantize.cu
+@@ -314,20 +314,28 @@ static __global__ void quantize_mmq_q8_1(
+     amax = fmaxf(amax, fabsf(xi.w));
+ 
+     // Exchange max. abs. value between vals_per_scale/4 threads.
++#if defined(GGML_CUDA_Q8_1_GFX906_DPP_REDUCE)
++    amax = gfx906_dpp_reduce_max<vals_per_scale/4>(amax);
++#else
+ #pragma unroll
+     for (int offset = vals_per_scale/8; offset > 0; offset >>= 1) {
+         amax = fmaxf(amax, __shfl_xor_sync(0xFFFFFFFF, amax, offset, WARP_SIZE));
+     }
++#endif // GGML_CUDA_Q8_1_GFX906_DPP_REDUCE
+ 
+     float sum;
+     if (ds_layout != MMQ_Q8_1_DS_LAYOUT_D4) {
+         sum = xi.x + xi.y + xi.z + xi.w;
+ 
+         // Calculate sums across vals_per_sum/4 threads.
++#if defined(GGML_CUDA_Q8_1_GFX906_DPP_REDUCE)
++        sum = gfx906_dpp_reduce_sum<vals_per_sum/4>(sum);
++#else
+ #pragma unroll
+         for (int offset = vals_per_sum/8; offset > 0; offset >>= 1) {
+             sum += __shfl_xor_sync(0xFFFFFFFF, sum, offset, WARP_SIZE);
+         }
++#endif // GGML_CUDA_Q8_1_GFX906_DPP_REDUCE
+     }
+ 
+     const float d_inv = 127.0f / amax;
+diff --git a/ggml/src/ggml-hip/CMakeLists.txt b/ggml/src/ggml-hip/CMakeLists.txt
+index 164ee4254..f9451ff19 100644
+--- a/ggml/src/ggml-hip/CMakeLists.txt
++++ b/ggml/src/ggml-hip/CMakeLists.txt
+@@ -83,6 +83,9 @@ if (GGML_HIP_COMPILE_TARGET_COUNT EQUAL 1 AND "gfx906" IN_LIST GGML_HIP_COMPILE_
+     set_source_files_properties(
+         "../ggml-cuda/template-instances/mmq-instance-q6_k.cu"
+         PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_MMQ_Q6K_GFX906_MIN_BLOCKS_1)
++    set_source_files_properties(
++        "../ggml-cuda/quantize.cu"
++        PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_Q8_1_GFX906_DPP_REDUCE)
+ endif()
+ file(GLOB   SRCS "../ggml-cuda/template-instances/mmf*.cu")
+ list(APPEND GGML_SOURCES_ROCM ${SRCS})

@@ -67,6 +67,33 @@ file(GLOB   SRCS "../ggml-cuda/template-instances/fattn-mma*.cu")
 list(APPEND GGML_SOURCES_ROCM ${SRCS})
 file(GLOB   SRCS "../ggml-cuda/template-instances/mmq*.cu")
 list(APPEND GGML_SOURCES_ROCM ${SRCS})
+set(GGML_HIP_COMPILE_TARGETS ${CMAKE_HIP_ARCHITECTURES})
+if (NOT GGML_HIP_COMPILE_TARGETS)
+    set(GGML_HIP_COMPILE_TARGETS ${GPU_TARGETS})
+endif()
+list(REMOVE_DUPLICATES GGML_HIP_COMPILE_TARGETS)
+list(LENGTH GGML_HIP_COMPILE_TARGETS GGML_HIP_COMPILE_TARGET_COUNT)
+if (GGML_HIP_COMPILE_TARGET_COUNT EQUAL 1 AND "gfx906" IN_LIST GGML_HIP_COMPILE_TARGETS)
+    file(GLOB GFX906_FATTN_VEC_SRCS "../ggml-cuda/template-instances/fattn-vec*.cu")
+    set_source_files_properties(
+        ${GFX906_FATTN_VEC_SRCS}
+        PROPERTIES COMPILE_DEFINITIONS
+            "GGML_CUDA_FATTN_VEC_GFX906_DPP_Q8_1;GGML_CUDA_FATTN_VEC_GFX906_KQ8")
+    set_source_files_properties(
+        "../ggml-cuda/mmvq.cu"
+        PROPERTIES COMPILE_DEFINITIONS
+            "GGML_CUDA_MMVQ_Q4K_GFX906_BRANCHLESS_SCALES;GGML_CUDA_MMVQ_Q4K_GFX906_PAIRED_FUSION;GGML_CUDA_MMVQ_Q8_0_GFX906_WIDE_VDR;GGML_CUDA_MMVQ_Q8_0_GFX906_PAIRED_FUSION")
+    set_source_files_properties(
+        "../ggml-cuda/quantize.cu"
+        PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_Q8_1_GFX906_DPP_REDUCE)
+    set_source_files_properties(
+        "../ggml-cuda/template-instances/mmq-instance-q4_k.cu"
+        PROPERTIES COMPILE_DEFINITIONS
+            "GGML_CUDA_MMQ_Q4K_GFX906_PRECOMPUTE;GGML_CUDA_MMQ_Q4K_GFX906_MIN_BLOCKS_3")
+    set_source_files_properties(
+        "../ggml-cuda/template-instances/mmq-instance-q6_k.cu"
+        PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_MMQ_Q6K_GFX906_MIN_BLOCKS_1)
+endif()
 file(GLOB   SRCS "../ggml-cuda/template-instances/mmf*.cu")
 list(APPEND GGML_SOURCES_ROCM ${SRCS})
 
