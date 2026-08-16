@@ -715,6 +715,15 @@ ggml_backend_cuda_context::~ggml_backend_cuda_context() {
     std::unique_lock<std::mutex> lock(ggml_cuda_lock);
     ggml_cuda_lock_cv.wait(lock, []{ return ggml_cuda_lock_counter.load(std::memory_order_relaxed) == 0; });
 
+    ggml_cuda_set_device(device);
+    if (tp_overlap.fork != nullptr) {
+        CUDA_CHECK(cudaEventDestroy(tp_overlap.fork));
+    }
+    for (cudaEvent_t event : tp_overlap.ready) {
+        if (event != nullptr) {
+            CUDA_CHECK(cudaEventDestroy(event));
+        }
+    }
     if (copy_event != nullptr) {
         CUDA_CHECK(cudaEventDestroy(copy_event));
     }
@@ -1119,6 +1128,10 @@ struct ggml_backend_cuda_comm_context {
             NCCL_CHECK(ncclCommDestroy(comm));
         }
 #endif // GGML_USE_NCCL
+        for (ggml_backend_t backend : backends) {
+            auto * cuda_ctx = static_cast<ggml_backend_cuda_context *>(backend->context);
+            cuda_ctx->tp_overlap.enabled = false;
+        }
         ggml_cuda_ar_pipeline_free(ar_pipeline);
     }
 };
@@ -1348,6 +1361,17 @@ static bool ggml_backend_cuda_comm_allreduce_internal(
     GGML_ASSERT(n_backends == 2);
     GGML_ASSERT(tensors[0] != nullptr);
 
+#ifdef GGML_USE_HIP
+    bool overlap_active = false;
+    for (ggml_backend_t backend : comm_ctx->backends) {
+        auto * cuda_ctx = static_cast<ggml_backend_cuda_context *>(backend->context);
+        overlap_active |= cuda_ctx->tp_overlap.active;
+    }
+    if (!overlap_active) {
+        return false;
+    }
+#endif
+
     const int64_t   ne   = ggml_nelements(tensors[0]);
     const ggml_type type = tensors[0]->type;
 
@@ -1441,6 +1465,16 @@ static void ggml_backend_cuda_comm_init_internal(ggml_backend_cuda_comm_context 
     ret->ar_pipeline = ggml_cuda_ar_pipeline_init(ret->dev_ids.data(), ret->dev_ids.size());
     if (ret->ar_pipeline) {
         ret->try_allreduce = ggml_backend_cuda_comm_try_allreduce_internal;
+#ifdef GGML_USE_HIP
+        const char * overlap = getenv("GGML_CUDA_TP_OVERLAP");
+        if (overlap != nullptr && strcmp(overlap, "1") == 0) {
+            for (ggml_backend_t backend : ret->backends) {
+                auto * cuda_ctx = static_cast<ggml_backend_cuda_context *>(backend->context);
+                cuda_ctx->tp_overlap.enabled = true;
+            }
+            GGML_LOG_INFO("%s: enabled exact Q8 two-slab TP overlap\n", __func__);
+        }
+#endif
         return;
     }
 
@@ -2471,7 +2505,14 @@ static void ggml_cuda_mul_mat(ggml_backend_cuda_context & ctx, const ggml_tensor
         ggml_cuda_mul_mat_vec_q(ctx, src0, src1, nullptr, dst);
         return;
     }
-    if (ggml_cuda_should_use_mmq(src0->type, cc, ne11, /*n_experts =*/ 0)) {
+    const bool use_tp_overlap_mmq =
+        ctx.tp_overlap.enabled &&
+        cc == GGML_CUDA_CC_VEGA20 &&
+        src0->type == GGML_TYPE_Q8_0 &&
+        ne00 == 8704 && ne01 == 5120 &&
+        ne10 == 8704 && ne11 == 2048 &&
+        ne0 == 5120 && ne1 == 2048;
+    if (use_tp_overlap_mmq || ggml_cuda_should_use_mmq(src0->type, cc, ne11, /*n_experts =*/ 0)) {
         ggml_cuda_mul_mat_q(ctx, src0, src1, nullptr, dst);
         return;
     }
@@ -3316,6 +3357,17 @@ static bool ggml_cuda_graph_check_compability(ggml_cgraph * cgraph) {
                 GGML_LOG_DEBUG("%s: disabling CUDA graphs due to unsupported node type\n", __func__);
 #endif
             }
+        }
+
+        const char * tp_overlap = getenv("GGML_CUDA_TP_OVERLAP");
+        if (tp_overlap != nullptr && strcmp(tp_overlap, "1") == 0 &&
+                node->op == GGML_OP_MUL_MAT &&
+                node->src[0]->type == GGML_TYPE_Q8_0 &&
+                node->src[0]->ne[0] == 8704 &&
+                node->src[0]->ne[1] == 5120 &&
+                node->src[1]->ne[0] == 8704 &&
+                node->src[1]->ne[1] == 2048) {
+            use_cuda_graph = false;
         }
 
         if (!use_cuda_graph) {

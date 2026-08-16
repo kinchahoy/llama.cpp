@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <type_traits>
 
 // ---------------------------------------------------------------------------
 // CUDA AllReduce for tensor-parallel inference across two GPUs.
@@ -952,13 +953,298 @@ bool ggml_cuda_ar_allreduce(
     return ok;
 }
 
-#else // defined(GGML_USE_HIP) || defined(GGML_USE_MUSA)
+#elif defined(GGML_USE_HIP)
 
-// HIP and MUSA lack the host-mapped pinned-memory APIs (cudaHostAllocPortable
-// / cudaHostAllocMapped / cudaHostGetDevicePointer) and __nanosleep that this
-// implementation relies on, so the internal AllReduce is a CUDA-only feature.
-// The dispatcher in ggml-cuda.cu treats a nullptr pipeline as "init failed"
-// and silently falls back to the meta backend's generic AllReduce.
+#include "convert.cuh"
+
+#include <cstring>
+#include <limits>
+
+template <typename T>
+static __global__ void ggml_hip_ar_reduce_half(
+        T * __restrict__ dst, const T * __restrict__ peer, int count) {
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    const int nt  = gridDim.x * blockDim.x;
+    for (int i = tid; i < count; i += nt) {
+        dst[i] = ggml_cuda_cast<T>(
+            ggml_cuda_cast<float>(dst[i]) + ggml_cuda_cast<float>(peer[i]));
+    }
+}
+
+static __global__ void ggml_hip_ar_reduce_half_bf16(
+        float * __restrict__ dst, nv_bfloat16 * __restrict__ wire, int count) {
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    const int nt  = gridDim.x * blockDim.x;
+    for (int i = tid; i < count; i += nt) {
+        const float sum = dst[i] + ggml_cuda_cast<float>(wire[i]);
+        const nv_bfloat16 reduced = ggml_cuda_cast<nv_bfloat16>(sum);
+        wire[i] = reduced;
+        dst[i] = ggml_cuda_cast<float>(reduced);
+    }
+}
+
+struct ggml_cuda_ar_pipeline {
+    int          devices[2]         = {};
+    cudaEvent_t  encoded[2]         = {};
+    cudaEvent_t  copied[2]          = {};
+    cudaStream_t encode[2]          = {};
+    cudaStream_t comm[2]            = {};
+    bool         direct_peer_access = false;
+    bool         overlap_logged     = false;
+};
+
+ggml_cuda_ar_pipeline * ggml_cuda_ar_pipeline_init(const int * devices, size_t n_devices) {
+    const char * overlap = getenv("GGML_CUDA_TP_OVERLAP");
+    if (overlap == nullptr || strcmp(overlap, "1") != 0) {
+        return nullptr;
+    }
+    if (n_devices != 2) {
+        return nullptr;
+    }
+
+    auto * p = new ggml_cuda_ar_pipeline;
+    bool direct_peer_access = true;
+    for (int i = 0; i < 2; ++i) {
+        p->devices[i] = devices[i];
+        const int physical = ggml_cuda_info().devices[devices[i]].physical_device;
+        const int peer     = ggml_cuda_info().devices[devices[1 - i]].physical_device;
+        if (physical == peer) {
+            ggml_cuda_ar_pipeline_free(p);
+            return nullptr;
+        }
+
+        ggml_cuda_set_device(devices[i]);
+        int can_access_peer = 0;
+        const cudaError_t can_access_rc = cudaDeviceCanAccessPeer(&can_access_peer, physical, peer);
+        if (can_access_rc != cudaSuccess || !can_access_peer) {
+            direct_peer_access = false;
+            (void) cudaGetLastError();
+        } else {
+            const cudaError_t rc = cudaDeviceEnablePeerAccess(peer, 0);
+            if (rc != cudaSuccess && rc != cudaErrorPeerAccessAlreadyEnabled) {
+                direct_peer_access = false;
+                (void) cudaGetLastError();
+            } else if (rc == cudaErrorPeerAccessAlreadyEnabled) {
+                (void) cudaGetLastError();
+            }
+        }
+
+        if (cudaEventCreateWithFlags(&p->encoded[i], cudaEventDisableTiming) != cudaSuccess ||
+                cudaEventCreateWithFlags(&p->copied[i], cudaEventDisableTiming) != cudaSuccess ||
+                cudaStreamCreateWithFlags(&p->encode[i], cudaStreamNonBlocking) != cudaSuccess ||
+                cudaStreamCreateWithFlags(&p->comm[i], cudaStreamNonBlocking) != cudaSuccess) {
+            ggml_cuda_ar_pipeline_free(p);
+            return nullptr;
+        }
+    }
+
+    p->direct_peer_access = direct_peer_access;
+    const char * allreduce = getenv("GGML_CUDA_ALLREDUCE");
+    if (!direct_peer_access && (allreduce == nullptr || strcmp(allreduce, "internal") != 0)) {
+        ggml_cuda_ar_pipeline_free(p);
+        return nullptr;
+    }
+    GGML_LOG_INFO("%s: initialized two-GPU HIP AllReduce transport=%s\n",
+        __func__, direct_peer_access ? "direct-peer" : "copy-staged");
+    return p;
+}
+
+void ggml_cuda_ar_pipeline_free(ggml_cuda_ar_pipeline * p) {
+    if (p == nullptr) {
+        return;
+    }
+    for (int i = 0; i < 2; ++i) {
+        ggml_cuda_set_device(p->devices[i]);
+        if (p->encoded[i] != nullptr) {
+            (void) cudaEventDestroy(p->encoded[i]);
+        }
+        if (p->copied[i] != nullptr) {
+            (void) cudaEventDestroy(p->copied[i]);
+        }
+        if (p->encode[i] != nullptr) {
+            (void) cudaStreamDestroy(p->encode[i]);
+        }
+        if (p->comm[i] != nullptr) {
+            (void) cudaStreamDestroy(p->comm[i]);
+        }
+    }
+    delete p;
+}
+
+template <typename T>
+static bool ggml_hip_ar_allreduce_overlap(
+        ggml_cuda_ar_pipeline * p, ggml_backend_t * backends, ggml_tensor ** tensors) {
+    ggml_backend_cuda_context * cuda_ctx[2] = {
+        static_cast<ggml_backend_cuda_context *>(backends[0]->context),
+        static_cast<ggml_backend_cuda_context *>(backends[1]->context),
+    };
+
+    bool any_active = false;
+    bool match = tensors[0]->type == GGML_TYPE_F32 && !p->direct_peer_access;
+    for (int i = 0; i < 2; ++i) {
+        const ggml_cuda_tp_overlap_state & overlap = cuda_ctx[i]->tp_overlap;
+        any_active |= overlap.active;
+        match &= overlap.active &&
+                 overlap.dst == tensors[i]->data &&
+                 overlap.slab_elements > 0 &&
+                 2 * overlap.slab_elements == ggml_nelements(tensors[i]);
+    }
+    match &= cuda_ctx[0]->tp_overlap.slab_elements == cuda_ctx[1]->tp_overlap.slab_elements;
+
+    if (!any_active) {
+        return false;
+    }
+    if (!match) {
+        for (int i = 0; i < 2; ++i) {
+            ggml_cuda_set_device(p->devices[i]);
+            ggml_cuda_tp_overlap_state & overlap = cuda_ctx[i]->tp_overlap;
+            if (overlap.active) {
+                CUDA_CHECK(cudaStreamWaitEvent(cuda_ctx[i]->stream(), overlap.ready[0], 0));
+                CUDA_CHECK(cudaStreamWaitEvent(cuda_ctx[i]->stream(), overlap.ready[1], 0));
+                overlap.active = false;
+            }
+        }
+        return false;
+    }
+
+    const int64_t count64 = cuda_ctx[0]->tp_overlap.slab_elements;
+    if (count64 > std::numeric_limits<int>::max()) {
+        return false;
+    }
+    const int count = (int) count64;
+
+    const char * bf16_wire = getenv("GGML_CUDA_TP_OVERLAP_BF16");
+    if constexpr (std::is_same_v<T, float>) {
+        if (bf16_wire != nullptr && strcmp(bf16_wire, "1") == 0) {
+            ggml_cuda_pool_alloc<nv_bfloat16> wire[2];
+            ggml_cuda_pool_alloc<nv_bfloat16> inbound[2];
+            to_bf16_cuda_t to_bf16 = ggml_get_to_bf16_cuda(GGML_TYPE_F32);
+            to_fp32_cuda_t to_fp32 = ggml_get_to_fp32_cuda(GGML_TYPE_BF16);
+
+            for (int device = 0; device < 2; ++device) {
+                ggml_cuda_set_device(p->devices[device]);
+                wire[device].alloc(cuda_ctx[device]->pool(), count);
+                inbound[device].alloc(cuda_ctx[device]->pool(), count);
+
+                const int owner = 1 - device;
+                cudaStream_t stream = p->encode[device];
+                CUDA_CHECK(cudaStreamWaitEvent(stream, cuda_ctx[device]->tp_overlap.ready[owner], 0));
+                const float * partial = static_cast<const float *>(tensors[device]->data) + owner * count64;
+                to_bf16(partial, wire[device].get(), count64, stream);
+                CUDA_CHECK(cudaGetLastError());
+                CUDA_CHECK(cudaEventRecord(p->encoded[device], stream));
+            }
+
+            for (int owner = 0; owner < 2; ++owner) {
+                const int peer = 1 - owner;
+                ggml_cuda_set_device(p->devices[owner]);
+                cudaStream_t stream = p->comm[owner];
+                CUDA_CHECK(cudaStreamWaitEvent(stream, cuda_ctx[owner]->tp_overlap.ready[owner], 0));
+                CUDA_CHECK(cudaStreamWaitEvent(stream, p->encoded[peer], 0));
+
+                const int dst_physical = ggml_cuda_info().devices[p->devices[owner]].physical_device;
+                const int src_physical = ggml_cuda_info().devices[p->devices[peer]].physical_device;
+                CUDA_CHECK(cudaMemcpyPeerAsync(
+                    inbound[owner].get(), dst_physical,
+                    wire[peer].get(), src_physical,
+                    count64 * sizeof(nv_bfloat16), stream));
+
+                float * local = static_cast<float *>(tensors[owner]->data) + owner * count64;
+                const int block_size = 256;
+                const int n_blocks = std::min(1024, (count + block_size - 1) / block_size);
+                ggml_hip_ar_reduce_half_bf16<<<n_blocks, block_size, 0, stream>>>(
+                    local, inbound[owner].get(), count);
+                CUDA_CHECK(cudaGetLastError());
+
+                CUDA_CHECK(cudaMemcpyPeerAsync(
+                    wire[peer].get(), src_physical,
+                    inbound[owner].get(), dst_physical,
+                    count64 * sizeof(nv_bfloat16), stream));
+                CUDA_CHECK(cudaEventRecord(p->copied[owner], stream));
+            }
+
+            for (int device = 0; device < 2; ++device) {
+                const int peer_owner = 1 - device;
+                ggml_cuda_set_device(p->devices[device]);
+                cudaStream_t stream = cuda_ctx[device]->stream();
+                CUDA_CHECK(cudaStreamWaitEvent(stream, p->copied[device], 0));
+                CUDA_CHECK(cudaStreamWaitEvent(stream, p->copied[peer_owner], 0));
+                float * dst = static_cast<float *>(tensors[device]->data) + peer_owner * count64;
+                to_fp32(wire[device].get(), dst, count64, stream);
+                CUDA_CHECK(cudaGetLastError());
+                cuda_ctx[device]->tp_overlap.active = false;
+            }
+
+            if (!p->overlap_logged) {
+                GGML_LOG_INFO("%s: executing exact Q8 two-slab compute/transport overlap wire=bf16\n", __func__);
+                p->overlap_logged = true;
+            }
+            return true;
+        }
+    }
+
+    ggml_cuda_pool_alloc<T> scratch[2];
+    for (int owner = 0; owner < 2; ++owner) {
+        ggml_cuda_set_device(p->devices[owner]);
+        scratch[owner].alloc(cuda_ctx[owner]->pool(), count);
+        cudaStream_t stream = p->comm[owner];
+        CUDA_CHECK(cudaStreamWaitEvent(stream, cuda_ctx[0]->tp_overlap.ready[owner], 0));
+        CUDA_CHECK(cudaStreamWaitEvent(stream, cuda_ctx[1]->tp_overlap.ready[owner], 0));
+
+        T * local = static_cast<T *>(tensors[owner]->data) + owner * count64;
+        const T * peer = static_cast<const T *>(tensors[1 - owner]->data) + owner * count64;
+        const int dst_physical = ggml_cuda_info().devices[p->devices[owner]].physical_device;
+        const int src_physical = ggml_cuda_info().devices[p->devices[1 - owner]].physical_device;
+        CUDA_CHECK(cudaMemcpyPeerAsync(
+            scratch[owner].get(), dst_physical, peer, src_physical, count64 * sizeof(T), stream));
+
+        const int block_size = 256;
+        const int n_blocks = std::min(1024, (count + block_size - 1) / block_size);
+        ggml_hip_ar_reduce_half<T><<<n_blocks, block_size, 0, stream>>>(local, scratch[owner].get(), count);
+        CUDA_CHECK(cudaGetLastError());
+
+        T * dst = static_cast<T *>(tensors[1 - owner]->data) + owner * count64;
+        CUDA_CHECK(cudaMemcpyPeerAsync(
+            dst, src_physical, local, dst_physical, count64 * sizeof(T), stream));
+        CUDA_CHECK(cudaEventRecord(p->copied[owner], stream));
+    }
+
+    for (int i = 0; i < 2; ++i) {
+        ggml_cuda_set_device(p->devices[i]);
+        CUDA_CHECK(cudaStreamWaitEvent(cuda_ctx[i]->stream(), p->copied[0], 0));
+        CUDA_CHECK(cudaStreamWaitEvent(cuda_ctx[i]->stream(), p->copied[1], 0));
+        cuda_ctx[i]->tp_overlap.active = false;
+    }
+
+    if (!p->overlap_logged) {
+        GGML_LOG_INFO("%s: executing exact Q8 two-slab compute/transport overlap wire=f32\n", __func__);
+        p->overlap_logged = true;
+    }
+    return true;
+}
+
+template <typename T>
+static bool ggml_hip_ar_allreduce(
+        ggml_cuda_ar_pipeline * p, ggml_backend_t * backends, ggml_tensor ** tensors) {
+    return ggml_hip_ar_allreduce_overlap<T>(p, backends, tensors);
+}
+
+bool ggml_cuda_ar_allreduce(
+        ggml_cuda_ar_pipeline * p, ggml_backend_t * backends, ggml_tensor ** tensors) {
+    switch (tensors[0]->type) {
+        case GGML_TYPE_F32:
+            return ggml_hip_ar_allreduce<float>(p, backends, tensors);
+        case GGML_TYPE_F16:
+            return ggml_hip_ar_allreduce<half>(p, backends, tensors);
+        case GGML_TYPE_BF16:
+            return ggml_hip_ar_allreduce<nv_bfloat16>(p, backends, tensors);
+        default:
+            return false;
+    }
+}
+
+#else // defined(GGML_USE_MUSA)
+
 ggml_cuda_ar_pipeline * ggml_cuda_ar_pipeline_init(const int *, size_t) {
     return nullptr;
 }
