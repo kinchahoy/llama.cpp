@@ -1431,6 +1431,15 @@ struct ggml_cuda_stream_context {
     }
 };
 
+struct ggml_cuda_tp_overlap_state {
+    bool        enabled       = false;
+    bool        active        = false;
+    void *      dst           = nullptr;
+    int64_t     slab_elements = 0;
+    cudaEvent_t fork          = nullptr;
+    cudaEvent_t ready[2]      = {};
+};
+
 struct ggml_backend_cuda_context {
     int device;
     std::string name;
@@ -1518,6 +1527,8 @@ struct ggml_backend_cuda_context {
     }
 
     ggml_cuda_stream_context concurrent_stream_context;
+
+    ggml_cuda_tp_overlap_state tp_overlap;
 
     // Quantized copies of activations already produced during this graph
     // evaluation, so repeated matmuls off one activation quantize it once.

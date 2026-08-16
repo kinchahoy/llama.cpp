@@ -133,6 +133,73 @@ void ggml_cuda_mul_mat_q(
     const size_t y_values_per_block = use_native_fp4 ? QK_FP4_MMQ            : QK8_1_MMQ;
 
     if (!ids) {
+#if defined(GGML_USE_HIP)
+        const bool tp_overlap =
+            ctx.tp_overlap.enabled &&
+            ctx.curr_stream_no == 0 &&
+            !ctx.tp_overlap.active &&
+            cc == GGML_CUDA_CC_VEGA20 &&
+            src0->type == GGML_TYPE_Q8_0 &&
+            ne00 == 8704 && ne01 == 5120 &&
+            ne10 == 8704 && ne11 == 2048 &&
+            ne02 == 1 && ne03 == 1 &&
+            ne12 == 1 && ne13 == 1 &&
+            ne0 == 5120 && ne1 == 2048 &&
+            ne2 == 1 && ne3 == 1;
+
+        if (tp_overlap) {
+            constexpr int64_t slab_cols = 1024;
+            constexpr int     stream_no = 1;
+
+            ggml_cuda_tp_overlap_state & overlap = ctx.tp_overlap;
+            if (overlap.fork == nullptr) {
+                CUDA_CHECK(cudaEventCreateWithFlags(&overlap.fork, cudaEventDisableTiming));
+                for (cudaEvent_t & event : overlap.ready) {
+                    CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
+                }
+            }
+
+            CUDA_CHECK(cudaEventRecord(overlap.fork, stream));
+            ctx.curr_stream_no = stream_no;
+            cudaStream_t compute_stream = ctx.stream();
+            CUDA_CHECK(cudaStreamWaitEvent(compute_stream, overlap.fork, 0));
+
+            const size_t nbytes_slab_q8_1 =
+                slab_cols * ne10_padded * sizeof(block_q8_1_mmq) / QK8_1_MMQ +
+                ggml_cuda_mmq_get_J_max(src0->type, fallback, cc, slab_cols) * sizeof(block_q8_1_mmq);
+            ggml_cuda_pool_alloc<char> slab_q8_1[2];
+            for (ggml_cuda_pool_alloc<char> & allocation : slab_q8_1) {
+                allocation.alloc(ctx.pool(), nbytes_slab_q8_1);
+            }
+
+            const int64_t s11 = src1->nb[1] / ts_src1;
+            for (int slab = 0; slab < 2; ++slab) {
+                const int64_t col0 = slab * slab_cols;
+                quantize_mmq_q8_1_cuda(
+                    src1_d + col0 * s11, nullptr, slab_q8_1[slab].get(),
+                    src0->type, ne10, s11, 0, 0, ne10_padded,
+                    slab_cols, 1, 1, compute_stream);
+                CUDA_CHECK(cudaGetLastError());
+
+                const mmq_args args = {
+                    src0_d, src0->type, (const int *) slab_q8_1[slab].get(), nullptr, nullptr,
+                    dst_d + col0 * s1, nullptr,
+                    ne00, ne01, slab_cols, s01, slab_cols, s1,
+                    1, 1, s02, 0, s2,
+                    1, 1, s03, 0, s3,
+                    slab_cols};
+                ggml_cuda_mul_mat_q_switch_type(ctx, args, compute_stream);
+                CUDA_CHECK(cudaEventRecord(overlap.ready[slab], compute_stream));
+            }
+
+            ctx.curr_stream_no    = 0;
+            overlap.active        = true;
+            overlap.dst           = dst_d;
+            overlap.slab_elements = ne0 * slab_cols;
+            return;
+        }
+#endif
+
         const size_t nbytes_src1_q8_1 = ne13*ne12 * ne11*ne10_padded * y_block_size/y_values_per_block +
             ggml_cuda_mmq_get_J_max(src0->type, fallback, cc, ne11) * sizeof(block_q8_1_mmq);
         ggml_cuda_pool_alloc<char> src1_q8_1(ctx.pool());

@@ -24,11 +24,7 @@ on gfx906.
 
 ## MTP speculative-decode optimizations
 
-Opt-in optimizations on top of upstream's `--spec-type draft-mtp` (MTP and the
-Qwen3.6 head are upstream), enabled with `LLAMA_ENABLE_MTP_OPT=1`: deferred-prefill
-KV staging, a KV-only prefill replay, disabling the draft context's pipeline ring,
-and a non-finite-draft fail-safe. Default off uses the standard `draft-mtp` path
-with these disabled. Backend-generic.
+Optimizations on top of upstream's `--spec-type draft-mtp`: deferred-prefill KV staging, a KV-only prefill replay, disabling the draft context's pipeline ring, and a non-finite-draft fail-safe. These paths are enabled by default. Their debugging escape hatches are `LLAMA_MTP_DEFERRED_PREFILL=0`, `LLAMA_MTP_NO_KV_ONLY=1`, and `LLAMA_MTP_DRAFT_PIPELINE=1`. Backend-generic.
 
 ## Concurrent lane dispatch
 
@@ -180,7 +176,6 @@ Recommended environment (each variable enables one of the features above):
 export GGML_ENABLE_CUSTOM_AR=1      # custom multi-GPU AllReduce
 export HSA_FORCE_FINE_GRAIN_PCIE=1  # peer-write AllReduce fast path (AMD over PCIe, validated gfx906)
 export GPU_MAX_HW_QUEUES=8          # MoE throughput on -tps
-export LLAMA_ENABLE_MTP_OPT=1       # MTP optimizations (with --spec-type draft-mtp)
 ```
 
 On a trimmed ROCm runtime (such as the slim Docker image) also set
