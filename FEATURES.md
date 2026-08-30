@@ -1,8 +1,64 @@
 # Features
 
 This fork extends upstream llama.cpp with multi-GPU and speculative-decoding
-optimizations. Most additions are backend-generic; the gfx906 (VEGA20) kernel
-tuning is the only hardware-specific part.
+optimizations. Most additions are backend-generic; the hardware-specific parts
+are the gfx906 (VEGA20) kernel tuning and the Q8_0/MXFP4 weight repack, both
+MI50 / MI60 / Radeon VII class GPUs.
+
+## Building from source
+
+Requires a ROCm toolchain with gfx906 support (rocBLAS gfx906 kernels, plus RCCL
+for `GGML_HIP_RCCL`). Note gfx906 is deprecated in ROCm 7.x. See `docs/build.md`
+for general HIP build background.
+
+```bash
+cmake -B build \
+  -DGGML_HIP=ON \
+  -DGGML_HIP_GRAPHS=ON \
+  -DGGML_HIP_RCCL=ON \
+  -DLLAMA_OPENSSL=ON \
+  -DAMDGPU_TARGETS=gfx906 \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DHIP_COMPILER=clang \
+  -DCMAKE_CXX_FLAGS="-O3 -Wno-unused-command-line-argument"
+cmake --build build --config Release -j
+```
+
+## Running
+
+Recommended environment (each variable enables one of the features above):
+
+```bash
+export GGML_ENABLE_CUSTOM_AR=1      # custom multi-GPU AllReduce
+export HSA_FORCE_FINE_GRAIN_PCIE=1  # peer-write AllReduce fast path (AMD over PCIe, validated gfx906)
+export GPU_MAX_HW_QUEUES=8          # MoE throughput on -tps
+export LLAMA_ENABLE_MTP_OPT=1       # MTP optimizations (with --spec-type draft-mtp)
+```
+
+On a trimmed ROCm runtime (such as the slim Docker image) also set
+`HSA_OVERRIDE_GFX_VERSION=9.0.6` so the runtime recognizes the gfx906 GPU. A full
+ROCm install detects it automatically and does not need this.
+
+Always pass `-lm dio` (`--load-mode dio`). mmap on the model file hangs on this
+stack. The older `--no-mmap` / `-dio` spellings still parse but are deprecated
+upstream, and in `llama-bench` they append two separate load modes, so the old
+two-flag form runs every benchmark twice. Select GPUs with `HIP_VISIBLE_DEVICES`
+(AMD) or `CUDA_VISIBLE_DEVICES` (NVIDIA); the example commands below use the AMD
+form.
+
+```bash
+# multi-GPU tensor-parallel server (4 GPUs, full TP)
+HIP_VISIBLE_DEVICES=0,1,2,3 llama-server -m model.gguf \
+  -ngl 99 -fa 1 -sm tensor -tps 0 -lm dio --host 0.0.0.0 --port 8080
+
+# 8 GPUs as 4 TP groups of 2 (TP=2, PP=4)
+HIP_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 llama-cli -m model.gguf \
+  -ngl 99 -fa 1 -sm tensor -tps 2 -lm dio
+
+# MTP speculative decode (Qwen3.6 dense)
+HIP_VISIBLE_DEVICES=0,1 llama-cli -m Qwen3.6-27B-MTP.gguf \
+  -ngl 99 -fa 1 -sm tensor --spec-type draft-mtp -lm dio
+```
 
 ## Multi-stage tensor parallelism (`-tps`)
 
@@ -19,8 +75,11 @@ AllReduce for the tensor-parallel reduction (in addition to upstream's
 `allreduce.cu`). F32 on the wire and faster than the RCCL / NCCL ring for token
 generation over PCIe. Enable with `GGML_ENABLE_CUSTOM_AR=1`; the fast peer-write
 path needs fine-grain PCIe coherence (`HSA_FORCE_FINE_GRAIN_PCIE=1` on any AMD
-over PCIe, a no-op on hardware-coherent GPUs and ignored on NVIDIA). Validated
-on gfx906.
+over PCIe, a no-op on hardware-coherent GPUs and ignored on NVIDIA). Decode-size
+collectives automatically use two-shot for TP5, TP8, TP10, and TP4 pipeline
+stages; standalone TP4 stays on broadcast. Large prompt collectives keep the
+RCCL / NCCL size gate. `GGML_TP_AR_TWOSHOT=0` forces broadcast and `=1` forces
+two-shot for diagnostics. Validated on gfx906.
 
 ## MTP speculative-decode optimizations
 
@@ -53,8 +112,8 @@ concurrent lane dispatch above. Validated on gfx906.
 
 ## DeepSeek-V4-Flash tensor parallelism
 
-Upstream keeps the deepseek4 architecture on the tensor-split unsupported list,
-so `-sm tensor` refuses to load it. The fork implements the split: the MLA heads
+Upstream added its own deepseek4 tensor split in b10604, with the same head-split
+shape this fork has carried since b10240. The fork keeps its routing: the MLA heads
 divide across the tensor-parallel group with the attention-side state mirrored
 per lane, the lightning-indexer selection runs on the GPU at any context length
 (above 16384 columns it previously fell back to the CPU, which corrupted output
@@ -62,6 +121,39 @@ past 65k context), and the indexer top-k needs no cross-lane broadcast because
 the fused scores are AllReduce outputs and already bit-identical on every lane.
 Byte-deterministic over a 100k-token greedy run, perplexity consistent with
 `-sm layer` within 0.3%. Works with multi-stage `-tps`. Validated on gfx906.
+
+deepseek4 also rebuilt its compressed-state and rollback plans on every ubatch, so
+the graph changed shape each prefill chunk and the allocation was re-planned every
+time. Fixed-width restore and snapshot entries per layout stream make the topology
+constant and the allocation is planned once, which is worth far more than it
+sounds on long prompts: 8x MI50 `-sm layer` with a 23k prompt, 182 to 759 t/s, and
+`-tps 4` generation 23.9 to 26.8 t/s. Three identical requests return identical
+output and identical draft acceptance.
+
+## Qwen3.8-Flash-Next tensor parallelism
+
+Qwen3.8-Flash-Next carries a PLE n-gram table - 27465 MiB on the UD-Q4_K_XL quant, larger at
+higher quants - that is otherwise host
+resident and demand paged, so every token pays a PCIe read to gather its rows and
+prefill is bound by that gather rather than by compute. `LLAMA_PLE_SHARD=1` splits
+the table by whole hash heads under `-sm tensor`, one segment owned per device, and
+get_rows zeroes the rows a device does not own so the partial vectors reduce through
+the existing AllReduce. On 4x MI50 with the UD-Q4_K_XL quant: 4096-token prefill 224
+to 500 t/s, 512-token generation 18 to 37 t/s, wiki perplexity 2.3108 to 2.3052
+(within error). The host staging copy is still retained after upload, so peak host
+memory is unchanged - this buys throughput, not footprint.
+
+The 103 GiB model does not fit alongside a 27 GiB gather table in host memory, so
+the loader maps lazily-read tensors even under `-lm dio`: the mapping is virtual,
+prefetch is zero and the range is never populated, which avoids whole-model mmap's
+page thrashing while still letting the table be demand paged.
+
+A NextN/MTP draft head is supported with `--spec-type draft-mtp`, converted by
+`convert_hf_to_gguf.py --mtp`. Draft acceptance runs 75-90 percent at `n_max 2` and
+is strongly text dependent (46 to 90 percent across prompts). Whether it is a net
+throughput win depends on the split mode - under `-sm tensor` the multi-GPU verify
+costs more than the drafting saves, while `-sm layer` lands near parity - so measure
+on your own topology before enabling it.
 
 ## Shared-expert tensor-parallel split
 
@@ -87,7 +179,10 @@ replicated per lane instead of split (a small dense drafter loses more to
 per-layer AllReduce than it gains from splitting), the no-vocab sidecar borrows
 the target tokenizer, and the target's output projection is replicated so every
 device holds the full logit row. Measured on DeepSeek-V4-Flash at `-tps 4` over
-8 GPUs: generation 18.0 to 27.3 t/s. Validated on gfx906.
+8 GPUs: generation 18.0 to 27.3 t/s. The target also stays unrepacked by default:
+on the same topology this raised draft acceptance from 63.8% to 83.5% and
+generation from 26.8 to 31.5 t/s without changing prefill throughput.
+`LLAMA_DSPARK_TARGET_REPACK=1` restores target repacking. Validated on gfx906.
 
 ## Allocation layout cache
 
@@ -149,11 +244,39 @@ The quantized copy is now kept and handed to the later matmuls, which is
 bit-exact. Worth +2.2-2.6% on prefill and decode. On by default;
 `GGML_CUDA_Q8_1_CACHE=0` restores the old behavior. Backend-generic.
 
-## Building from source
+## Q8_0 and MXFP4 weight repack (gfx906)
 
-Requires a ROCm toolchain with gfx906 support (rocBLAS gfx906 kernels, plus RCCL
-for `GGML_HIP_RCCL`). Note gfx906 is deprecated in ROCm 7.x. See `docs/build.md`
-for general HIP build background.
+Q8_0 weights upload into a two-plane layout (quants and scales in separate
+planes) with tiled MMQ and mat-vec kernels reading it directly, contributed
+by DENEB1312. On by default on gfx906, carried by the extra buffer types
+like upstream's CPU weight repack, so `--no-repack` disables it; a draft
+model always loads canonical weights. Measured on 2x MI50: prefill +12 to
++41% across dense and MoE models and both split modes, generation within a
+couple percent of the canonical path. Prefill is bit-exact and perplexity
+unchanged; greedy generation can differ within floating-point
+reassociation. Model load stages canonical bytes and repacks on the
+device, so `-sm layer` loads at vanilla-loader parity and tensor-parallel
+loads within about 1.4x of it. Narrow batches, such as the multi-token
+steps a speculative verify produces, fuse the MoE up and gate lanes and
+size their mat-vec lane group from the tensor shape and the device: a lane
+needs enough accumulation steps to cover its reduction, and the grid that
+results still has to fill the compute units. That puts them at or ahead of
+the canonical path per decode step, worth about 6% on multi-token
+prediction with a 35B MoE. Perplexity is unchanged on MoE and moves within
+floating-point reassociation on dense (6.7010 to 6.6858 on a 27B dense
+model at two tokens), while wide batches stay exact. Validated on gfx906.
+
+MXFP4 weights repack the same way: rows carry the packed nibbles with a
+one-byte e8m0 scale plane after them, staying at the canonical 17 bytes per
+block so VRAM use does not grow. Measured against the canonical path:
+prefill +24% on a 35B MoE (one GPU) and +34% on gpt-oss-120b (two GPUs,
+layer split), generation +19% on a 27B dense model, perplexity within
+0.02%. Narrow batches and decode share the Q8_0 machinery through
+per-type kernel traits: 2-8 token verify batches take one mat-vec per
+expert assignment instead of the tiled GEMM (+41% at four tokens on the
+35B MoE), decode fuses the up and gate lanes (+6% generation on the 35B
+MoE), and tensor-split placement is admitted (+28% prefill on two GPUs
+with `-sm tensor`).
 
 ```bash
 cmake -B build \

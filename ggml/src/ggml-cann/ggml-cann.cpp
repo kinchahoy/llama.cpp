@@ -2534,6 +2534,9 @@ static bool ggml_backend_cann_supports_op(ggml_backend_dev_t dev, const ggml_ten
             }
         case GGML_OP_ROPE:
             {
+                if (((const int32_t *) op->op_params)[15] != 0) {
+                    return false; // FIXME: support ggml_rope_set_offset
+                }
                 if (op->src[0]->ne[0] > 896) {
                     return false;
                 }
@@ -2815,6 +2818,7 @@ static void ggml_backend_cann_device_get_props(ggml_backend_dev_t dev, ggml_back
         /* .host_buffer           = */ host_buffer,
         /* .buffer_from_host_ptr  = */ false,
         /* .events                = */ true,
+        /* .mmap_support          = */ true,
     };
 }
 
@@ -2944,6 +2948,7 @@ static const ggml_backend_device_i ggml_backend_cann_device_interface = {
     /* .event_new               = */ ggml_backend_cann_device_event_new,
     /* .event_free              = */ ggml_backend_cann_device_event_free,
     /* .event_synchronize       = */ ggml_backend_cann_device_event_synchronize,
+    /* .event_query             = */ nullptr,
 };
 
 // backend reg

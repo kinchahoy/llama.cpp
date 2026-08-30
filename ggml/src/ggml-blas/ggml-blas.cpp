@@ -367,6 +367,7 @@ static void ggml_backend_blas_device_get_props(ggml_backend_dev_t dev, struct gg
         /* .host_buffer           = */ false,
         /* .buffer_from_host_ptr  = */ true,
         /* .events                = */ false,
+        /* .mmap_support          = */ true,
     };
 }
 
@@ -468,6 +469,7 @@ static const struct ggml_backend_device_i ggml_backend_blas_device_i = {
     /* .event_new            = */ NULL,
     /* .event_free           = */ NULL,
     /* .event_synchronize    = */ NULL,
+    /* .event_query          = */ NULL,
 };
 
 // backend reg interface

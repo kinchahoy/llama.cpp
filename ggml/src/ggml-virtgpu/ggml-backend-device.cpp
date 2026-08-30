@@ -65,7 +65,7 @@ static void ggml_backend_remoting_device_get_props(ggml_backend_dev_t dev, ggml_
 
     virtgpu * gpu = DEV_TO_GPU(dev);
     apir_device_get_props(gpu, &props->caps.async, &props->caps.host_buffer, &props->caps.buffer_from_host_ptr,
-                          &props->caps.events);
+                          &props->caps.events, &props->caps.mmap_support);
 
     props->caps.buffer_from_host_ptr = false;
     props->caps.async                = false;
@@ -157,4 +157,5 @@ const ggml_backend_device_i ggml_backend_remoting_device_interface = {
     /* .event_new            = */ NULL,
     /* .event_free           = */ NULL,
     /* .event_synchronize    = */ NULL,
+    /* .event_query          = */ NULL,
 };

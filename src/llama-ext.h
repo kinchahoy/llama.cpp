@@ -142,9 +142,16 @@ LLAMA_API float * llama_get_embeddings_layer_inp(struct llama_context * ctx, uin
 // gather+encode to the first draft and keep the target's prefill pipeline overlap.
 // Returns the buffer base (or nullptr on failure/disable).
 LLAMA_API float * llama_set_embeddings_layer_inp_accum(struct llama_context * ctx, int32_t n_tokens_cap);
-// Returns the base of lid's accum region (or nullptr). Does NOT synchronize -
-// bound the read with llama_layer_inp_accum_wait or a full llama_synchronize.
+// Returns the base of lid's accum region for sequence zero (or nullptr). Does
+// NOT synchronize; bound the read with a readiness wait or a full
+// llama_synchronize. Use the sequence-aware form when n_seq_max > 1.
 LLAMA_API const float * llama_get_embeddings_layer_inp_accum(struct llama_context * ctx, uint32_t lid);
+LLAMA_API const float * llama_get_embeddings_layer_inp_accum_seq(
+        struct llama_context * ctx, uint32_t lid, llama_seq_id seq_id);
+LLAMA_API uint64_t llama_layer_inp_accum_span_epoch(
+        struct llama_context * ctx, llama_seq_id seq_id, llama_pos p0, int32_t n_tokens);
+LLAMA_API bool llama_layer_inp_accum_wait_epoch(struct llama_context * ctx, uint64_t epoch);
+LLAMA_API bool llama_layer_inp_accum_ready_epoch(struct llama_context * ctx, uint64_t epoch);
 // Block until every accum row below position p_end is on the host, using the
 // per-ubatch readiness events. Unlike llama_synchronize this does not wait for
 // work enqueued afterwards. Returns false when no live event covers p_end - the
@@ -167,7 +174,15 @@ LLAMA_API llama_context * llama_get_ctx_other(struct llama_context * ctx);
 // model/context data extraction
 //
 
+LLAMA_API int32_t llama_model_dflash_selector_top_k(const struct llama_model * model);
+
 // returns pointer to the target-model layer indices
 LLAMA_API const int32_t * llama_model_target_layer_ids  (const struct llama_model * model);
 // returns the number of extracted layers from target model
 LLAMA_API uint32_t        llama_model_target_layer_ids_n(const struct llama_model * model);
+
+// retrieves the whole token embedding matrix in F32 format (n_embd * n_vocab)
+// returns total number of elements or 0 on error
+// if out is nullptr, returns the number of tokens without writing to out
+// caller must allocate enough memory for out before calling
+LLAMA_API uint32_t llama_model_get_tok_embd(const struct llama_model * model, float * out);
