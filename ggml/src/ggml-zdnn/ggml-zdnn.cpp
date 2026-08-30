@@ -487,7 +487,8 @@ static void ggml_backend_zdnn_device_get_props(ggml_backend_dev_t dev, ggml_back
         /* .async                = */ false,
         /* .host_buffer          = */ false,
         /* .buffer_from_host_ptr = */ false,
-        /* .events               = */ false
+        /* .events               = */ false,
+        /* .mmap_support         = */ true,
     };
 }
 
@@ -546,6 +547,7 @@ static ggml_backend_device_i ggml_backend_zdnn_device_i = {
     /* .event_new            = */ NULL,
     /* .event_free           = */ NULL,
     /* .event_synchronize    = */ NULL,
+    /* .event_query          = */ NULL,
 };
 
 //

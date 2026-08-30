@@ -40,6 +40,7 @@ bool ggml_op_can_inplace(enum ggml_op op) {
         case GGML_OP_SILU_BACK:
         case GGML_OP_RMS_NORM:
         case GGML_OP_RMS_NORM_BACK:
+        case GGML_OP_CLAMP:
         case GGML_OP_SOFT_MAX:
         case GGML_OP_SOFT_MAX_BACK:
             return true;
@@ -521,20 +522,43 @@ struct ggml_gallocr {
     struct gallocr_layout layouts[GGML_GALLOC_MAX_LAYOUTS];
     int64_t layout_uses;
     uint64_t active_key_ids; // buffer-id checksum of the active layout (0 = unknown)
+    bool layout_cache_enabled;
 };
 
-static bool ggml_gallocr_layout_cache_enabled(void) {
-    static int enabled = -1;
-    if (enabled < 0) {
-        const char * env = getenv("GGML_GALLOC_LAYOUT_CACHE");
-        enabled = env == NULL || atoi(env) != 0;
+static uint64_t ggml_gallocr_graph_tensor_ordinal(
+        const struct ggml_hash_set * tensors, const uint64_t * ordinals, const struct ggml_tensor * tensor) {
+    if (tensor == NULL) {
+        return 0;
     }
-    return enabled != 0;
+    const size_t slot = ggml_hash_find(tensors, tensor);
+    if (slot == GGML_HASHSET_FULL || !ggml_bitset_get(tensors->used, slot)) {
+        return UINT64_MAX;
+    }
+    return ordinals[slot];
 }
 
-// checksum over the graph's op/type sequence, excluding shapes
+// checksum over graph connectivity, ops and types. Floating-point shapes stay
+// excluded so one worst-case prefill layout can serve smaller runtime chunks.
 static uint64_t ggml_gallocr_graph_key(const struct ggml_cgraph * graph) {
     uint64_t h = 1469598103934665603ULL;
+    const size_t n_tensors = (size_t) graph->n_nodes + (size_t) graph->n_leafs;
+    if (n_tensors == 0) {
+        return h;
+    }
+
+    struct ggml_hash_set tensors = ggml_hash_set_new(n_tensors);
+    uint64_t * ordinals = calloc(tensors.size, sizeof(*ordinals));
+    GGML_ASSERT(ordinals != NULL);
+
+    for (int i = 0; i < graph->n_nodes; i++) {
+        const size_t slot = ggml_hash_find_or_insert(&tensors, graph->nodes[i]);
+        ordinals[slot] = (uint64_t) i + 1;
+    }
+    for (int i = 0; i < graph->n_leafs; i++) {
+        const size_t slot = ggml_hash_find_or_insert(&tensors, graph->leafs[i]);
+        ordinals[slot] = (uint64_t) graph->n_nodes + (uint64_t) i + 1;
+    }
+
 #define GGML_GALLOC_KEY_MIX(v) h = (h ^ (uint64_t)(v)) * 1099511628211ULL
     GGML_GALLOC_KEY_MIX(graph->n_nodes);
     GGML_GALLOC_KEY_MIX(graph->n_leafs);
@@ -542,15 +566,35 @@ static uint64_t ggml_gallocr_graph_key(const struct ggml_cgraph * graph) {
         const struct ggml_tensor * node = graph->nodes[i];
         GGML_GALLOC_KEY_MIX(node->op);
         GGML_GALLOC_KEY_MIX(node->type);
+        GGML_GALLOC_KEY_MIX(node->flags);
         GGML_GALLOC_KEY_MIX(node->view_src != NULL || node->data != NULL);
+        GGML_GALLOC_KEY_MIX(ggml_gallocr_graph_tensor_ordinal(&tensors, ordinals, node->view_src));
+        for (int j = 0; j < GGML_MAX_SRC; j++) {
+            GGML_GALLOC_KEY_MIX(ggml_gallocr_graph_tensor_ordinal(&tensors, ordinals, node->src[j]));
+        }
     }
     for (int i = 0; i < graph->n_leafs; i++) {
         const struct ggml_tensor * leaf = graph->leafs[i];
         GGML_GALLOC_KEY_MIX(leaf->op);
         GGML_GALLOC_KEY_MIX(leaf->type);
+        GGML_GALLOC_KEY_MIX(leaf->flags);
         GGML_GALLOC_KEY_MIX(leaf->view_src != NULL || leaf->data != NULL);
+        GGML_GALLOC_KEY_MIX(ggml_gallocr_graph_tensor_ordinal(&tensors, ordinals, leaf->view_src));
+        // Integer graph inputs carry row, position and sequence plans. Their
+        // dimensions can change the allocation lifetime topology even when the
+        // op/type sequence is identical (for example, a DSV4 ubatch that first
+        // mixes two server slots). Keep variable-size floating-point masks out
+        // of the key so ordinary long-prefill chunks still share one layout.
+        if ((leaf->flags & GGML_TENSOR_FLAG_INPUT) &&
+                (leaf->type == GGML_TYPE_I32 || leaf->type == GGML_TYPE_I64)) {
+            for (int d = 0; d < GGML_MAX_DIMS; d++) {
+                GGML_GALLOC_KEY_MIX(leaf->ne[d]);
+            }
+        }
     }
 #undef GGML_GALLOC_KEY_MIX
+    free(ordinals);
+    ggml_hash_set_free(&tensors);
     return h == 0 ? 1 : h;
 }
 
@@ -575,6 +619,9 @@ static bool ggml_gallocr_layout_restore(ggml_gallocr_t galloc, struct ggml_cgrap
 ggml_gallocr_t ggml_gallocr_new_n(ggml_backend_buffer_type_t * bufts, int n_bufs) {
     ggml_gallocr_t galloc = (ggml_gallocr_t)calloc(1, sizeof(struct ggml_gallocr));
     GGML_ASSERT(galloc != NULL);
+
+    const char * layout_cache_env = getenv("GGML_GALLOC_LAYOUT_CACHE");
+    galloc->layout_cache_enabled = layout_cache_env == NULL || atoi(layout_cache_env) != 0;
 
     galloc->bufts = calloc(n_bufs, sizeof(ggml_backend_buffer_type_t));
     GGML_ASSERT(galloc->bufts != NULL);
@@ -1171,7 +1218,7 @@ static bool ggml_gallocr_needs_realloc(ggml_gallocr_t galloc, struct ggml_cgraph
 // the buffer-id assignment it was reserved with - same-topology graphs with
 // different assignments (multi-buffer schedulers) get separate slots
 static void ggml_gallocr_layout_store(ggml_gallocr_t galloc, uint64_t key, uint64_t key_ids) {
-    if (!ggml_gallocr_layout_cache_enabled() || key == 0) {
+    if (!galloc->layout_cache_enabled || key == 0) {
         return;
     }
     galloc->active_key_ids = key_ids;
@@ -1261,7 +1308,7 @@ static void ggml_gallocr_layout_store(ggml_gallocr_t galloc, uint64_t key, uint6
 // becomes the active allocation and no reserve (hence no scheduler drain)
 // is needed
 static bool ggml_gallocr_layout_restore(ggml_gallocr_t galloc, struct ggml_cgraph * graph, uint64_t key_ids) {
-    if (!ggml_gallocr_layout_cache_enabled()) {
+    if (!galloc->layout_cache_enabled) {
         return false;
     }
 
