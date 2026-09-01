@@ -2063,30 +2063,8 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
     const size_t n_max_backend_buffer = ml.ctx_map.size() * ml.files.size();
     pimpl->ctxs_bufs.reserve(n_max_backend_buffer);
 
-    // Bind lazily-read tensors straight to the file mapping. Must happen before the
-    // allocator below, which only sizes tensors whose data is still null - that is
-    // what keeps the gather table out of the allocation and off the host RSS.
-    for (auto & [buft_lazy, ctx_lazy] : ml.ctx_map) {
-        for (ggml_tensor * t = ggml_get_first_tensor(ctx_lazy.get()); t != nullptr;
-                t = ggml_get_next_tensor(ctx_lazy.get(), t)) {
-            void * addr = ml.lazy_tensor_addr(ggml_get_name(t));
-            if (addr == nullptr) {
-                continue;
-            }
-            ggml_backend_buffer_t lbuf = ggml_backend_cpu_buffer_from_ptr(addr, ggml_nbytes(t));
-            if (lbuf == nullptr) {
-                continue;
-            }
-            ggml_backend_buffer_set_usage(lbuf, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
-            t->buffer = lbuf;
-            t->data   = addr;
-            pimpl->lazy_bufs.emplace_back(lbuf);
-            LLAMA_LOG_INFO("%s: tensor %s bound to its file mapping, rows read on demand\n",
-                    __func__, ggml_get_name(t));
-        }
-    }
-
-    for (auto & [buft, ctx_ptr] : ml.ctx_map) {
+    for (auto & [ctx_key, ctx_ptr] : ml.ctx_map) {
+        ggml_backend_buffer_type_t buft = ctx_key.buft;
         ggml_context * ctx = ctx_ptr.get();
 
         // skip contexts without tensors
@@ -2132,7 +2110,11 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
         bool is_default_buft = buft == ggml_backend_dev_buffer_type(dev);
 
         std::vector<ggml_backend_buffer_ptr> bufs;
-        if (ml.use_mmap && use_mmap_buffer && buffer_from_host_ptr_supported && is_default_buft) {
+
+        // a lazy context is mapped whatever the load mode, but the memory-fit pass maps nothing
+        const bool is_lazy_mapped = ctx_key.lazy && !ml.no_alloc;
+
+        if ((ml.use_mmap || is_lazy_mapped) && use_mmap_buffer && buffer_from_host_ptr_supported && is_default_buft) {
             GGML_ASSERT(!ml.no_alloc);
             for (uint32_t idx = 0; idx < ml.files.size(); idx++) {
                 // only the mmap region containing the tensors in the model is mapped to the backend buffer
