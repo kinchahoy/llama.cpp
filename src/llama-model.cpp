@@ -25,6 +25,8 @@
 #include "ggml.h"
 #include "ggml-cpp.h"
 
+#include <thread>
+#include <atomic>
 #include <algorithm>
 #include <cassert>
 #include <cfloat>
@@ -378,6 +380,46 @@ static bool llama_ple_shard_enabled() {
         return on;
     }();
     return enabled;
+}
+
+// PLE gather table prefault, opt in with LLAMA_PLE_PREFAULT=1.
+// The lazily mapped table is paged in one row at a time by the first requests of a fresh process, and the rows a prompt touches are hash-selected, so there is nothing to predict:
+// touch every page once at load from a few threads and join, so the first request runs on a warm table.
+// Costs load time and page cache, which the kernel may reclaim under pressure.
+// file-backed pages count in RSS while mapped.
+// No VRAM.
+static void llama_ple_prefault(const ggml_tensor * tab) {
+    static const bool enabled = [] {
+        const char * s = getenv("LLAMA_PLE_PREFAULT");
+        return s != nullptr && atoi(s) != 0;
+    }();
+    if (!enabled || tab == nullptr || tab->data == nullptr || tab->buffer == nullptr ||
+            !ggml_backend_buffer_is_host(tab->buffer)) {
+        return;
+    }
+    const size_t nbytes = ggml_nbytes(tab);
+    const size_t page   = 4096;
+    const int n_threads = 8;
+    const int64_t t0 = ggml_time_us();
+    std::vector<std::thread> workers;
+    std::atomic<uint64_t> sink{0};
+    for (int t = 0; t < n_threads; ++t) {
+        workers.emplace_back([&, t]() {
+            const size_t lo = (nbytes * t) / n_threads;
+            const size_t hi = (nbytes * (t + 1)) / n_threads;
+            const volatile uint8_t * p = (const volatile uint8_t *) tab->data;
+            uint64_t acc = 0;
+            for (size_t off = lo; off < hi; off += page) {
+                acc += p[off];
+            }
+            sink += acc;
+        });
+    }
+    for (auto & w : workers) {
+        w.join();
+    }
+    LLAMA_LOG_WARN("%s: LLAMA_PLE_PREFAULT=1, touched %zu MiB of %s in %.1f s (%d threads)\n", __func__,
+                   nbytes / (1024 * 1024), tab->name, (ggml_time_us() - t0) / 1e6, n_threads);
 }
 
 struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const struct ggml_tensor * tensor, void * userdata) {
@@ -1513,7 +1555,6 @@ struct llama_model::impl {
     // buffers over a file mapping for TENSOR_READ_LAZY tensors. Held separately from
     // ctxs_bufs: they are not allocations, so they must not appear in the memory
     // breakdown, and ctxs_bufs carries a one-buffer-per-context invariant.
-    std::vector<ggml_backend_buffer_ptr> lazy_bufs;
 
     buft_list_t cpu_buft_list;
     std::map<ggml_backend_dev_t, buft_list_t> gpu_buft_list;
@@ -1587,6 +1628,8 @@ void llama_model_base::load_hparams(llama_model_loader & ml) {
     ml.get_key(LLM_KV_POOLING_TYPE,            hparams.pooling_type,    false);
     ml.get_key(LLM_KV_BLOCK_COUNT,             hparams.n_layer_all);
     GGML_ASSERT(hparams.n_layer_all > 0 && hparams.n_layer_all <= LLAMA_MAX_LAYERS);
+    ml.get_key(LLM_KV_NEXTN_PREDICT_LAYERS,    hparams.n_layer_nextn,   false);
+    GGML_ASSERT(hparams.n_layer_nextn <= hparams.n_layer_all);
     ml.get_key(LLM_KV_EXPERT_COUNT,            hparams.n_expert,        false);
     ml.get_key(LLM_KV_EXPERT_USED_COUNT,       hparams.n_expert_used,   false);
     ml.get_key(LLM_KV_EXPERT_GROUP_COUNT,      hparams.n_expert_groups, false);
@@ -1646,8 +1689,8 @@ void llama_model_base::load_hparams(llama_model_loader & ml) {
     std::fill(hparams.swiglu_clamp_exp.begin(),   hparams.swiglu_clamp_exp.end(),   0.0f);
     std::fill(hparams.swiglu_clamp_shexp.begin(), hparams.swiglu_clamp_shexp.end(), 0.0f);
 
-    ml.get_key_or_arr(LLM_KV_FEED_FORWARD_LENGTH,  hparams.n_ff_arr,   hparams.n_layer(), false);
-    ml.get_key_or_arr(LLM_KV_ATTENTION_HEAD_COUNT, hparams.n_head_arr, hparams.n_layer(), false);
+    ml.get_key_or_arr(LLM_KV_FEED_FORWARD_LENGTH,  hparams.n_ff_arr,   hparams.n_layer_all, false);
+    ml.get_key_or_arr(LLM_KV_ATTENTION_HEAD_COUNT, hparams.n_head_arr, hparams.n_layer_all, false);
 
     // Populate deepstack_mapping_arr - initialized to -1 (no deepstack)
     std::fill(hparams.deepstack_mapping_arr.begin(), hparams.deepstack_mapping_arr.end(), -1);
@@ -1655,7 +1698,7 @@ void llama_model_base::load_hparams(llama_model_loader & ml) {
     // n_head_kv is optional, default to n_head
     hparams.n_head_kv_arr = hparams.n_head_arr;
 
-    ml.get_key_or_arr(LLM_KV_ATTENTION_HEAD_COUNT_KV, hparams.n_head_kv_arr, hparams.n_layer(), false);
+    ml.get_key_or_arr(LLM_KV_ATTENTION_HEAD_COUNT_KV, hparams.n_head_kv_arr, hparams.n_layer_all, false);
 
     bool rope_finetuned = false;
     ml.get_key(LLM_KV_ROPE_SCALING_FINETUNED, rope_finetuned, false);
@@ -2211,6 +2254,8 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
             pimpl->mappings.emplace_back(std::move(mapping));
         }
     }
+
+    llama_ple_prefault(per_layer_tok_embd);
 
     return true;
 }
