@@ -2,13 +2,74 @@
 
 Campaign started: 2026-08-12
 
-Last updated: 2026-08-14
+Last updated: 2026-09-10
 
 Hardware: two AMD MI60 (gfx906) over PCIe
 
 Base source: `b8efb9510` (build 10275)
 
 Candidate source: `b8efb9510-dirty`; standalone implementation patch SHA-256 `080ecd80b35237237b48f9db89f4577b588f6ddd7411cca4cfed89e8c1ac3531`.
+
+## 2026-09-10 mx and llama.cpp head merge
+
+Branch: `mx-upstream-2026-09-09`
+
+Inputs: mx head `0c81bd502`, llama.cpp head `434ddbbc0`, and PR 27825 head `ee5b990d1`. The measurements were made from the resolved but not yet committed llama.cpp-head merge. Release targets `llama-cli`, `llama-bench`, and `vr-test-gfx906-tp` built successfully with HIP for gfx906 and RCCL disabled.
+
+Canonical protocol: Qwen3.8 27B Q8_0, two MI60 GPUs, tensor split, Flash Attention, batch and ubatch 4096, actual cached depth 16384, PP2048, TG256, one repetition, and no warmup. See the exact command in [README.md](README.md).
+
+| Arm | PP t/s | TG t/s | Finding |
+| --- | ---: | ---: | --- |
+| Merged mx plus llama.cpp heads | 324.4369 | 18.3208 | Baseline; PP target met |
+| PR 27825 ROCm host-staged AllReduce | 325.7131 | 18.7649 | Best merged arm; keep |
+| PR 27825 rebuilt, resumed-session validation | 322.2327 | 18.4168 | PP target reconfirmed; TG remains below target |
+| Clean llama.cpp head, `../llamahead/build-norccl` | 196.9662 | 20.1327 | Confirms higher pure-head TG at real 16K depth |
+| Clean llama.cpp head, batch/ubatch 2048/512 | 179.5703 | 19.8510 | Non-apples-to-apples versus merged 4096/4096; modest defaults do not improve TG |
+| PR 27825 with `LLAMA_SHEXP_SPLIT=0` | 314.0392 | 17.6764 | Reject; shared-expert split helps PP and TG |
+| PR 27825 with `GGML_RP_GENERIC_MMV=1` | 315.6193 | 18.4499 | Reject; generic MMV loses to the repacked path |
+| Private exact BF16 overlap, batch/ubatch 2048 | 325.0877 | 18.5718 | Reject on this head; PR 27825 is simpler and faster |
+
+PR 27825 improved TG by 2.42% over the merged baseline while PP increased by 0.39%. The optimized branch is 65.36% faster than clean head in PP but 6.80% slower in TG. The immediate optimization problem is therefore the gfx906 TG path rather than prompt processing or a larger global batch.
+
+Resumed-session check on 2026-09-10: HEAD is `c0df68229`, MERGE_HEAD is `434ddbbc0`, and the index has no unresolved conflicts. The four unstaged files from the handoff and untracked `vr/build/` are present. All three requested targets rebuilt successfully with RCCL OFF. The modest clean-head run used the canonical command with `../llamahead/build-norccl/bin/llama-bench` and only batch/ubatch changed to 2048/512; clean-head source is unchanged at `434ddbbc0`. PP and TG sample times were 11405002441 ns and 12896066509 ns, respectively. This is one repetition, not a variance estimate.
+
+Retained AllReduce focused checks passed with `HIP_VISIBLE_DEVICES=0,1 GGML_CUDA_ALLREDUCE=internal`, overlap unset: `--n 1 --check` took 38351 us and `--n 2048 --check` took 81601 us. Both logged successful pipeline initialization. The harness checks 16 output values against 17408; this is a limited execution check, not model-quality validation. Its `wire=f32` label describes the old overlap control, not the generic pipeline's default BF16 round-trip (`GGML_CUDA_AR_BF16_THRESHOLD=1`).
+
+The clean head result does not reproduce 22 TG at 16K depth, but it supports the earlier observation: the shallower interactive run can reasonably be about 22 TG while the long-context canonical result is 20.13 TG. Use 20.13 TG as the first like-for-like target and retain 22 TG as the application goal.
+
+### 2026-09-10 afternoon TG isolation
+
+Correction: source inspection and the TG32 kernel trace show that the historical arms labeled PR 27825 did not exercise its AllReduce kernels with overlap off. `ggml_backend_cuda_comm_allreduce_internal()` still returned false on HIP unless the old exact overlap was active, so these arms used the meta-backend fallback. Pipeline initialization in the focused checks did not prove pipeline execution. The BF16 default described above applies only when the pipeline actually runs. Treat the earlier attribution of the throughput difference to PR 27825 as unproven.
+
+The earlier no-repack process lost its session handle without a captured result. It was rerun with persistent output under `/tmp/mx-tg-20260910/`. All arms below use the same merged binary, canonical 4096/4096 settings, and real 16K depth. No source changes were made for these experiments.
+
+| Arm | PP t/s | TG t/s | Raw output |
+| --- | ---: | ---: | --- |
+| Repacking disabled (`-nr 1`) | 130.4371 | 16.9108 | `no-repack.jsonl` |
+| Repacking enabled, serial dispatch (`GGML_META_PARALLEL_DISPATCH=0`) | 317.0269 | 18.7604 | `serial.jsonl` |
+| Fresh default control | 325.4868 | 18.6829 | `control.jsonl` |
+| HIP overlap-only guard removed; generic AllReduce active | 394.1701 | 25.8895 | `ar-enabled.jsonl` |
+
+Against the fresh control, disabling repacking loses about 59.9% PP and 9.49% TG. Serial dispatch gains only 0.42% TG while losing 2.60% PP; do not promote it from this single sample. Keep repacking and parallel dispatch. The no-repack result does not support blaming repacked weight layout alone for the clean-head TG advantage.
+
+The TG32 trace is in `/tmp/mx-tg-20260910/profile/`. Tracing stretched decode to 123.14 seconds (0.2599 TG), so its absolute timings are not representative. It contains repacked single-token kernels and host/device copies, but no `ggml_cuda_ar` kernel, which prompted inspection of the stale HIP guard. Removing only that guard allows the existing generic pipeline to execute.
+
+Retain the 11-line guard removal: it raises PP by 21.10% and TG by 38.57% against the fresh fallback control, meeting the 300+ PP / 22-25 TG target at 16K. Both requested samples completed with no warmup and one repetition; sample times are 5195727007 ns for PP2048 and 9888164938 ns for TG256. The old overlap controls remain unset, with repacking and parallel dispatch at their defaults. No 64K run was performed.
+
+The CLI, bench, and focused test rebuilt successfully. After removing the guard, both `--n 1 --check` and `--n 2048 --check` passed. The n=1 trace explicitly records four `ggml_cuda_ar_kernel<float, __hip_bfloat16>` launches in `ar-check/n1_kernel_stats.csv`, proving execution rather than just pipeline initialization. The n=2048 unprofiled check took 67643 us. Logs are `ar-check.log` and `ar-check-2048.log`. These all-ones checks cover limited execution correctness, not model quality; active transport defaults to BF16, unlike the earlier fallback arms. No perplexity or model-output equivalence claim is made.
+
+Whole-token capture requires custom peer-access AllReduce through `comm_ar_prepare`; it cannot capture the retained host-staged path. Disabling parallel dispatch also disables this capture attempt. These are one-shot screening measurements, not estimates of run-to-run variance.
+
+### 64K winner gate
+
+The PR 27825 winner was run once with the identical command except for `-d 65536`.
+
+| Depth | PP t/s | TG t/s | PP change from 16K | TG change from 16K |
+| ---: | ---: | ---: | ---: | ---: |
+| 16384 | 325.7131 | 18.7649 | - | - |
+| 65536 | 216.0927 | 16.2924 | -33.65% | -13.17% |
+
+The 64K cache and benchmark fit on both 32 GB MI60 GPUs. This is historical evidence only: the user canceled further 64K testing on 2026-09-10 and set the active target to 300+ PP and 22-25 TG at depth 16384.
 
 ## 2026-08-14 head merge and Qwen3.8 validation
 
