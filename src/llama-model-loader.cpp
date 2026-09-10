@@ -1421,6 +1421,7 @@ void llama_model_loader::done_getting_tensors(bool partial) const {
     }
 }
 
+
 void llama_model_loader::init_mappings(bool prefetch, llama_mlocks * mlock_mmaps) {
     // note: read_lazy also requires mmap; this condition make sure it's usable even when --load-mode is not set to mmap
     if (use_mmap || lazy.any()) {
