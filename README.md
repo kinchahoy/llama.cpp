@@ -2,6 +2,8 @@
 > **mx-llama.cpp** - a fork of llama.cpp for multi-GPU inference. Backend-generic,
 > kernel tuning for AMD gfx906 (MI50).
 > Images: **[mxxm/mx-llama.cpp](https://hub.docker.com/r/mxxm/mx-llama.cpp)**
+>
+> **ROCm Multi-GPU Quickstart:** See **[buildguide.md](buildguide.md)** (focusing on gfx906, no RCCL, and Q8 optimization; adds Q8_0/MXFP4 repacking, chunked delta-net, and MoE TP).
 
 ```
 -sm tensor          [0 1 2 3 4 5 6 7]                  upstream: one group, all layers
