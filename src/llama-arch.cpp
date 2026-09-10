@@ -578,6 +578,12 @@ static const std::map<llm_tensor, const char *> LLM_TENSOR_NAMES = {
     { LLM_TENSOR_NEXTN_HNORM,                            "blk.%d.nextn.hnorm" },
     { LLM_TENSOR_NEXTN_SHARED_HEAD_HEAD,                 "blk.%d.nextn.shared_head_head" },
     { LLM_TENSOR_NEXTN_SHARED_HEAD_NORM,                 "blk.%d.nextn.shared_head_norm" },
+    // qwen4exp splits the nextn fusion into two projections and folds its own
+    // 4-branch residual, which the DeepSeek-shaped set above does not cover
+    { LLM_TENSOR_NEXTN_FC_HIDDEN,                        "blk.%d.nextn.fc_hidden" },
+    { LLM_TENSOR_NEXTN_HC_NORM,                          "blk.%d.nextn.hc_head_norm" },
+    { LLM_TENSOR_NEXTN_HC_DOWN,                          "blk.%d.nextn.hc_head_down" },
+    { LLM_TENSOR_NEXTN_HC_UP,                            "blk.%d.nextn.hc_head_up" },
     { LLM_TENSOR_ATTN_SUB_NORM,                          "blk.%d.attn_sub_norm" },
     { LLM_TENSOR_FFN_SUB_NORM,                           "blk.%d.ffn_sub_norm" },
     { LLM_TENSOR_DEC_OUTPUT_NORM,                        "dec.output_norm" },
@@ -745,7 +751,7 @@ static const std::map<llm_tensor, llm_tensor_info> LLM_TENSOR_INFOS = {
     {LLM_TENSOR_ATTN_KV_B,                  {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
     {LLM_TENSOR_ATTN_KV,                    {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
     {LLM_TENSOR_ATTN_KV_NORM,               {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
-    {LLM_TENSOR_ATTN_OUT_A,                 {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
+    {LLM_TENSOR_ATTN_OUT_A,                 {LLM_TENSOR_LAYER_REPEATING, GGML_OP_RESHAPE}},
     {LLM_TENSOR_ATTN_OUT_B,                 {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
     {LLM_TENSOR_HC_HEAD_FN,                 {LLM_TENSOR_LAYER_OUTPUT,    GGML_OP_MUL_MAT}},
     {LLM_TENSOR_HC_HEAD_BASE,               {LLM_TENSOR_LAYER_OUTPUT,    GGML_OP_ADD}},
@@ -967,6 +973,10 @@ static const std::map<llm_tensor, llm_tensor_info> LLM_TENSOR_INFOS = {
     {LLM_TENSOR_NEXTN_HNORM,                {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
     {LLM_TENSOR_NEXTN_SHARED_HEAD_HEAD,     {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
     {LLM_TENSOR_NEXTN_SHARED_HEAD_NORM,     {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
+    {LLM_TENSOR_NEXTN_FC_HIDDEN,            {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
+    {LLM_TENSOR_NEXTN_HC_NORM,              {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
+    {LLM_TENSOR_NEXTN_HC_DOWN,              {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
+    {LLM_TENSOR_NEXTN_HC_UP,                {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
     // Nemotron 3 Super
     // latent projections feed ggml_mul_mat, the buft probe must use MUL_MAT to keep them on GPU
     {LLM_TENSOR_FFN_LATENT_DOWN,            {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
@@ -1134,6 +1144,8 @@ bool llm_arch_supports_sm_tensor(const llm_arch & arch) {
         case LLM_ARCH_OLMOE:
         case LLM_ARCH_DEEPSEEK2:
         case LLM_ARCH_DEEPSEEK32:
+        // DEEPSEEK4 is deliberately absent: it runs under -sm tensor (upstream since
+        // b10604, the fork via llm_arch_sm_tensor_replicates_attention). Do not re-add it.
         case LLM_ARCH_HY_V4:
         case LLM_ARCH_DOTS3NOTE:
         case LLM_ARCH_GLM_DSA:
@@ -1142,19 +1154,30 @@ bool llm_arch_supports_sm_tensor(const llm_arch & arch) {
         case LLM_ARCH_NEMOTRON_H:
         case LLM_ARCH_NEMOTRON_H_MOE:
         case LLM_ARCH_GRANITE_HYBRID:
-        case LLM_ARCH_LFM2:
-        case LLM_ARCH_LFM2MOE:
-        case LLM_ARCH_MINIMAX_01:
         // MINIMAX_M2 is deliberately absent: the fork supports it under -sm tensor.
+        // Do not re-add it. LFM2/LFM2MOE were dropped from this list by upstream.
+        case LLM_ARCH_MINIMAX_01:
         case LLM_ARCH_MINIMAX_M3:
         case LLM_ARCH_MISTRAL4:
         case LLM_ARCH_KIMI_LINEAR:
         case LLM_ARCH_BAILINGMOE3:
         case LLM_ARCH_KIMI_K3:
         case LLM_ARCH_QWEN3TTS:
-        case LLM_ARCH_QWEN4EXP:   // TODO: fix test-llama-archs
             return false;
         default:
             return true;
+    }
+}
+
+bool llm_arch_sm_tensor_replicates_attention(const llm_arch & arch) {
+    // MLA archs share a single KV latent head that cannot be head-split, so the
+    // attention is replicated (design A) and only the experts/FFN are split.
+    switch (arch) {
+        case LLM_ARCH_DEEPSEEK2:
+        case LLM_ARCH_DEEPSEEK32:
+        case LLM_ARCH_DEEPSEEK4:
+            return true;
+        default:
+            return false;
     }
 }

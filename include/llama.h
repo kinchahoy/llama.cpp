@@ -321,11 +321,10 @@ extern "C" {
         enum llama_split_mode split_mode; // how to split the model across multiple GPUs
         enum llama_load_mode  load_mode;  // how to load the model
 
-        enum llama_lazy_mode lazy_mode; // on-demand reading of tensors marked by the arch
-
         // when split_mode == LLAMA_SPLIT_MODE_TENSOR, GPUs per TP group. Remaining GPUs form pipeline stages.
         // 0 (default): all GPUs in one TP group (original behavior). Must divide the device count.
         int32_t tensor_parallel_size;
+        enum llama_lazy_mode lazy_mode; // on-demand reading of tensors marked by the arch
 
         // the GPU that is used for the entire model when split_mode is LLAMA_SPLIT_MODE_NONE
         int32_t main_gpu;

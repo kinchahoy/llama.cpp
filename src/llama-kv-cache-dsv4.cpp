@@ -650,7 +650,40 @@ static llama_kv_cache_dsv4_context::comp_plan dsv4_build_comp_plan(
         plan.state_persist_dst_idxs.push_back(row.dst);
     }
 
-    if (n_rs_seq > 0) {
+    // Phase-aware rollback snapshot/restore planning. Speculative rollback
+    // only ever targets positions within the current verify window, and every
+    // rollbackable batch snapshots its own pre-batch state (the
+    // d <= n_seq_tokens planes), so snapshot planning on prompt-prefill
+    // batches is dead weight - measured as the whole 2.4x -sm layer prefill
+    // cost with a drafter attached (+14 sched splits, state copies on every
+    // device per ubatch). The gate is per ubatch, because the stream loop
+    // below emits fixed-width entries for every stream: an ubatch is a prefill
+    // when every sequence in it carries many tokens with at most one logit
+    // output and no pending rollback. A batched verify wants logits for every
+    // token and keeps full planning, and a pending rollback is always restored.
+    // Set LLAMA_DSV4_NO_PREFILL_SNAPSHOT=0 to force the old always-on planning.
+    static const bool no_pp_snap = []() {
+        const char * env = getenv("LLAMA_DSV4_NO_PREFILL_SNAPSHOT");
+        return !env || atoi(env) > 0;
+    }();
+    bool ub_prefill = no_pp_snap && n_rs_seq > 0 && ubatch.n_seqs_unq > 0;
+    for (uint32_t s = 0; ub_prefill && s < ubatch.n_seqs_unq; ++s) {
+        const llama_seq_id seq_id = ubatch.seq_id_unq[s];
+        const uint32_t rollback = seq_id >= 0 && (uint32_t) seq_id < rs_idx.size() ? rs_idx[seq_id] : 0;
+        uint32_t n_tok = 0;
+        uint32_t n_out = 0;
+        for (uint32_t i = 0; i < ubatch.n_tokens; ++i) {
+            if (dsv4_token_has_seq(ubatch, i, seq_id)) {
+                n_tok++;
+                if (ubatch.output && ubatch.output[i]) {
+                    n_out++;
+                }
+            }
+        }
+        ub_prefill = rollback == 0 && n_tok >= 64 && n_out <= 1;
+    }
+
+    if (n_rs_seq > 0 && !ub_prefill) {
         // Emit restore/snapshot entries for all layout streams so that the
         // graph tensor sizes do not depend on the ubatch's sequence count.
         // Streams not present in the ubatch get no-op entries.
@@ -863,8 +896,16 @@ static llama_kv_cache_dsv4_context::comp_plan dsv4_build_reserve_comp_plan(
 
     const uint64_t state_rows = (uint64_t) state_size*n_stream;
     const size_t n_persist = (size_t) std::min<uint64_t>(ubatch.n_tokens, state_rows);
-    const size_t n_restore = n_rs_seq > 0 ? (size_t) state_size*n_stream : 0;
-    const size_t n_snapshot = (size_t) n_rs_seq*state_size*n_stream;
+    // must mirror the phase-aware snapshot gate in the plan fill above -
+    // reserve ubatches are synthetic (zero output flags, no pending rollback),
+    // so the per-seq classification reduces to the per-seq token count here
+    static const bool no_pp_snap = []() {
+        const char * env = getenv("LLAMA_DSV4_NO_PREFILL_SNAPSHOT");
+        return !env || atoi(env) > 0;
+    }();
+    const bool skip_rs = no_pp_snap && std::max<uint32_t>(1, ubatch.n_seq_tokens) >= 64;
+    const size_t n_restore = (n_rs_seq > 0 && !skip_rs) ? (size_t) state_size*n_stream : 0;
+    const size_t n_snapshot = (n_rs_seq > 0 && !skip_rs) ? (size_t) n_rs_seq*state_size*n_stream : 0;
 
     plan.state_pos .resize(ubatch.n_tokens);
     plan.state_persist_src_idxs.resize(n_persist);
@@ -1448,6 +1489,12 @@ llama_memory_context_ptr llama_kv_cache_dsv4::init_update(llama_context * lctx, 
 bool llama_kv_cache_dsv4::get_can_shift() const {
     // Compressed row metadata uses block-derived positions. Keep shifting
     // disabled until DSV4 compressed-cache shift semantics are wired.
+    return false;
+}
+
+bool llama_kv_cache_dsv4::get_can_checkpoint() const {
+    // The compressed attention state cannot currently be restored losslessly
+    // from a partial sequence checkpoint.
     return false;
 }
 

@@ -13,12 +13,16 @@
 #include "llama-sampler.h"
 #include "llama.h"
 
+#include "../ggml/src/ggml-backend-sched-impl.h"
+
+#include <algorithm>
 #include <cinttypes>
 #include <cmath>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
 #include <string>
+
 
 //
 // llama_context
@@ -105,6 +109,13 @@ llama_context::llama_context(
     if (cparams.n_rs_seq > 0 && !llm_arch_supports_rs_rollback(model.arch)) {
         LLAMA_LOG_DEBUG("%s: n_rs_seq=%u requested but model does not support recurrent partial rollback; clamping to 0\n",
                         __func__, cparams.n_rs_seq);
+        cparams.n_rs_seq = 0;
+    } else if (cparams.n_rs_seq > 0 && model.arch == LLM_ARCH_QWEN4EXP && cparams.n_seq_max > 1) {
+        // The snapshot ring currently has no cross-sequence plane-copy planner.
+        // Keep multi-slot Qwen4exp on the no-rollback behavior instead of using the unproven plane-indexed path.
+        LLAMA_LOG_WARN(
+                "%s: qwen4exp recurrent rollback currently requires n_seq_max=1; clamping n_rs_seq to 0\n",
+                __func__);
         cparams.n_rs_seq = 0;
     }
 
@@ -246,6 +257,16 @@ llama_context::llama_context(
 
     cparams.n_ubatch = std::min(cparams.n_batch, params.n_ubatch == 0 ? params.n_batch : params.n_ubatch);
 
+    const uint64_t n_ubatch_min_rs = (uint64_t) cparams.n_rs_seq + 2;
+    if (cparams.n_rs_seq > 0 && cparams.n_ubatch < n_ubatch_min_rs) {
+        // split_equal() must keep the trailing (n_rs_seq + 1) tokens in one ubatch.
+        // Preserve the requested physical batch cap and use the existing full-state checkpoint fallback instead of aborting inside the batch allocator.
+        LLAMA_LOG_WARN("%s: recurrent partial rollback with n_rs_seq=%u requires n_ubatch >= %" PRIu64
+                "; n_ubatch=%u, clamping n_rs_seq to 0; full-state checkpoints are required\n",
+                __func__, cparams.n_rs_seq, n_ubatch_min_rs, cparams.n_ubatch);
+        cparams.n_rs_seq = 0;
+    }
+
     cparams.n_outputs_max = params.n_outputs_max == 0 || llama_model_has_encoder(&model) ? cparams.n_batch : params.n_outputs_max;
     cparams.n_outputs_max_per_seq = params.n_outputs_max_per_seq == 0 ?
             cparams.n_outputs_max : std::min(params.n_outputs_max_per_seq, cparams.n_outputs_max);
@@ -308,6 +329,7 @@ llama_context::llama_context(
     LLAMA_LOG_INFO("%s: n_ctx_seq             = %u\n",   __func__, cparams.n_ctx_seq);
     LLAMA_LOG_INFO("%s: n_batch               = %u\n",   __func__, cparams.n_batch);
     LLAMA_LOG_INFO("%s: n_ubatch              = %u\n",   __func__, cparams.n_ubatch);
+
     LLAMA_LOG_INFO("%s: causal_attn           = %d\n",   __func__, cparams.causal_attn);
     LLAMA_LOG_INFO("%s: flash_attn            = %s\n",   __func__, llama_flash_attn_type_name(params.flash_attn_type));
     LLAMA_LOG_INFO("%s: kv_unified            = %s\n",   __func__, cparams.kv_unified ? "true" : "false");
@@ -445,6 +467,18 @@ llama_context::llama_context(
             pipeline_parallel = false;
         }
 
+        // A sidecar drafter - identified by borrowing the target's context - drafts
+        // one token at a time, so the ring buys it nothing while its idle
+        // compute-buffer copies cost real time on a layer-split draft. Its prompt
+        // encode does not lose anything either, since that replays deferred against
+        // the target's chunks. Measured with the DSpark sidecar on
+        // DeepSeek-V4-Flash over 8 MI50 at 16k: -sm layer generation 23.0 -> 25.5
+        // t/s with prefill flat, -sm tensor unchanged. Opt back in with
+        // LLAMA_DRAFT_PIPELINE for debugging.
+        if (cparams.ctx_other != nullptr && !getenv("LLAMA_DRAFT_PIPELINE")) {
+            pipeline_parallel = false;
+        }
+
         // pipeline parallelism requires support for async compute and events in all devices
         if (pipeline_parallel) {
             for (auto & backend : backends) {
@@ -494,6 +528,8 @@ llama_context::llama_context(
 llama_context::~llama_context() {
     // wait for any pending asynchronous copies into the output buffers before they are freed
     synchronize();
+
+    layer_inp_accum_events_free();
 
     // when training, ggml_opt allocates extra buffers through the scheduler, so the sizes no longer match the expectation
     if (!model.hparams.no_alloc && !opt_ctx) {
@@ -578,8 +614,20 @@ void llama_context::resolve_fused_ops(const llama_memory_context_i * mctx, uint3
     }
 
     if (cparams.auto_flid) {
-        LLAMA_LOG_INFO("%s: resolving fused Lightning Indexer support:\n", func);
-        resolve(llm_fused_op_lid_probe, cparams.fused_lid);
+        // LLAMA_NO_FUSED_LID=1: force the unfused lightning-indexer graph. The
+        // fused op adds the mask per lane before the partial-sum AllReduce and
+        // uses an F16 mask input, the unfused graph masks once after the
+        // reduce with an F32 mask - an A/B that separates fused-op handling
+        // from mask-input distribution under multi-stage tensor parallel.
+        static const bool no_fused_lid = getenv("LLAMA_NO_FUSED_LID") != nullptr
+            && atoi(getenv("LLAMA_NO_FUSED_LID")) != 0;
+        if (no_fused_lid) {
+            cparams.fused_lid = false;
+            LLAMA_LOG_WARN("%s: fused Lightning Indexer disabled by LLAMA_NO_FUSED_LID\n", func);
+        } else {
+            LLAMA_LOG_INFO("%s: resolving fused Lightning Indexer support:\n", func);
+            resolve(llm_fused_op_lid_probe, cparams.fused_lid);
+        }
         cparams.auto_flid = false;
     }
 
@@ -615,7 +663,23 @@ void llama_context::sched_reserve() {
     gf_res_prev.reset(new llm_graph_result(max_nodes));
     gf_res_reserve.reset(new llm_graph_result(max_nodes));
 
-    sched.reset(ggml_backend_sched_new(backend_ptrs.data(), backend_buft.data(), backend_ptrs.size(), max_nodes, cparams.pipeline_parallel, cparams.op_offload));
+    auto new_sched = [&](bool parallel) {
+        ggml_backend_sched_t result = ggml_backend_sched_new(
+            backend_ptrs.data(), backend_buft.data(), backend_ptrs.size(),
+            max_nodes, parallel, cparams.op_offload);
+
+        // Tiny-ubatch multi-GPU pipelining can race split-input reuse on ROCm.
+        // Keep the policy local to this context. An explicit environment value
+        // remains a diagnostic override sampled when the scheduler is created.
+        bool sync_non_graph_inputs = cparams.n_ubatch < 64;
+        if (const char * value = getenv("GGML_SCHED_SYNC_NONGRAPH")) {
+            sync_non_graph_inputs = atoi(value) != 0;
+        }
+        ggml_backend_sched_set_sync_non_graph_inputs(result, sync_non_graph_inputs);
+        return result;
+    };
+
+    sched.reset(new_sched(cparams.pipeline_parallel));
 
     llama_memory_context_ptr mctx;
     if (memory) {
@@ -632,6 +696,54 @@ void llama_context::sched_reserve() {
     LLAMA_LOG_DEBUG("%s: worst-case: n_tokens = %d, n_seqs = %d, n_outputs = %d\n", __func__, n_tokens, n_seqs, n_outputs);
 
     resolve_fused_ops(mctx.get(), n_seqs);
+
+    // Persistent device tensors for the layer-input taps. Allocated OUTSIDE the
+    // scheduler's compute arena: with the tap tensors inside it, the packing
+    // shifts and runtime graphs stop fitting the reserved plan - measured as an
+    // unexpected same-size graph reallocation (plus its all-backend synchronize)
+    // on EVERY prefill chunk, costing 2.4x prefill under -sm layer. Tensor split
+    // does not exhibit that realloc, but its in-arena tap readbacks still require
+    // a full scheduler drain whenever the compute ring wraps. A persistent tap
+    // replaces that drain with the event dependency in graph_compute. This is
+    // especially important for deferred DSpark prefill. LLAMA_TAP_STATIC=0
+    // restores in-arena taps for all split modes.
+    layer_inp_dev.assign(cparams.embeddings_layer_inp.size(), nullptr);
+    buf_layer_inp_dev.reset();
+    ctx_layer_inp_dev.reset();
+    {
+        static const char * s_tap_static = getenv("LLAMA_TAP_STATIC");
+        const bool want_static = s_tap_static == nullptr || atoi(s_tap_static) != 0;
+        int n_taps = 0;
+        for (bool enabled : cparams.embeddings_layer_inp) {
+            n_taps += enabled ? 1 : 0;
+        }
+        if (want_static && n_taps > 0 && model.dev_output()) {
+            const ggml_init_params ip = {
+                /*.mem_size   =*/ ggml_tensor_overhead() * (size_t) n_taps,
+                /*.mem_buffer =*/ nullptr,
+                /*.no_alloc   =*/ true,
+            };
+            ctx_layer_inp_dev.reset(ggml_init(ip));
+            for (uint32_t il = 0; il < cparams.embeddings_layer_inp.size(); ++il) {
+                if (cparams.embeddings_layer_inp[il]) {
+                    ggml_tensor * t = ggml_new_tensor_2d(ctx_layer_inp_dev.get(), GGML_TYPE_F32,
+                            model.hparams.n_embd, cparams.n_ubatch);
+                    ggml_format_name(t, "layer_inp_dev-%u", il);
+                    layer_inp_dev[il] = t;
+                }
+            }
+            auto * buft = ggml_backend_dev_buffer_type(model.dev_output());
+            buf_layer_inp_dev.reset(ggml_backend_alloc_ctx_tensors_from_buft(ctx_layer_inp_dev.get(), buft));
+            if (!buf_layer_inp_dev) {
+                LLAMA_LOG_WARN("%s: failed to allocate persistent tap buffer, falling back to in-arena taps\n", __func__);
+                layer_inp_dev.assign(cparams.embeddings_layer_inp.size(), nullptr);
+                ctx_layer_inp_dev.reset();
+            } else {
+                LLAMA_LOG_INFO("%s: %d persistent tap tensors on %s (%zu x %u each)\n", __func__,
+                        n_taps, ggml_backend_buft_name(buft), (size_t) model.hparams.n_embd, cparams.n_ubatch);
+            }
+        }
+    }
 
     // reserve worst-case graph
     int n_splits_pp = -1;
@@ -650,7 +762,7 @@ void llama_context::sched_reserve() {
             if (cparams.pipeline_parallel) {
                 LLAMA_LOG_WARN("%s: compute buffer allocation failed, retrying without pipeline parallelism\n", __func__);
                 cparams.pipeline_parallel = false;
-                sched.reset(ggml_backend_sched_new(backend_ptrs.data(), backend_buft.data(), backend_ptrs.size(), max_nodes, false, cparams.op_offload));
+                sched.reset(new_sched(false));
                 gf = graph_reserve(n_tokens, n_seqs, n_outputs_pp, mctx.get());
             }
             if (!gf) {
@@ -1249,6 +1361,191 @@ float * llama_context::get_embeddings_pre_norm_accum() {
     return embd_pre_norm_accum;
 }
 
+float * llama_context::set_embeddings_layer_inp_accum(int32_t n_tokens_cap) {
+    buf_layer_inp_accum.reset();
+    layer_inp_accum     = nullptr;
+    layer_inp_accum_cap = 0;
+    layer_inp_accum_n_seq = 0;
+    layer_inp_accum_idx.assign(cparams.embeddings_layer_inp.size(), -1);
+    layer_inp_accum_row_epoch.clear();
+    layer_inp_accum_epoch = 0;
+    layer_inp_accum_events_free();
+
+    if (n_tokens_cap <= 0) {
+        return nullptr;
+    }
+
+    int32_t n_regions = 0;
+    for (uint32_t il = 0; il < cparams.embeddings_layer_inp.size(); ++il) {
+        if (cparams.embeddings_layer_inp[il]) {
+            layer_inp_accum_idx[il] = n_regions++;
+        }
+    }
+    if (n_regions == 0) {
+        return nullptr;
+    }
+
+    const uint32_t n_embd  = model.hparams.n_embd; // matches the t_layer_inp row stride
+    const int32_t  n_seq   = (int32_t) cparams.n_seq_max;
+    const size_t   nfloats = (size_t) n_regions * n_seq * n_tokens_cap * n_embd;
+    const size_t   nbytes  = nfloats * sizeof(float);
+
+    // Pinned host buffer so the per-ubatch tap D2H stays truly asynchronous (a D2H
+    // into pageable memory blocks the stream). Same buffer type as the output buffer.
+    auto * buft = ggml_backend_cpu_buffer_type();
+    auto * output_dev = model.dev_output();
+    auto * host_buft  = output_dev ? ggml_backend_dev_host_buffer_type(output_dev) : nullptr;
+    if (host_buft) {
+        buft = host_buft;
+    }
+
+    buf_layer_inp_accum.reset(ggml_backend_buft_alloc_buffer(buft, nbytes));
+    if (buf_layer_inp_accum == nullptr) {
+        LLAMA_LOG_ERROR("%s: failed to allocate layer-inp accum buffer of size %.2f MiB\n",
+                __func__, nbytes / (1024.0 * 1024.0));
+        layer_inp_accum_idx.assign(cparams.embeddings_layer_inp.size(), -1);
+        return nullptr;
+    }
+
+    LLAMA_LOG_INFO("%s: layer-inp accum: %d regions x %d seq x %d tokens, %.2f MiB pinned\n",
+            __func__, n_regions, n_seq, n_tokens_cap, nbytes / (1024.0 * 1024.0));
+
+    // Clear so any prompt position that is never extracted (e.g. served from the
+    // prompt cache without a fresh decode) reads as zero rather than garbage.
+    ggml_backend_buffer_clear(buf_layer_inp_accum.get(), 0);
+
+    layer_inp_accum     = (float *) ggml_backend_buffer_get_base(buf_layer_inp_accum.get());
+    layer_inp_accum_cap = n_tokens_cap;
+    layer_inp_accum_n_seq = n_seq;
+    layer_inp_accum_ub  = 0;
+    layer_inp_accum_row_epoch.assign((size_t) n_seq * n_tokens_cap, 0);
+    return layer_inp_accum;
+}
+
+const float * llama_context::get_embeddings_layer_inp_accum(uint32_t lid) {
+    return get_embeddings_layer_inp_accum_seq(lid, 0);
+}
+
+const float * llama_context::get_embeddings_layer_inp_accum_seq(uint32_t lid, llama_seq_id seq_id) {
+    if (!layer_inp_accum || lid >= layer_inp_accum_idx.size() || layer_inp_accum_idx[lid] < 0) {
+        return nullptr;
+    }
+    if (seq_id < 0 || seq_id >= layer_inp_accum_n_seq) {
+        return nullptr;
+    }
+    const uint32_t n_embd = model.hparams.n_embd;
+    const size_t region_seq = (size_t) layer_inp_accum_idx[lid] * layer_inp_accum_n_seq + seq_id;
+    return layer_inp_accum + region_seq * layer_inp_accum_cap * n_embd;
+}
+
+uint64_t llama_context::layer_inp_accum_span_epoch(
+        llama_seq_id seq_id, llama_pos p0, int32_t n_tokens) const {
+    if (seq_id < 0 || seq_id >= layer_inp_accum_n_seq || p0 < 0 || n_tokens <= 0 ||
+            (size_t) p0 + n_tokens > (size_t) layer_inp_accum_cap) {
+        return 0;
+    }
+
+    uint64_t epoch = 0;
+    const size_t offset = (size_t) seq_id * layer_inp_accum_cap + p0;
+    for (int32_t i = 0; i < n_tokens; ++i) {
+        const uint64_t row_epoch = layer_inp_accum_row_epoch[offset + i];
+        if (row_epoch == 0) {
+            return 0;
+        }
+        epoch = std::max(epoch, row_epoch);
+    }
+    return epoch;
+}
+
+void llama_context::layer_inp_accum_events_free() {
+    for (auto & ev : layer_inp_accum_events) {
+        for (auto & backend_ev : ev.events) {
+            if (backend_ev.event) {
+                ggml_backend_event_free(backend_ev.event);
+            }
+        }
+        ev.events.clear();
+    }
+    layer_inp_accum_events.clear();
+    layer_inp_accum_ev_next = 0;
+}
+
+bool llama_context::layer_inp_accum_wait(llama_pos p_end) {
+    // Stream order makes any event with pos_end >= p_end a valid guarantee for
+    // p_end. The one with the smallest such pos_end minimizes the wait.
+    const layer_inp_accum_ev * best = nullptr;
+    for (const auto & ev : layer_inp_accum_events) {
+        if (!ev.events.empty() && ev.pos_end >= p_end && (!best || ev.pos_end < best->pos_end)) {
+            best = &ev;
+        }
+    }
+    if (!best) {
+        return false;
+    }
+    for (const auto & backend_ev : best->events) {
+        ggml_backend_event_synchronize(backend_ev.event);
+    }
+    return true;
+}
+
+bool llama_context::layer_inp_accum_ready(llama_pos p_end) {
+    // Same search as the wait, but it never blocks. Lets the drafter replay only
+    // what the target has already finished and hand the host straight back to
+    // feeding the target, instead of surrendering the whole queue lead: the
+    // events fire in stream order, so waiting on one means waiting for the
+    // device to reach that position, not for a copy to land.
+    for (const auto & ev : layer_inp_accum_events) {
+        if (!ev.events.empty() && ev.pos_end >= p_end) {
+            bool ready = true;
+            for (const auto & backend_ev : ev.events) {
+                ready = ready && ggml_backend_event_query(backend_ev.event);
+            }
+            if (ready) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool llama_context::layer_inp_accum_wait_epoch(uint64_t epoch) {
+    if (epoch == 0) {
+        return false;
+    }
+    const layer_inp_accum_ev * best = nullptr;
+    for (const auto & ev : layer_inp_accum_events) {
+        if (!ev.events.empty() && ev.epoch >= epoch && (!best || ev.epoch < best->epoch)) {
+            best = &ev;
+        }
+    }
+    if (!best) {
+        return false;
+    }
+    for (const auto & backend_ev : best->events) {
+        ggml_backend_event_synchronize(backend_ev.event);
+    }
+    return true;
+}
+
+bool llama_context::layer_inp_accum_ready_epoch(uint64_t epoch) {
+    if (epoch == 0) {
+        return false;
+    }
+    for (const auto & ev : layer_inp_accum_events) {
+        if (ev.events.empty() || ev.epoch < epoch) {
+            continue;
+        }
+        bool ready = true;
+        for (const auto & backend_ev : ev.events) {
+            ready = ready && ggml_backend_event_query(backend_ev.event);
+        }
+        if (ready) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void llama_context::set_causal_attn(bool value) {
     LLAMA_LOG_DEBUG("%s: value = %d\n", __func__, value);
 
@@ -1404,18 +1701,43 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
     // in order to correctly reuse a graph, it's full topology has to be uniquely determined by these parameters
     const auto gparams = graph_params(res, ubatch, mctx, gtype);
 
+    bool graph_sequence_layout_changed = false;
+
     if (!graph_reuse_disable && res->can_reuse(gparams)) {
         //LLAMA_LOG_DEBUG("%s: reusing previous graph\n", __func__);
 
         // with pipeline parallelism, the previous graph_compute_async may still be running
         // on the GPU. we must synchronize before set_inputs to avoid overwriting input tensors
         // that the previous compute is still reading.
-        if (cparams.pipeline_parallel) {
+        // LLAMA_REUSE_NO_DRAIN=1: skip this drain. The scheduler stages graph
+        // inputs through per-copy pinned buffers guarded by events, and the
+        // reused graph's kernels are stream-ordered behind the in-flight
+        // graph on every lane, so the overwrite hazard this drain guards
+        // against is already handled for staged inputs. Experimental gate to
+        // measure cross-chunk prefill overlap.
+        static const bool reuse_no_drain = []() {
+            const char * env = getenv("LLAMA_REUSE_NO_DRAIN");
+            return env && atoi(env) != 0;
+        }();
+        if (cparams.pipeline_parallel && !reuse_no_drain) {
             ggml_backend_sched_synchronize(sched.get());
         }
 
         n_reused++;
     } else {
+        graph_sequence_layout_changed = graph_seq_ids.size() != ubatch.n_seqs_unq;
+        for (size_t i = 0; !graph_sequence_layout_changed && i < graph_seq_ids.size(); ++i) {
+            graph_sequence_layout_changed = graph_seq_ids[i] != ubatch.seq_id_unq[i];
+        }
+
+        // A sequence-layout transition rebuilds persistent per-sequence graph state.
+        // Pipeline compute is asynchronous, so a previous graph may still be using it
+        // when a server slot joins, leaves, or is replaced. Ordinary single-sequence
+        // shape changes retain their cross-ubatch overlap.
+        if (cparams.pipeline_parallel && !graph_seq_ids.empty() && graph_sequence_layout_changed) {
+            ggml_backend_sched_synchronize(sched.get());
+        }
+
         res->reset();
 
         ggml_backend_sched_reset(sched.get());
@@ -1452,9 +1774,20 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
 
     const auto status = graph_compute(res->get_gf(), ubatch.n_tokens > 1);
     if (status != GGML_STATUS_SUCCESS) {
+        if (mctx) {
+            mctx->finish_compute(false);
+        }
         LLAMA_LOG_ERROR("%s: failed to compute graph, compute status: %d\n", __func__, status);
         ret = status;
         return nullptr;
+    }
+
+    if (mctx) {
+        mctx->finish_compute(true);
+    }
+
+    if (graph_sequence_layout_changed) {
+        graph_seq_ids.assign(ubatch.seq_id_unq, ubatch.seq_id_unq + ubatch.n_seqs_unq);
     }
 
     ret = GGML_STATUS_SUCCESS;
@@ -2004,7 +2337,7 @@ int llama_context::decode(const llama_batch & batch_inp) {
             }
         }
 
-        extract_layer_inputs(res, n_tokens_prev, ubatch.n_tokens);
+        extract_layer_inputs(res, n_tokens_prev, ubatch);
 
         // extract nextn embeddings before
         // only meaningful in LLAMA_POOLING_TYPE_NONE (per-token); other pooling modes are ignored.
@@ -2022,15 +2355,33 @@ int llama_context::decode(const llama_batch & batch_inp) {
                 // MTP deferred prefill: when an accum buffer is set (unmasked target during
                 // prompt prefill), extract straight into the position-indexed accum buffer
                 // and skip the per-batch embd_nextn copy, which is unused during prefill.
-                // This keeps the whole prompt hidden across decode calls without a per-chunk
-                // synchronize and avoids a second D2H. Assumes a contiguous ubatch (single
-                // sequence, sequential positions), which holds for prefill.
+                // Sequential positions use one D2H; unusual non-contiguous positions are
+                // copied row-by-row so replay indexes the actual positions safely.
                 const bool accum_active = embd_pre_norm_accum && !masked && ubatch.pos;
                 if (accum_active) {
-                    const int64_t p0 = ubatch.pos[0];
-                    if (p0 >= 0 && (size_t) (p0 + n_rows)*n_embd <= embd_pre_norm_accum_size) {
-                        float * dst = embd_pre_norm_accum + (size_t) p0*n_embd;
-                        ggml_backend_tensor_get_async(backend_h, t_h_nextn, dst, 0, n_rows*n_embd*sizeof(float));
+                    bool positions_valid = true;
+                    bool positions_contiguous = true;
+                    for (int64_t i = 0; i < n_rows; ++i) {
+                        const llama_pos pos = ubatch.pos[i];
+                        positions_valid = positions_valid && pos >= 0 &&
+                            ((size_t) pos + 1) * n_embd <= embd_pre_norm_accum_size;
+                        positions_contiguous = positions_contiguous &&
+                            (i == 0 || pos == ubatch.pos[0] + i);
+                    }
+
+                    if (positions_valid) {
+                        if (positions_contiguous) {
+                            float * dst = embd_pre_norm_accum + (size_t) ubatch.pos[0] * n_embd;
+                            ggml_backend_tensor_get_async(backend_h, t_h_nextn, dst, 0,
+                                    n_rows * n_embd * sizeof(float));
+                        } else {
+                            const size_t row_bytes = (size_t) n_embd * sizeof(float);
+                            for (int64_t i = 0; i < n_rows; ++i) {
+                                float * dst = embd_pre_norm_accum + (size_t) ubatch.pos[i] * n_embd;
+                                ggml_backend_tensor_get_async(backend_h, t_h_nextn, dst,
+                                        (size_t) i * row_bytes, row_bytes);
+                            }
+                        }
 
                         // The async extract reads t_h_nextn straight from the scheduler's
                         // rotating compute buffer (one slot per copy in the pipeline ring). With
@@ -2291,7 +2642,61 @@ uint32_t llama_context::output_reserve(int32_t n_outputs) {
     return n_outputs_max;
 }
 
-void llama_context::extract_layer_inputs(const llm_graph_result * res, size_t token_offset, size_t n_tokens) {
+void llama_context::extract_layer_inputs(const llm_graph_result * res, size_t token_offset, const llama_ubatch & ubatch) {
+    const size_t n_tokens = ubatch.n_tokens;
+
+    // Position-indexed accum, partitioned by sequence. Build contiguous source
+    // runs once and reuse them for every tapped layer. The common single-request
+    // prefill remains one D2H per layer; combined server batches are split into
+    // sequence runs so identical positions in different slots cannot collide.
+    static const int32_t accum_min = []() {
+        const char * e = getenv("LLAMA_TAP_ACCUM_MIN");
+        return e != nullptr ? atoi(e) : 16;
+    }();
+
+    struct accum_run {
+        llama_seq_id seq_id;
+        llama_pos    p0;
+        size_t       i0;
+        size_t       n;
+    };
+    std::vector<accum_run> accum_runs;
+
+    bool accum_ok = layer_inp_accum && ubatch.pos && ubatch.n_pos == 1 &&
+                    (int32_t) n_tokens >= accum_min;
+    for (size_t i = 0; accum_ok && i < n_tokens; ++i) {
+        const llama_pos pos = ubatch.pos[i];
+        if (pos < 0 || pos >= layer_inp_accum_cap || ubatch.n_seq_id[i] <= 0) {
+            accum_ok = false;
+            break;
+        }
+
+        for (int32_t j = 0; j < ubatch.n_seq_id[i]; ++j) {
+            const llama_seq_id seq_id = ubatch.seq_id[i][j];
+            if (seq_id < 0 || seq_id >= layer_inp_accum_n_seq) {
+                accum_ok = false;
+                break;
+            }
+
+            if (ubatch.n_seq_id[i] == 1 && !accum_runs.empty()) {
+                auto & last = accum_runs.back();
+                if (last.seq_id == seq_id && last.i0 + last.n == i && last.p0 + (llama_pos) last.n == pos) {
+                    last.n++;
+                    continue;
+                }
+            }
+            accum_runs.push_back({seq_id, pos, i, 1});
+        }
+    }
+    if (!accum_ok) {
+        accum_runs.clear();
+    }
+
+    bool accum_wrote = false;
+    bool accum_complete = accum_ok;
+    bool taps_static = true;
+    std::vector<ggml_backend_t> accum_backends;
+
     for (uint32_t il = 0; il < cparams.embeddings_layer_inp.size(); ++il) {
         if (!cparams.embeddings_layer_inp[il]) {
             continue;
@@ -2316,6 +2721,115 @@ void llama_context::extract_layer_inputs(const llm_graph_result * res, size_t to
         ggml_backend_t backend = ggml_backend_sched_get_tensor_backend(sched.get(), t);
         GGML_ASSERT(backend != nullptr);
         ggml_backend_tensor_get_async(backend, t, embd_layer_inp[il].data + dst_offset, 0, nbytes);
+
+        const bool layer_accum_ok = accum_ok && layer_inp_accum_idx[il] >= 0 &&
+                                    row_floats == model.hparams.n_embd;
+        if (layer_accum_ok) {
+            const size_t row_bytes = row_floats * sizeof(float);
+            for (const auto & run : accum_runs) {
+                const size_t region_seq =
+                    (size_t) layer_inp_accum_idx[il] * layer_inp_accum_n_seq + run.seq_id;
+                float * dst = layer_inp_accum +
+                    (region_seq * layer_inp_accum_cap + run.p0) * row_floats;
+                ggml_backend_tensor_get_async(backend, t, dst, run.i0 * row_bytes, run.n * row_bytes);
+            }
+            accum_wrote = true;
+            if (std::find(accum_backends.begin(), accum_backends.end(), backend) == accum_backends.end()) {
+                accum_backends.push_back(backend);
+            }
+            if (il >= layer_inp_dev.size() || layer_inp_dev[il] == nullptr) {
+                taps_static = false;
+            }
+        } else if (accum_ok) {
+            accum_complete = false;
+        }
+    }
+
+    // The accum extracts read straight from the scheduler's rotating compute buffers.
+    // With pipeline parallelism the ring wraps every n_copies ubatches and reuses a
+    // slot's buffer, so an async D2H that has not drained by then would read clobbered
+    // data. Bound the in-flight extracts to the ring size, same as the pre-norm accum.
+    if (accum_wrote) {
+        // Record one event per backend participating in the tap extraction. A
+        // readiness epoch is published only after all tapped layers have queued
+        // their copies, so a deferred consumer never observes a partially filled row.
+        if (layer_inp_accum_events.empty()) {
+            layer_inp_accum_events.resize(4);
+        }
+        if (!layer_inp_accum_events.empty()) {
+            auto & ev = layer_inp_accum_events[layer_inp_accum_ev_next];
+            layer_inp_accum_ev_next = (layer_inp_accum_ev_next + 1) % layer_inp_accum_events.size();
+
+            bool same_backends = ev.events.size() == accum_backends.size();
+            for (size_t i = 0; same_backends && i < accum_backends.size(); ++i) {
+                same_backends = ev.events[i].backend == accum_backends[i];
+            }
+            if (!same_backends) {
+                for (auto & backend_ev : ev.events) {
+                    if (backend_ev.event) {
+                        ggml_backend_event_synchronize(backend_ev.event);
+                        ggml_backend_event_free(backend_ev.event);
+                    }
+                }
+                ev.events.clear();
+                for (ggml_backend_t backend : accum_backends) {
+                    ggml_backend_dev_t dev = ggml_backend_get_device(backend);
+                    ggml_backend_event_t event = dev ? ggml_backend_event_new(dev) : nullptr;
+                    if (!event) {
+                        for (auto & backend_ev : ev.events) {
+                            ggml_backend_event_free(backend_ev.event);
+                        }
+                        ev.events.clear();
+                        break;
+                    }
+                    ev.events.push_back({backend, event});
+                }
+            }
+
+            if (!ev.events.empty()) {
+                ev.pos_end = -1;
+                ev.epoch   = ++layer_inp_accum_epoch;
+                for (auto & backend_ev : ev.events) {
+                    ggml_backend_event_record(backend_ev.event, backend_ev.backend);
+                }
+
+                if (accum_complete) {
+                    for (const auto & run : accum_runs) {
+                        const size_t row = (size_t) run.seq_id * layer_inp_accum_cap + run.p0;
+                        std::fill_n(layer_inp_accum_row_epoch.begin() + row, run.n, ev.epoch);
+                        if (run.seq_id == 0) {
+                            ev.pos_end = std::max(ev.pos_end, run.p0 + (llama_pos) run.n);
+                        }
+                    }
+                }
+
+                if (taps_static) {
+                    tap_readback_waits.clear();
+                    tap_readback_waits.reserve(ev.events.size());
+                    for (const auto & backend_ev : ev.events) {
+                        tap_readback_waits.emplace_back(backend_ev.backend, backend_ev.event);
+                    }
+                }
+            }
+        }
+
+        // Two different hazards, two different bounds.
+        //
+        // An in-arena tap reads the scheduler's rotating compute buffers, which
+        // wrap every n_copies ubatches - bounding in-flight extracts to the ring
+        // size is the right guard and it stays.
+        //
+        // A persistent tap (layer_inp_dev) holds a SINGLE ubatch, so the correct
+        // bound is one, not n_copies: ubatch i+1 can overwrite the slot while
+        // ubatch i's readback is still draining. That is why output varies run to
+        // run once a drafter is attached while the same model without one is
+        // reproducible. Handle it where it belongs, as a dependency rather than a
+        // stall - the event recorded above is handed to the next graph_compute,
+        // whose copy waits on it on the device.
+        const int n_copies = ggml_backend_sched_get_n_copies(sched.get());
+        if (!taps_static && n_copies > 1 && (++layer_inp_accum_ub % n_copies) == 0) {
+            ggml_backend_sched_synchronize(sched.get());
+        }
     }
 }
 
@@ -2575,6 +3089,7 @@ llm_graph_params llama_context::graph_params(
         /*.n_outputs   =*/ n_outputs,
         /*.cb          =*/ graph_get_cb(),
         /*.res         =*/ res,
+        /*.layer_inp_dev =*/ &layer_inp_dev,
     };
 }
 
@@ -2596,6 +3111,15 @@ ggml_status llama_context::graph_compute(
     for (const auto & set_n_threads_fn : set_n_threads_fns) {
         set_n_threads_fn.second(set_n_threads_fn.first, n_threads);
     }
+
+    // A persistent layer tap is a single ubatch deep, so this graph's copies into
+    // it would overwrite rows the previous ubatch's D2H may still be reading.
+    // Each tapped pipeline stage owns a separate writer stream and needs its own
+    // dependency; waiting only on the last stage leaves the other taps exposed.
+    for (const auto & wait : tap_readback_waits) {
+        ggml_backend_event_wait(wait.first, wait.second);
+    }
+    tap_readback_waits.clear();
 
     auto status = ggml_backend_sched_graph_compute_async(sched.get(), gf);
     if (status != GGML_STATUS_SUCCESS) {
@@ -3983,6 +4507,44 @@ void llama_set_embeddings_nextn(llama_context * ctx, bool value, bool masked) {
 
 void llama_set_embeddings_layer_inp(llama_context * ctx, uint32_t lid, bool value) {
     ctx->set_embeddings_layer_inp(lid, value);
+}
+
+void llama_sched_reserve(llama_context * ctx) {
+    ctx->sched_reserve();
+}
+
+float * llama_set_embeddings_layer_inp_accum(llama_context * ctx, int32_t n_tokens_cap) {
+    return ctx->set_embeddings_layer_inp_accum(n_tokens_cap);
+}
+
+const float * llama_get_embeddings_layer_inp_accum(llama_context * ctx, uint32_t lid) {
+    return ctx->get_embeddings_layer_inp_accum(lid);
+}
+
+const float * llama_get_embeddings_layer_inp_accum_seq(
+        llama_context * ctx, uint32_t lid, llama_seq_id seq_id) {
+    return ctx->get_embeddings_layer_inp_accum_seq(lid, seq_id);
+}
+
+uint64_t llama_layer_inp_accum_span_epoch(
+        llama_context * ctx, llama_seq_id seq_id, llama_pos p0, int32_t n_tokens) {
+    return ctx->layer_inp_accum_span_epoch(seq_id, p0, n_tokens);
+}
+
+bool llama_layer_inp_accum_wait_epoch(llama_context * ctx, uint64_t epoch) {
+    return ctx->layer_inp_accum_wait_epoch(epoch);
+}
+
+bool llama_layer_inp_accum_ready_epoch(llama_context * ctx, uint64_t epoch) {
+    return ctx->layer_inp_accum_ready_epoch(epoch);
+}
+
+bool llama_layer_inp_accum_wait(llama_context * ctx, llama_pos p_end) {
+    return ctx->layer_inp_accum_wait(p_end);
+}
+
+bool llama_layer_inp_accum_ready(llama_context * ctx, llama_pos p_end) {
+    return ctx->layer_inp_accum_ready(p_end);
 }
 
 void llama_set_mtp_prefill_kv_only(llama_context * ctx, bool value) {

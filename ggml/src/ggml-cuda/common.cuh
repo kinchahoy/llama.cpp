@@ -972,6 +972,12 @@ typedef void (*dequantize_kernel_t)(const void * vx, const int64_t ib, const int
 template<typename dst_t>
 using dequantize_kq_t = void (*)(const void * vx, const int64_t ib, dst_t * y, const int tid);
 
+// Same, but bounded by how many 32-value sub-blocks of the super-block belong to the
+// row. Lets get_rows serve rows whose width is a multiple of the native block but not
+// of QK_K (qwen4exp PLE table: 160 = 5 x 32).
+template <typename dst_t>
+using dequantize_kq_n_t = void (*)(const void * vx, const int64_t ib, dst_t * y, const int tid, const int n_sub);
+
 static __device__ __forceinline__ float get_alibi_slope(
     const float max_bias, const uint32_t h, const uint32_t n_head_log2, const float m0, const float m1
 ) {
@@ -1214,6 +1220,10 @@ struct ggml_cuda_pool {
     virtual ~ggml_cuda_pool() = default;
 
     virtual void * alloc(size_t size, size_t * actual_size) = 0;
+    // Pools without recovery keep the regular fail-fast behavior.
+    virtual void * try_alloc(size_t size, size_t * actual_size) {
+        return alloc(size, actual_size);
+    }
     virtual void free(void * ptr, size_t size) = 0;
 };
 
@@ -1233,9 +1243,7 @@ struct ggml_cuda_pool_alloc {
     }
 
     ~ggml_cuda_pool_alloc() {
-        if (ptr != nullptr) {
-            pool->free(ptr, actual_size);
-        }
+        reset();
     }
 
     // size is in number of elements
@@ -1249,6 +1257,21 @@ struct ggml_cuda_pool_alloc {
     T * alloc(ggml_cuda_pool & pool, size_t size) {
         this->pool = &pool;
         return alloc(size);
+    }
+
+    T * try_alloc(size_t size) {
+        GGML_ASSERT(pool != nullptr);
+        GGML_ASSERT(ptr == nullptr);
+        ptr = (T *) pool->try_alloc(size * sizeof(T), &this->actual_size);
+        return ptr;
+    }
+
+    void reset() {
+        if (ptr != nullptr) {
+            pool->free(ptr, actual_size);
+            ptr = nullptr;
+            actual_size = 0;
+        }
     }
 
     T * get() {
@@ -1289,9 +1312,18 @@ struct ggml_cuda_graph {
     size_t num_nodes = 0;
     std::vector<cudaGraphNode_t> nodes;
     bool disable_due_to_gpu_arch = false;
+    bool disable_due_to_memory = false;
     bool warmup_complete = false;
     uint64_t uid = 0;
     int64_t last_used_time = 0;
+    // kernel functions of the last capture, to detect function changes that
+    // hipGraphExecUpdate would apply without validating launch geometry
+    std::vector<const void *> kernel_funcs;
+    // graphs never amortize for entries whose properties keep changing
+    // (spec decode churns shapes and KV pointers) - they self-disable
+    int n_prop_checks = 0;
+    int n_prop_resets = 0;
+    bool unstable_disabled = false;
     struct node_properties {
         ggml_tensor node;
         void *   node_src_data_ptrs[GGML_MAX_SRC];
@@ -1302,7 +1334,7 @@ struct ggml_cuda_graph {
 
     bool is_enabled() const {
         static const bool disable_cuda_graphs_due_to_env = (getenv("GGML_CUDA_DISABLE_GRAPHS") != nullptr);
-        return !(disable_due_to_gpu_arch || disable_cuda_graphs_due_to_env);
+        return !(disable_due_to_gpu_arch || disable_due_to_memory || unstable_disabled || disable_cuda_graphs_due_to_env);
     }
 #endif
 };
@@ -1475,6 +1507,23 @@ struct ggml_backend_cuda_context {
     cudaEvent_t  pp_copy_event_b = nullptr; // pp_copy_stream -> dst main
 
     cudaStream_t streams[GGML_CUDA_MAX_DEVICES][GGML_CUDA_MAX_STREAMS] = { { nullptr } };
+
+    // Remember a smaller split flash-attention workspace after an allocation failure.
+    int fattn_parallel_blocks_cap = 0;
+    bool fattn_parallel_blocks_override_logged = false;
+    // Preserve a working row chunk after TOP_K encounters memory pressure. Retrying
+    // the known-too-large allocation in every layer would force a device-wide pool
+    // flush and make deep prefill needlessly expensive.
+    int64_t top_k_workspace_rows_cap = 0;
+    bool top_k_workspace_rows_cap_logged = false;
+    // Maximum MMQ output columns known to fit its quantized-activation workspace.
+    // Zero keeps the original full-width path until actual memory pressure occurs.
+    int64_t mmq_workspace_cols_cap = 0;
+    bool mmq_workspace_cols_cap_logged = false;
+    int64_t mmq_id_workspace_tokens_cap = 0;
+    bool mmq_id_workspace_tokens_cap_logged = false;
+    int64_t repack_workspace_cols_cap = 0;
+    bool repack_workspace_cols_cap_logged = false;
     cublasHandle_t cublas_handles[GGML_CUDA_MAX_DEVICES][GGML_CUDA_MAX_STREAMS] = {nullptr};
     void * cublas_workspaces[GGML_CUDA_MAX_DEVICES][GGML_CUDA_MAX_STREAMS] = {nullptr};
     size_t cublas_workspace_sizes[GGML_CUDA_MAX_DEVICES] = {0};
@@ -1567,6 +1616,7 @@ struct ggml_backend_cuda_context {
     size_t q8_1_cache_hits   = 0;
     size_t q8_1_cache_misses = 0;
     size_t q8_1_cache_peak   = 0; // most entries alive at once, over the run
+    bool q8_1_cache_pressure_logged = false;
     void q8_1_cache_reset() {
         q8_1_cache.clear();
     }
@@ -1769,6 +1819,7 @@ static __inline__ void ggml_cuda_kernel_launch(Kernel kernel, const ggml_cuda_ke
     kernel<<<launch_params.block_nums, launch_params.block_dims, launch_params.shmem, launch_params.stream>>>(std::forward<Args>(args)... );
     CUDA_CHECK(cudaGetLastError());
 }
+
 // Defined in ggml-cuda.cu. Hands back the quantized copy of src1 made earlier in
 // this graph evaluation, or returns nullptr so the caller allocates and quantizes
 // itself. `variant` separates layouts that are not interchangeable, since only an
@@ -1776,4 +1827,4 @@ static __inline__ void ggml_cuda_kernel_launch(Kernel kernel, const ggml_cuda_ke
 char * ggml_cuda_q8_1_cache_acquire(
         ggml_backend_cuda_context & ctx, const ggml_tensor * src1, int variant,
         int64_t ne_padded, int64_t s11, int64_t s12, int64_t s13,
-        size_t nbytes, bool & hit);
+        size_t nbytes, bool & hit, bool * pressure = nullptr);

@@ -346,6 +346,12 @@ struct common_params_speculative_draft {
 
     std::vector<ggml_backend_dev_t> devices; // devices to use for offloading
 
+    // -sm tensor: GPUs per TP group for the DRAFT model, independent of the target's.
+    // A draft is small and runs one forward per drafted token, so the target's topology
+    // is rarely the right one for it. 0 keeps the draft in a single TP group over its
+    // own devices, which is what a 0.4 GB drafter wants next to a 40 GB target.
+    int32_t tensor_parallel_size = 0;
+
     std::vector<llama_model_tensor_buft_override> tensor_buft_overrides;
 };
 
@@ -482,9 +488,9 @@ struct common_params {
 
     enum llama_split_mode split_mode = LLAMA_SPLIT_MODE_LAYER; // how to split the model across GPUs
     enum llama_load_mode  load_mode  = LLAMA_LOAD_MODE_AUTO; // how to load the model
+    int32_t tensor_parallel_size = 0; // -sm tensor: GPUs per TP group. Rest form pipeline stages. 0 = single TP group
 
     enum llama_lazy_mode lazy_mode = LLAMA_LAZY_MODE_AUTO; // on-demand reading of tensors marked by the arch
-    int32_t tensor_parallel_size = 0; // -sm tensor: GPUs per TP group. Rest form pipeline stages. 0 = single TP group
 
     common_cpu_params cpuparams;
     common_cpu_params cpuparams_batch;

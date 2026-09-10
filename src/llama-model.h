@@ -229,6 +229,13 @@ struct llama_layer_nextn {
     struct ggml_tensor * shared_head_head_s    = nullptr;
     struct ggml_tensor * shared_head_head_in_s = nullptr;
     struct ggml_tensor * shared_head_norm      = nullptr;
+
+    // qwen4exp: the fusion is two projections rather than one over a concat, and the
+    // block folds its own 4-branch residual before reading the hidden state
+    struct ggml_tensor * fc_hidden             = nullptr;
+    struct ggml_tensor * hc_norm               = nullptr;
+    struct ggml_tensor * hc_down               = nullptr;
+    struct ggml_tensor * hc_up                 = nullptr;
 };
 
 struct llama_layer_switch_lora {
@@ -733,6 +740,7 @@ struct llama_model {
     size_t n_tensors() const;
     size_t n_devices() const;
     const float * tensor_split() const;
+    bool tensor_mirror_output() const;
 
     uint32_t n_gpu_layers() const;
     llama_split_mode split_mode() const;

@@ -564,14 +564,12 @@ llama_model_qwen35::graph_mtp::graph_mtp(const llama_model & model, const llm_gr
     // armed, build + store ONLY K/V (identical to the full path) and skip Q/attention/gate/wo/FFN/
     // output - removing the O(n^2) attention and the FFN that dominate the replay cost.
     if (cparams.mtp_prefill_kv_only) {
-        auto [Qcur_unused, Kc, Vc] = build_qkv(layer, cur,
-                n_embd_head * 2, n_head,
-                n_embd_head,     n_head_kv,
-                n_embd_head,     n_head_kv,
-                il, false);
-        GGML_UNUSED(Qcur_unused);
-
+        ggml_tensor * Kc = build_lora_mm(layer.wk, cur, layer.wk_s);
+        Kc = ggml_reshape_3d(ctx0, Kc, n_embd_head, n_head_kv, n_tokens);
         Kc = build_norm(Kc, layer.attn_k_norm, nullptr, LLM_NORM_RMS, il);
+
+        ggml_tensor * Vc = build_lora_mm(layer.wv, cur, layer.wv_s);
+        Vc = ggml_reshape_3d(ctx0, Vc, n_embd_head, n_head_kv, n_tokens);
 
         Kc = ggml_rope_multi(ctx0, Kc, inp_pos, nullptr,
                 n_rot, sections, rope_type, n_ctx_orig, freq_base, freq_scale,
