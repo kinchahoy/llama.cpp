@@ -1,6 +1,6 @@
 #include "allreduce.cuh"
 
-#if !defined(GGML_USE_MUSA)
+#if !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA)
 
 #include "convert.cuh"
 #include "ggml-impl.h"
@@ -12,11 +12,12 @@
 #include <type_traits>
 
 // ---------------------------------------------------------------------------
-// AllReduce for tensor-parallel inference across two CUDA or ROCm GPUs.
+// AllReduce for tensor-parallel inference across two GPUs (CUDA or
+// ROCm/HIP).
 //
-// Provides an in-place sum reduction over matching tensors on two
-// devices in the same process.  Used by the tensor-split path alongside
-// NCCL; targets setups without NVLink, where data is exchanged between the
+// Provides an in-place sum reduction over matching tensors on two GPUs
+// in the same process.  Used by the tensor-split path alongside NCCL;
+// targets setups without NVLink/xGMI, where data is exchanged between the
 // GPUs by staging it through pinned host memory over PCIe.
 //
 // Two reduction strategies are selected per call by tensor size:
@@ -163,6 +164,7 @@ static __global__ void ggml_cuda_ar_kernel(
 
         while (ggml_cuda_ar_signal_get(other_slot) != token) {
 #ifdef GGML_USE_HIP
+            // Equals ~100ns at 2500 MHz (sleeps for n * [1,64] clock cycles)
             __builtin_amdgcn_s_sleep(4);
 #elif __CUDA_ARCH__ >= GGML_CUDA_CC_VOLTA
             __nanosleep(100);
@@ -283,7 +285,7 @@ struct ggml_cuda_ar_host_mapping {
         }
         rc = cudaHostGetDevicePointer(reinterpret_cast<void **>(&dev), host, 0);
         if (rc != cudaSuccess) {
-            (void) cudaFreeHost(host);
+            CUDA_CHECK(cudaFreeHost(host));
             host = nullptr;
             dev  = nullptr;
         }
@@ -292,7 +294,7 @@ struct ggml_cuda_ar_host_mapping {
 
     void free() {
         if (host) {
-            (void) cudaFreeHost(host);
+            CUDA_CHECK(cudaFreeHost(host));
             host = nullptr;
             dev  = nullptr;
         }
@@ -404,7 +406,8 @@ ggml_cuda_ar_pipeline * ggml_cuda_ar_pipeline_init(const int * devices, size_t n
         return nullptr;
     }
 
-    // The chunked kernel uses a device sleep intrinsic. CUDA requires sm70+.
+    // The chunked kernel uses __nanosleep (NVIDIA, sm70+) or
+    // __builtin_amdgcn_s_sleep (AMD).
     for (size_t i = 0; i < n_devices; ++i) {
         const int cc = ggml_cuda_info().devices[devices[i]].cc;
         if (cc < GGML_CUDA_CC_VOLTA) {
@@ -546,7 +549,7 @@ void ggml_cuda_ar_pipeline_free(ggml_cuda_ar_pipeline * p) {
     for (int i = 0; i < p->n_devices; ++i) {
         if (p->streams[i]) {
             ggml_cuda_set_device(p->devices[i]);
-            (void) cudaStreamSynchronize(p->streams[i]);
+            CUDA_CHECK(cudaStreamSynchronize(p->streams[i]));
         }
     }
 
@@ -555,28 +558,28 @@ void ggml_cuda_ar_pipeline_free(ggml_cuda_ar_pipeline * p) {
         p->host_large[i].free();
         if (p->dev_tmp[i]) {
             ggml_cuda_set_device(p->devices[i]);
-            (void) cudaFree(p->dev_tmp[i]);
+            CUDA_CHECK(cudaFree(p->dev_tmp[i]));
         }
         ggml_cuda_set_device(p->devices[i]);
         for (int s = 0; s < GGML_CUDA_AR_POOL_SIZE; ++s) {
-            if (p->ev_pool[i][s].app) { (void) cudaEventDestroy(p->ev_pool[i][s].app); }
+            if (p->ev_pool[i][s].app) { CUDA_CHECK(cudaEventDestroy(p->ev_pool[i][s].app)); }
             for (int c = 0; c < GGML_CUDA_AR_COPY_MAX_CHUNKS; ++c) {
-                if (p->ev_pool[i][s].cpy[c]) { (void) cudaEventDestroy(p->ev_pool[i][s].cpy[c]); }
+                if (p->ev_pool[i][s].cpy[c]) { CUDA_CHECK(cudaEventDestroy(p->ev_pool[i][s].cpy[c])); }
             }
-            if (p->ev_pool[i][s].h2d) { (void) cudaEventDestroy(p->ev_pool[i][s].h2d); }
-            if (p->ev_pool[i][s].ker) { (void) cudaEventDestroy(p->ev_pool[i][s].ker); }
+            if (p->ev_pool[i][s].h2d) { CUDA_CHECK(cudaEventDestroy(p->ev_pool[i][s].h2d)); }
+            if (p->ev_pool[i][s].ker) { CUDA_CHECK(cudaEventDestroy(p->ev_pool[i][s].ker)); }
         }
         if (p->host_large_read_done[i]) {
             ggml_cuda_set_device(p->devices[i]);
-            (void) cudaEventDestroy(p->host_large_read_done[i]);
+            CUDA_CHECK(cudaEventDestroy(p->host_large_read_done[i]));
         }
         if (p->dev_tmp_kernel_done[i]) {
             ggml_cuda_set_device(p->devices[i]);
-            (void) cudaEventDestroy(p->dev_tmp_kernel_done[i]);
+            CUDA_CHECK(cudaEventDestroy(p->dev_tmp_kernel_done[i]));
         }
         if (p->streams[i]) {
             ggml_cuda_set_device(p->devices[i]);
-            (void) cudaStreamDestroy(p->streams[i]);
+            CUDA_CHECK(cudaStreamDestroy(p->streams[i]));
         }
     }
     p->arrival.free();
