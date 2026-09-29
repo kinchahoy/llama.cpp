@@ -247,3 +247,8 @@ Chat template and parser:
 - [PEG parser](docs/development/parsing.md) - alternative to regex that llama.cpp uses to parse model's output
 - [Auto parser](docs/autoparser.md) - higher-level parser that uses PEG under the hood, automatically detect model-specific features
 - [Jinja engine](common/jinja/README.md)
+
+## Head merge check
+
+- After merging upstream or mx-llama heads, confirm the default ROCm tensor-parallel path still uses the intended AllReduce. Check that `ggml/src/ggml-cuda/allreduce.cu` compiles the host-staged path for HIP and that its pipeline does not require `GGML_CUDA_TP_OVERLAP=1` for the normal configuration.
+- Rebuild and compare PP and TG with the pre-merge commit using identical `llama-bench` settings. On 2026-09-29, excluding HIP from the host-staged path reduced Qwen3.8 27B Q8_0 PP2048 by 21% and TG256 by 38% on two gfx906 GPUs.

@@ -1,6 +1,6 @@
 #include "allreduce.cuh"
 
-#if !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA)
+#if !defined(GGML_USE_MUSA)
 
 #include "convert.cuh"
 #include "ggml-impl.h"
