@@ -202,6 +202,8 @@ static llama_model * llama_model_mapping(llm_arch arch, const llama_model_params
             return new llama_model_dots3note(params);
         case LLM_ARCH_DEEPSEEK4:
             return new llama_model_deepseek4(params);
+        case LLM_ARCH_DEEPSEEK41:
+            return new llama_model_deepseek41(params);
         case LLM_ARCH_GLM_DSA:
             return new llama_model_glm_dsa(params);
         case LLM_ARCH_MISTRAL4:
@@ -430,7 +432,10 @@ struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const str
     const llama_meta_device_get_split_state_userdata * ud = (const llama_meta_device_get_split_state_userdata *) userdata;
     const llama_hparams & hparams = ud->model->hparams;
     const std::string tensor_name = tensor->name;
+    // V4.1 shares V4's grouped attention output, so every rule that sizes a per-head or per-group segment by dsv4_o_group_count applies to it as well.
+    // Left out, the attention sinks fell to the generic per-head granularity, which put all 64 of a layer's sink values on one lane while the attention node held 32 heads per lane.
     const bool is_dsv4 = ud->model->arch == LLM_ARCH_DEEPSEEK4 ||
+        ud->model->arch == LLM_ARCH_DEEPSEEK41 ||
         (ud->model->arch == LLM_ARCH_DFLASH && hparams.dsv4_hc_mult > 0);
 
     static const std::regex pattern_q_weight        ("blk\\.\\d*\\.attn_q.weight");
@@ -597,8 +602,12 @@ struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const str
     // up-projection that needs its own head-split rule. Add both before widening this.
     // A DSV4-backbone DFlash drafter carries the same grouped-LoRA output and the same
     // single-head KV latent, so it takes the identical routing.
+    // V4.1 carries the same attention shape this path was written for: a grouped-LoRA output projection over o_groups and a single-head KV latent.
+    // Its compressor and indexer are separate tensors with their own rules, and the compressed latent stays mirrored, so each device scores its own heads against the whole of it.
+    // Left out of the gate, V4.1 fell through to the design-A mirror and kept a full copy of attn_q_b, attn_output_a and attn_output_b on every device, 4.65 GiB per card of the 5.70 GiB that overflowed them.
     const bool head_split_attention = mla_tp_env && replicate_attention &&
-                                      (ud->model->arch == LLM_ARCH_DEEPSEEK4 || dflash_dsv4_split);
+                                      (ud->model->arch == LLM_ARCH_DEEPSEEK4 ||
+                                       ud->model->arch == LLM_ARCH_DEEPSEEK41 || dflash_dsv4_split);
     if (mla_tp_env && replicate_attention && !head_split_attention) {
         LLAMA_LOG_WARN("%s: LLAMA_MLA_TP is only implemented for deepseek4, using design A\n", __func__);
     }
@@ -617,6 +626,12 @@ struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const str
     }
 
     auto get_tensor_config = [&]() -> tensor_config {
+        // A tied output head is loaded as a duplicate of token_embd.weight and keeps that name.
+        // By name it would fall to the mirrored default with the embedding table, and every lane would then run the whole head each token.
+        // The duplicate is only ever read by MUL_MAT, so it takes the output.weight rules below.
+        const bool tied_output = tensor != nullptr && tensor == ud->model->output && ud->model->output != ud->model->tok_embd &&
+            !std::regex_match(tensor_name, pattern_output_weight);
+
         // The MTP draft block sits one block past the trunk and is loaded as its own
         // model on a single device, yet it inherits the target's split mode and so
         // still passes through here. Mirror it whole. Two reasons: its tensor set is
@@ -746,7 +761,7 @@ struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const str
                 std::regex_match(tensor_name, pattern_ffn_gate_up_weight) ||
                 std::regex_match(tensor_name, pattern_ffn_down_weight)   || std::regex_match(tensor_name, pattern_ffn_down_bias)   ||
                 std::regex_match(tensor_name, pattern_ffn_down_exps_bias);
-            const bool is_output =
+            const bool is_output = tied_output ||
                 std::regex_match(tensor_name, pattern_output_weight) || std::regex_match(tensor_name, pattern_output_bias);
             if (!is_ffn && !is_output) {
                 return get_tensor_config_impl(GGML_BACKEND_SPLIT_AXIS_MIRRORED);
@@ -846,7 +861,7 @@ struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const str
         }
 
         // output
-        if (std::regex_match(tensor_name, pattern_output_weight)) {
+        if (tied_output || std::regex_match(tensor_name, pattern_output_weight)) {
             // deepseek4 keeps the vocabulary-parallel head: mirroring it, as upstream does,
             // measured 3.8 percent slower at -tps 4 on 8 MI50 and reads the whole head on
             // every device each token.
@@ -1217,6 +1232,33 @@ struct ggml_backend_meta_split_state llama_meta_device_get_split_state(const str
         // are replicated to every dev, which is correct (just wasteful for small constants).
         // The meta backend's compute partitioning derives stage ownership from non-mirrored
         // sources, so this doesn't break correctness.
+        // A mirrored layer weight is only read by its own stage and, at a stage seam, by the neighbouring stage.
+        // The meta backend places the seam between the last AllReduce of the previous layer and the first split weight of the next one, so the ops in that window can run on either stage.
+        // The first layer of a stage therefore also keeps a copy on the previous stage, and the last layer of a stage on the next one.
+        // Naming those lanes in nr[1] lets the meta backend skip the copy on every other lane.
+        // The meta backend aborts at partition time if a node ever reads such a weight on a lane without a copy, and LLAMA_STAGE_LOCAL_MIRROR=0 restores a copy on every lane.
+        static const bool stage_local_mirror = [] {
+            const char * s = getenv("LLAMA_STAGE_LOCAL_MIRROR");
+            return s == nullptr || atoi(s) != 0;
+        }();
+        if (stage_local_mirror && split_state.axis == GGML_BACKEND_SPLIT_AXIS_MIRRORED && ud->n_stages > 1 &&
+                tensor_name.compare(0, 4, "blk.") == 0 && tc.il < hparams.n_layer() && ud->n_devices <= 32) {
+            uint32_t lanes = 0;
+            for (size_t k = 0; k < tps; k++) {
+                lanes |= 1u << (lane_base + k);
+            }
+            if (stage > 0 && (tc.il == 0 || owning_stage(tc.il - 1, true) != stage)) {
+                for (size_t k = 0; k < tps; k++) {
+                    lanes |= 1u << (lane_base - tps + k);
+                }
+            }
+            if (stage + 1 < ud->n_stages && (tc.il + 1 >= hparams.n_layer() || owning_stage(tc.il + 1, true) != stage)) {
+                for (size_t k = 0; k < tps; k++) {
+                    lanes |= 1u << (lane_base + tps + k);
+                }
+            }
+            split_state.nr[1] = lanes;
+        }
         if (split_state.axis == GGML_BACKEND_SPLIT_AXIS_PARTIAL) {
             GGML_ASSERT(tc.tensor_axis_0 != tensor);
             const ggml_backend_meta_split_state source_split_state = llama_meta_device_get_split_state(tc.tensor_axis_0, userdata);
@@ -2310,6 +2352,17 @@ ggml_tensor * llama_model_base::create_tensor(llama_model_loader & ml, const LLM
     // which also means dropping the lazy flag - there is no file mapping to page from
     // once it lives on the devices.
     const buft_list_t * buft_list_input = pimpl->dev_input.buft_list;
+
+    // Same reasoning as the PLE table below, and the stakes are higher: the two DeepSeek-V4.1 engram tables are 48.6 GiB each, the default meta rule for an unrecognised tensor is MIRRORED, and a GET_ROWS support check that accepts them into VRAM would put a copy of each on every device.
+    // Pin them to plain CPU and let the rows page in as they are gathered.
+    if (tn.tensor == LLM_TENSOR_ENGRAM_EMBED) {
+        static const buft_list_t engram_cpu_only = {
+            { ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU),
+              ggml_backend_cpu_buffer_type() }
+        };
+        buft_list_input = &engram_cpu_only;
+    }
+
     if (tn.tensor == LLM_TENSOR_PER_LAYER_TOKEN_EMBD) {
         if (llama_ple_shard_enabled() && params.split_mode == LLAMA_SPLIT_MODE_TENSOR &&
                 !pimpl->dev_layer.empty()) {
@@ -2915,6 +2968,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params, 
                 }
             } break;
         case LLM_ARCH_DEEPSEEK4:
+        case LLM_ARCH_DEEPSEEK41:
             {
                 GGML_ASSERT(hparams.swa_type != LLAMA_SWA_TYPE_NONE);
 
@@ -3419,6 +3473,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
         case LLM_ARCH_DEEPSEEK2OCR:
         case LLM_ARCH_DEEPSEEK32:
         case LLM_ARCH_DEEPSEEK4:
+        case LLM_ARCH_DEEPSEEK41:
         case LLM_ARCH_MUSE_GLIMMER:
         case LLM_ARCH_PLM:
         case LLM_ARCH_CHATGLM:
