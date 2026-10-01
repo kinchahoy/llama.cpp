@@ -1,0 +1,9 @@
+model,arm,source_commit,build,pp_tokens_per_second,tg_tokens_per_second,score,scenario_seconds,decision
+Q8_0,production_reference,b8efb9510,10275,282.976000,19.819900,48.117500,109.564149,reference
+Q8_0,same_build_overlap_off,b8efb9510-dirty,10275,283.038027,18.471830,46.775633,113.321978,control
+Q8_0,broad_hip_transport,b8efb9510-dirty,10275,262.514088,14.031026,40.282435,135.393009,reject
+Q8_0,f32_overlap,b8efb9510-dirty,10275,276.339528,18.029366,45.663319,116.085612,reject
+Q8_0,bf16_overlap_final,b8efb9510-dirty,10275,318.778032,19.626644,51.504447,103.570238,keep_opt_in
+UD-Q8_K_XL,overlap_off,b8efb9510-dirty,10275,281.024245,,,,control
+UD-Q8_K_XL,bf16_overlap_final,b8efb9510-dirty,10275,314.851894,15.774956,47.260145,116.950183,quality_first_only
+Qwen3.8-Q8_0,bf16_overlap_final,46b95d97e-dirty,10279,319.477897,18.401067,50.348857,106.932620,keep_opt_in
