@@ -1,0 +1,18 @@
+./build/bin/llama-server \
+  -hf unsloth/Qwen3.8-27B-GGUF:Q8_0 \
+  -ngl 999 \
+  -dev ROCm0,ROCm1 \
+  -sm tensor \
+  -fa on \
+  -b 4096 \
+  -ub 4096 \
+  -np 3 \
+  -c 250000 \
+  --kv-unified \
+  --cache-reuse 512 \
+  --no-mmap \
+  --mlock \
+  --spec-type draft-mtp \
+  --spec-draft-n-max 2 \
+  --host 192.168.1.83 \
+  --port 9099
