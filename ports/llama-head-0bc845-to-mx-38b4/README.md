@@ -35,6 +35,8 @@ The expected result is a working tree whose files in `MANIFEST.tsv` exactly matc
 
 ## Port to a newer llama.cpp head
 
+Follow the [gfx906 merge resolution guide](../../vr/MERGE-GFX906.md) for typical conflict decisions and the [current merge kit](../llama-head-e358d-to-mx-20261001/README.md) for the 2026-10-01 reconciliation. This kit remains pinned to the older base.
+
 Create a clean worktree at the new upstream commit and apply the same patches with `git apply --3way` in order. Resolve conflicts in the source, especially where upstream has changed an interface, then build and benchmark. A clean apply only proves that text was carried forward; it does not prove that the fast dispatch path still runs. For each new checkpoint, record the upstream commit, inspect `git diff` against it, and run `regenerate.py --base <upstream-commit> --target <accepted-mx-commit>` from the copied kit directory. The exporter fails if one of its five runtime groups becomes empty. Review `EXCLUDED.txt` for new paths that need an explicit group before treating a new export as complete.
 
 The highest value post-merge checks are these integration seams:
