@@ -10,6 +10,8 @@
 #include "speculative.h"
 #include "unicode.h"
 
+#include "../src/llama-ext.h"
+
 #include <algorithm>
 #include <cinttypes>
 #include <climits>
@@ -1308,6 +1310,12 @@ common_init_result::common_init_result(common_params & params, bool model_only) 
     }
 
     pimpl->context.reset(lctx);
+
+    if (mparams.load_mtp && cparams.ctx_type == LLAMA_CONTEXT_TYPE_DEFAULT) {
+        // Configure target extraction before warmup and the first prompt.
+        llama_set_embeddings_nextn(lctx, true, /*masked*/ false);
+        llama_sched_reserve(lctx);
+    }
 
     set_process_priority(params.cpuparams.priority);
 
