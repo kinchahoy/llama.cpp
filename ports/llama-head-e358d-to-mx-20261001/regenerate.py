@@ -10,7 +10,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 DEFAULT_BASE = "e358d59178377be4c58ba567925e05faadbccb57"
-DEFAULT_TARGET = "6f1050df17a6d4442c0067df642efc003a9dbc4e"
+DEFAULT_TARGET = "8a6351ddf09c444d342b671bc9a26559735f19e1"
 PATCHES = (
     "0001-core-ggml.patch",
     "0002-gpu-backends.patch",
