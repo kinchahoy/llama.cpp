@@ -45,8 +45,13 @@ bool ggml_cuda_repack_mmv_fusion_width_ok(int64_t n_tokens, bool has_ids, ggml_t
     // that ubatch, fused against unfused: +4.6% at 2 tokens, -2.7% at 3,
     // +2.4% at 4 - and a speculative verify step is exactly 3 wide at the
     // default draft depth, so dense fusion loses where it would be used.
-    const int64_t max_tokens = has_ids ? MMQ_RP_Q8_MOE_MMV_MAX_TOKENS : 1;
-    GGML_UNUSED(wt);
+    // GGML_RP_NC_FUSION=1 fuses dense Q8_0 up/gate up to the narrow mat-vec width (measured slower at 6-8 columns).
+    static const bool nc_fusion = [] {
+        const char * e = getenv("GGML_RP_NC_FUSION");
+        return e != nullptr && atoi(e) != 0;
+    }();
+    const int64_t max_tokens = has_ids ? MMQ_RP_Q8_MOE_MMV_MAX_TOKENS :
+        (nc_fusion && wt == GGML_TYPE_Q8_0 ? MMQ_RP_Q8_MMV_MAX_TOKENS : 1);
     return n_tokens >= 1 && n_tokens <= max_tokens;
 }
 

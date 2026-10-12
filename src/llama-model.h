@@ -693,6 +693,9 @@ struct llama_model {
     llm_type type = LLM_TYPE_UNKNOWN;
     llm_arch arch = LLM_ARCH_UNKNOWN;
 
+    // path of the main GGUF file, empty when loaded from memory or a FILE handle
+    std::string path;
+
     std::string name = "n/a";
 
     llama_hparams hparams = {};

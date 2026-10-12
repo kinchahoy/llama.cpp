@@ -1484,6 +1484,18 @@ struct ggml_cuda_tp_overlap_state {
     cudaEvent_t ready[2]      = {};
 };
 
+// Prefill AllReduce overlap. The meta backend marks the mat-mul whose output it will AllReduce;
+// mul_mat then computes it in token slabs and records one event per slab, so the transfer of
+// slab k can run while slab k+1 is computed. The AllReduce consumes and clears the state.
+struct ggml_cuda_ar_slab_state {
+    static constexpr int MAX_SLABS = 8;
+    const ggml_tensor * target    = nullptr;
+    bool                done      = false;
+    int                 n_slabs   = 0;
+    int64_t             slab_rows = 0; // dst ne[1] per slab
+    cudaEvent_t         ready[MAX_SLABS] = {};
+};
+
 struct ggml_backend_cuda_context {
     int device;
     std::string name;
@@ -1595,6 +1607,7 @@ struct ggml_backend_cuda_context {
     ggml_cuda_stream_context concurrent_stream_context;
 
     ggml_cuda_tp_overlap_state tp_overlap;
+    ggml_cuda_ar_slab_state    ar_slab;
 
     // Quantized copies of activations already produced during this graph
     // evaluation, so repeated matmuls off one activation quantize it once.

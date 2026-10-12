@@ -521,6 +521,9 @@ static struct llama_model * llama_model_load_from_file_impl(
         return nullptr;
     }
 
+    if (file == nullptr && metadata == nullptr) {
+        model->path = path_model;
+    }
     return model;
 }
 

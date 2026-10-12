@@ -14,8 +14,10 @@ There is no demonstrated drop-in 20-40% improvement over this fork in the review
 
 ## Workload and existing reference
 
+Use the [current benchmark workflow](README.md#benchmark-workflow). This 256-token CLI run is the trusted quick check; confirm improvements with longer generation, such as `-n 4000`. `llama-bench` is a faster screening tool with less weight for the real workload. Explore batch/ubatch 2048/2048 and 4096/4096 as separate comparisons.
+
 ```sh
-./build/bin/llama-cli \
+./build-ilp/bin/llama-cli \
   -hf unsloth/Qwen3.8-27B-GGUF:Q8_0 \
   -ngl 999 -dev ROCm0,ROCm1 -sm tensor -fa on \
   -f flake.nix -st -b 2048 -ub 2048 -c 150000 \

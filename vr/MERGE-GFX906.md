@@ -1,5 +1,7 @@
 # Merging llama.cpp heads for MI50/MI60 (gfx906)
 
+Short procedure: [active patch kit README](patches/llama-head-08ffba21e/README.md). This page is the long reference.
+
 Keep the accepted MX runtime overlay when moving to a new ggml-org/llama.cpp head. The active kit is linked in [README.md](README.md); `OLD-IGNORE/patches` is archived and must not replace it. Resolve all source interfaces before configuring, building, or testing. A text-clean merge is not evidence that the fast kernels still dispatch.
 
 ## Inject into a future upstream head
@@ -9,7 +11,7 @@ Use this route for a clean upstream checkout. Use a normal upstream merge when t
 Set these three absolute paths. `LLAMA_REPO` is an existing Git checkout; `PORT_DIR` must not exist. The new detached worktree isolates the port from any work in the original checkout. These commands fetch the official head, retain its exact commit, ensure the kit's upstream base objects are available, and stop at the first patch conflict. They do not build, benchmark, or commit.
 
 ```sh
-KIT=/home/raistlin/infer/mx-llama.cpp/ports/llama-head-e358d-to-mx-20261001
+KIT=/home/raistlin/infer/mx-llama.cpp/vr/patches/llama-head-08ffba21e
 LLAMA_REPO=/path/to/llama.cpp
 PORT_DIR=/path/to/llama-gfx906
 (
@@ -18,7 +20,7 @@ PORT_DIR=/path/to/llama-gfx906
     (cd "$KIT" && sha256sum -c SHA256SUMS)
     git -C "$LLAMA_REPO" fetch https://github.com/ggml-org/llama.cpp.git master
     UPSTREAM_HEAD=$(git -C "$LLAMA_REPO" rev-parse FETCH_HEAD)
-    KIT_BASE=e358d59178377be4c58ba567925e05faadbccb57
+    KIT_BASE=08ffba21e5c2f1728b6b405c05ff3913f65706d4
     if ! git -C "$LLAMA_REPO" cat-file -e "$KIT_BASE^{commit}"; then
         git -C "$LLAMA_REPO" fetch https://github.com/ggml-org/llama.cpp.git "$KIT_BASE"
     fi
@@ -43,13 +45,13 @@ Read the failing patch name, `git -C "$PORT_DIR" status --short`, and `git -C "$
 
 The meaning of ours and theirs reverses between these workflows. Reconcile the source behavior; do not choose a side for every conflict. Stage only the resolved files with `git -C "$PORT_DIR" add -- path/to/resolved-file`. Check that the index has no unmerged entries before continuing to the next patch.
 
-If `0002-gpu-backends.patch` landed with conflicts, finish its resolution and then apply only the remaining patches:
+If `0002-ggml-hip-gfx906-kernels.patch` landed with conflicts, finish its resolution and then apply only the remaining patches:
 
 ```sh
 (
     set -e
     test -z "$(git -C "$PORT_DIR" ls-files -u)"
-    for name in 0003-model-runtime.patch 0004-common-tools.patch 0005-build-harness.patch; do
+    for name in 0003-llama-model-runtime.patch 0004-common-tools-tests-harness.patch 0005-tp-token-graph-fusions-ar-overlap.patch; do
         git -C "$PORT_DIR" apply --3way "$KIT/patches/$name"
     done
 )
@@ -57,11 +59,13 @@ If `0002-gpu-backends.patch` landed with conflicts, finish its resolution and th
 
 Adjust the remaining list to the patch that actually stopped. Do not replay a patch that already landed. A missing-blob or rejected-hunk error with no unmerged entries needs separate inspection; it does not mean the failing patch was installed. Fetch missing base objects or adapt the rejected change before proceeding. Keep all remaining builds and tests deferred until every patch and its API reconciliation is complete.
 
-Review the resulting overlay with `git -C "$PORT_DIR" diff HEAD --stat` and `git -C "$PORT_DIR" diff HEAD -- path/to/file`. Review automatically merged changes too. Then check `git diff --check`, `git diff --cached --check`, conflict markers, and stale tensor/API identifiers inside the port worktree. Only after this source review should you use the active kit's documented build and single PP/TG command.
+Review the resulting overlay with `git -C "$PORT_DIR" diff HEAD --stat` and `git -C "$PORT_DIR" diff HEAD -- path/to/file`. Review automatically merged changes too. Then check `git diff --check`, `git diff --cached --check`, conflict markers, and stale tensor/API identifiers inside the port worktree. Only after this source review should you build and measure. Use the kit's pinned command to reproduce its historical result and the [current CLI workflow](README.md#benchmark-workflow) to assess the real workload.
 
 ## Standard workload and performance priority
 
-Optimize Q8_0 first, then preserve Q4_0 and Q4_K. The documented Qwen3.8-27B Q8_0 workload targets over 400 PP2048 and about 30 TG256 tokens/s on two gfx906 GPUs. PP and TG are in that order. Use full GPU offload, flash attention, tensor split, batch/ubatch 4096, and context depth 16384. A requested single final check uses one repetition and no warmup. Do not run parameter sweeps or additional quant benchmarks unless requested.
+Optimize Q8_0 first, then preserve Q4_0 and Q4_K. Use the [current benchmark workflow](README.md#benchmark-workflow): the trusted quick check is the real CLI prompt with 256 output tokens, and longer CLI generation provides the strongest confirmation. Explore batch/ubatch 2048/2048 and 4096/4096 separately. PP and TG are reported in that order.
+
+The older pinned kit used a synthetic PP2048/TG256 workload with full GPU offload, flash attention, tensor split, batch/ubatch 4096/4096 and populated depth 16384. Its reference was over 400 PP and about 30 TG tokens/s on two gfx906 GPUs. The one-repetition/no-warmup and single-final-run instructions were limits for those port tasks, not a general performance-validation policy. Preserve that exact command when reproducing those records; do not compare its numbers directly with the current CLI workload. Agree on any broader sweep before running it.
 
 Carry both the immediate pre-port result and the older performance reference into the next kit. The September 10 reference was 414.24 PP / 30.28 TG; the recorded checkpoint before the October 1 merge was 431.13 / 27.81, and the resolved October 1 run was 424.57 / 28.86. The latest run improved TG over the immediate checkpoint but remains 1.42 TG (4.7%) below the older reference. Do not describe that historical TG gap as recovered. These runs are historical comparisons with different repetition counts; the cause of the remaining gap is unproven.
 
@@ -95,7 +99,7 @@ Use the three-way base and inspect both sides of each conflict. Avoid choosing o
 | Attention training bypass | Keep upstream direct K/V reads for training. For inference retain MX `build_cpy_k/v` and `build_get_k/v` helpers so split KV buffers use the correct views and copies. |
 | Layer-input and NextN extraction | Carry upstream full-token batch-index mapping through the MX extraction signature with `llama_ubatch`. Return whether ordinary rows were copied, keep deferred position/sequence accumulation and readback events, and reorder unmasked rows independently of selected logits. Retain support for wider layer taps instead of adding an unconditional n_embd-width assertion. |
 | Recurrent memory | Preserve the MX snapshot ring, validity depths, convolution windows, and rollback handling. Carry upstream empty-memory detection so a draft with no recurrent layers disables snapshots. |
-| MTP planning and GDN snapshots | Keep the [fixes incorporated into the main patch series](../ports/llama-head-e358d-to-mx-20261001/README.md#mtp-planning-and-snapshot-correctness). Enable target extraction before warmup and complete target/draft reservations before prompt processing. The custom chunked GDN kernel must store every requested trailing snapshot and use the supplied output slot stride; its input has one state per sequence, not K. Preserve the chunked GDN/KDA and direct-cache regression cases. A fast PP run does not prove rollback correctness. |
+| MTP planning and GDN snapshots | Keep the [fixes incorporated into the main patch series](OLD-IGNORE/ports/llama-head-e358d-to-mx-20261001/README.md#mtp-planning-and-snapshot-correctness). Enable target extraction before warmup and complete target/draft reservations before prompt processing. The custom chunked GDN kernel must store every requested trailing snapshot and use the supplied output slot stride; its input has one state per sequence, not K. Preserve the chunked GDN/KDA and direct-cache regression cases. A fast PP run does not prove rollback correctness. |
 | Tensor identifiers | Rename C++ enum, tensor names/roles, layer fields, Python enums, mappings, and model tensor lists together. Keep GGUF wire names stable and old source aliases where needed; remove duplicate mappings and declarations. |
 | Qwen4Exp QSA/MTP refactors | Reconcile loader, converter, graph declarations, trunk graph, separate MTP graph, and k-pool memory access together. Retain MX convolution snapshot helpers. Accept old split fc_embedding/fc_hidden GGUF projections and new concatenated eh_proj tensors. Permit trunk-only compress-ratio arrays with a zero default for missing MTP entries, but honor explicit new MTP ratios. |
 | Application batch API | Use upstream `common_batch` and `llama_process` interfaces while keeping MX prompt chunking and separate final-token handling. |
@@ -103,13 +107,13 @@ Use the three-way base and inspect both sides of each conflict. Avoid choosing o
 
 ## Finish and export
 
-Once all source reconciliation is complete, check for conflict markers, stale identifiers, and whitespace errors. Configure the existing gfx906 Release/HIP build with RCCL off, build `llama-bench`, and run the documented PP2048/TG256 command once. Record actual values and the environment. Compare with the recorded pre-merge checkpoint, and identify that comparison as historical if no fresh baseline was requested. A Q8 run does not measure Q4 performance or validate every optional model path.
+Once all source reconciliation is complete, check for conflict markers, stale identifiers, and whitespace errors. Configure the existing gfx906 Release/HIP build with RCCL off and build the benchmark tools. Compare pre-merge and post-merge binaries with identical `llama-bench` settings, then confirm with the [CLI workflow](README.md#benchmark-workflow) within the requested test budget. Record actual values and the environment. Compare with the recorded pre-merge checkpoint, and identify that comparison as historical if no fresh baseline was requested. A Q8 run does not measure Q4 performance or validate every optional model path.
 
 Export a new kit against the exact upstream commit. Keep the old kit as a pinned reference. Runtime groups are file-disjoint and must all apply; inspect `EXCLUDED.txt` for omitted source paths. A Git tree snapshot can pin an uncommitted resolution without creating a commit. Replay the exported patches on a clean upstream archive and compare their runtime files with the snapshot before treating the kit as reproducible. Leave commits and publication to the user.
 
 ### Create the next reusable kit
 
-Run this after the source has been reviewed and the requested final benchmark has finished. First stage any remaining reviewed source edits, including new files; `write-tree` captures only the index. The clean-worktree route leaves `HEAD` at the exact upstream base; these commands require all source edits to be staged and all conflicts resolved. For an existing MX branch merge, replace the `UPSTREAM_HEAD` assignment below with its saved upstream commit instead of `HEAD`.
+Run this after the source has been reviewed and the requested benchmark checks have finished. First stage any remaining reviewed source edits, including new files; `write-tree` captures only the index. The clean-worktree route leaves `HEAD` at the exact upstream base; these commands require all source edits to be staged and all conflicts resolved. For an existing MX branch merge, replace the `UPSTREAM_HEAD` assignment below with its saved upstream commit instead of `HEAD`.
 
 ```sh
 (
@@ -120,7 +124,7 @@ Run this after the source has been reviewed and the requested final benchmark ha
     UPSTREAM_SHORT=$(git -C "$PORT_DIR" rev-parse --short=8 "$UPSTREAM_HEAD")
     RESOLVED_TREE=$(git -C "$PORT_DIR" write-tree)
     git -C "$PORT_DIR" update-ref "refs/port-snapshots/gfx906-$UPSTREAM_HEAD" "$RESOLVED_TREE"
-    NEXT_KIT="$PORT_DIR/ports/llama-head-$UPSTREAM_SHORT-gfx906"
+    NEXT_KIT="$PORT_DIR/vr/patches/llama-head-$UPSTREAM_SHORT"
     test ! -e "$NEXT_KIT"
     mkdir -p "$NEXT_KIT"
     cp "$KIT/regenerate.py" "$KIT/verify.py" "$NEXT_KIT/"
@@ -142,7 +146,7 @@ PY
 )
 ```
 
-The exporter expects the kit under `ports/<kit-name>/` in the target checkout. Updating the defaults matters: otherwise a later invocation without arguments silently exports the old snapshot. The snapshot ref retains the uncommitted tree without making a commit. Patch replay is an offline source check, separate from the single GPU performance run.
+The exporter expects the kit under `vr/patches/<kit-name>/` in the target checkout. Updating the defaults matters: otherwise a later invocation without arguments silently exports the old snapshot. The snapshot ref retains the uncommitted tree without making a commit. Patch replay is an offline source check, separate from the single GPU performance run.
 
 Review `MANIFEST.tsv` and `EXCLUDED.txt`; if an excluded path is required runtime code, update the existing export grouping and regenerate before calling the kit complete. Write the new kit's README with its upstream commit, resolved tree/ref, changed interfaces, exact build/benchmark command and environment, raw result paths, both historical references, remaining performance gaps, and unmeasured quant/model paths. Copy the merge guide into a new checkout if it is not already there. Update `vr/README.md` to point at the new kit only after accepting the port; retain the older kits and measurements.
 
@@ -151,7 +155,7 @@ Review `MANIFEST.tsv` and `EXCLUDED.txt`; if an excluded path is required runtim
 Send this with the active kit and this guide available in the workspace:
 
 ```text
-Port the active gfx906 patch kit linked from vr/README.md to the current official ggml-org/llama.cpp head. Follow vr/MERGE-GFX906.md. Use an isolated clean worktree for injection; use an upstream merge if MX is already installed. Apply all five patch groups. Prioritize MI50/MI60 Q8_0 performance, then preserve Q4_0 and Q4_K. Retain repack layout and dispatch, gfx906 MMQ/MMVQ tuning, normal HIP host-staged AllReduce without a TP-overlap flag, parallel lane dispatch, shared-expert sharding and scheduler dependencies. Reconcile all conflicts and automatically merged interfaces before any build or test. Then build llama-bench and run only one standard PP2048/TG256 check at depth 16384. Report the immediate baseline and the older 30.28 TG reference separately; do not declare the historical gap recovered without evidence. Export and document a new pinned kit for the next port. Leave changes uncommitted and do not push or submit a PR.
+Port the active gfx906 patch kit linked from vr/README.md to the current official ggml-org/llama.cpp head. Follow vr/MERGE-GFX906.md. Use an isolated clean worktree for injection; use an upstream merge if MX is already installed. Apply all five patch groups. Prioritize MI50/MI60 Q8_0 performance, then preserve Q4_0 and Q4_K. Retain repack layout and dispatch, gfx906 MMQ/MMVQ tuning, normal HIP host-staged AllReduce without a TP-overlap flag, parallel lane dispatch, shared-expert sharding and scheduler dependencies. Reconcile all conflicts and automatically merged interfaces before any build or test. Then build llama-bench and llama-cli. Compare the pre-port and post-port binaries with identical llama-bench settings and confirm with the CLI workload in vr/README.md; use longer generation when the test budget permits. Keep historical depth-16384 results separate from the current CLI workload. Report the immediate baseline and the older 30.28 TG reference separately; do not declare the historical gap recovered without evidence. Export and document a new pinned kit for the next port. Leave changes uncommitted and do not push or submit a PR.
 ```
 
 ## 2026-10-01 reconciliation

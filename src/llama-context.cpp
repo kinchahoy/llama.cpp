@@ -1,6 +1,7 @@
 #include "llama-context.h"
 
 #include "ggml.h"
+#include "gguf.h"
 #include "llama-arch.h"
 #include "llama-graph.h"
 #include "llama-impl.h"
@@ -256,6 +257,10 @@ llama_context::llama_context(
                 throw std::runtime_error(model.arch_name() + " requires ctx_other to be set (this warning is normal during memory fitting)");
             }
             cparams.ctx_other = params.ctx_other;
+            if (model.arch == LLM_ARCH_DFLASH) {
+                load_private_head(*llama_get_model(params.ctx_other));
+            }
+
         }
     }
 
@@ -1880,6 +1885,7 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
     if (!graph_reuse_disable && gf_res_prev_active == res && res->can_reuse(gparams)) {
         //LLAMA_LOG_DEBUG("%s: reusing previous graph\n", __func__);
 
+
         // with pipeline parallelism, the previous graph_compute_async may still be running
         // on the GPU. we must synchronize before set_inputs to avoid overwriting input tensors
         // that the previous compute is still reading.
@@ -2834,7 +2840,13 @@ bool llama_context::extract_layer_inputs(const llm_graph_result * res, size_t to
     // sequence runs so identical positions in different slots cannot collide.
     static const int32_t accum_min = []() {
         const char * e = getenv("LLAMA_TAP_ACCUM_MIN");
-        return e != nullptr ? atoi(e) : 16;
+        return e != nullptr ? atoi(e) : 1;
+    }();
+    // A prompt chunk that lands in the accum as one run is read from there only, so skip its second D2H copy.
+    // LLAMA_TAP_EMBD_SKIP=0 always copies.
+    static const bool embd_skip = []() {
+        const char * e = getenv("LLAMA_TAP_EMBD_SKIP");
+        return e == nullptr || atoi(e) != 0;
     }();
 
     struct accum_run {
@@ -2845,7 +2857,12 @@ bool llama_context::extract_layer_inputs(const llm_graph_result * res, size_t to
     };
     std::vector<accum_run> accum_runs;
 
-    bool accum_ok = layer_inp_accum && ubatch.pos && ubatch.n_pos == 1 &&
+    // M-RoPE text rows carry the text position in the first section. LLAMA_TAP_ACCUM_MROPE=0 restores n_pos == 1 only.
+    static const bool accum_mrope = []() {
+        const char * e = getenv("LLAMA_TAP_ACCUM_MROPE");
+        return e == nullptr || atoi(e) != 0;
+    }();
+    bool accum_ok = layer_inp_accum && ubatch.pos && (ubatch.n_pos == 1 || (accum_mrope && ubatch.n_pos >= 1)) &&
                     (int32_t) n_tokens >= accum_min;
     for (size_t i = 0; accum_ok && i < n_tokens; ++i) {
         const llama_pos pos = ubatch.pos[i];
@@ -2903,12 +2920,14 @@ bool llama_context::extract_layer_inputs(const llm_graph_result * res, size_t to
 
         ggml_backend_t backend = ggml_backend_sched_get_tensor_backend(sched.get(), t);
         GGML_ASSERT(backend != nullptr);
-        // Tensor-split backends require a zero source offset.
-        ggml_backend_tensor_get_async(backend, t, embd_layer_inp[il].data + dst_offset, 0, nbytes);
-        extracted = true;
 
         const bool layer_accum_ok = accum_ok && layer_inp_accum_idx[il] >= 0 &&
                                     row_floats == model.hparams.n_embd;
+        if (!(embd_skip && layer_accum_ok && accum_runs.size() == 1 && n_tokens >= 16)) {
+            // Tensor-split backends require a zero source offset.
+            ggml_backend_tensor_get_async(backend, t, embd_layer_inp[il].data + dst_offset, 0, nbytes);
+        }
+        extracted = true;
         if (layer_accum_ok) {
             const size_t row_bytes = row_floats * sizeof(float);
             for (const auto & run : accum_runs) {
@@ -3147,6 +3166,116 @@ uint32_t llama_context::graph_max_nodes(uint32_t n_tokens) const {
     }
 
     return res;
+}
+
+// A draft on other devices than the target cannot use the target's token embedding and output head
+// (e.g. they live in a tensor-parallel meta buffer). Load private copies from the target GGUF instead.
+void llama_context::load_private_head(const llama_model & target) {
+    static const bool enabled = [] {
+        const char * e = getenv("LLAMA_DFLASH_PRIVATE_HEAD");
+        return e == nullptr || atoi(e) != 0;
+    }();
+    ggml_backend_dev_t dev = model.dev_output();
+    if (!enabled || dev == nullptr || target.path.empty()) {
+        return;
+    }
+    auto needs_copy = [&](const ggml_tensor * own, const ggml_tensor * tgt) {
+        return own == nullptr && tgt != nullptr && tgt->buffer != nullptr &&
+            !ggml_backend_dev_supports_buft(dev, ggml_backend_buffer_get_type(tgt->buffer));
+    };
+    const bool copy_embd = needs_copy(model.tok_embd, target.tok_embd);
+    const bool copy_out  = needs_copy(model.output,   target.output);
+    if (!copy_embd && !copy_out) {
+        return;
+    }
+
+    ggml_context * meta = nullptr;
+    gguf_init_params gp = { /*.no_alloc =*/ true, /*.ctx =*/ &meta };
+    gguf_context * gguf = gguf_init_from_file(target.path.c_str(), gp);
+    if (gguf == nullptr) {
+        LLAMA_LOG_WARN("%s: cannot open %s, draft keeps the shared head\n", __func__, target.path.c_str());
+        return;
+    }
+    const char * name_embd = "token_embd.weight";
+    const char * name_out  = gguf_find_tensor(gguf, "output.weight") >= 0 ? "output.weight" : name_embd;
+
+    // The output head goes into the buffer type of the draft's own weights when they are repacked, so the
+    // head mat-vec takes the same fast path. The token embedding is only read by get_rows and stays plain.
+    ggml_backend_buffer_type_t buft_plain = ggml_backend_dev_buffer_type(dev);
+    ggml_backend_buffer_type_t buft_out   = buft_plain;
+    const ggml_tensor * ref = model.layers.empty() ? nullptr : model.layers[0].wq;
+    const ggml_tensor * src_out = copy_out ? ggml_get_tensor(meta, name_out) : nullptr;
+    if (ref != nullptr && ref->buffer != nullptr && src_out != nullptr && ref->type == src_out->type) {
+        buft_out = ggml_backend_buffer_get_type(ref->buffer);
+    }
+
+    std::vector<std::pair<ggml_tensor *, const char *>> todo;
+    auto add = [&](ggml_context_ptr & ctx, ggml_backend_buffer_ptr & buf, ggml_backend_buffer_type_t buft, const char * name) -> ggml_tensor * {
+        const ggml_tensor * src = ggml_get_tensor(meta, name);
+        if (src == nullptr) {
+            return nullptr;
+        }
+        ggml_init_params ip = { ggml_tensor_overhead(), nullptr, /*.no_alloc =*/ true };
+        ctx.reset(ggml_init(ip));
+        ggml_tensor * t = ggml_dup_tensor(ctx.get(), src);
+        ggml_set_name(t, name);
+        buf.reset(ggml_backend_alloc_ctx_tensors_from_buft(ctx.get(), buft));
+        if (!buf) {
+            ctx.reset();
+            return nullptr;
+        }
+        ggml_backend_buffer_set_usage(buf.get(), GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+        todo.emplace_back(t, name);
+        return t;
+    };
+    ggml_tensor * t_embd = copy_embd ? add(ctx_private_head, buf_private_head, buft_plain, name_embd) : nullptr;
+    ggml_tensor * t_out  = copy_out  ? add(ctx_private_out,  buf_private_out,  buft_out,   name_out)  : nullptr;
+    if (todo.empty()) {
+        LLAMA_LOG_WARN("%s: cannot allocate the private head on %s\n", __func__, ggml_backend_dev_name(dev));
+        gguf_free(gguf);
+        ggml_free(meta);
+        return;
+    }
+
+    FILE * f = fopen(target.path.c_str(), "rb");
+    bool ok = f != nullptr;
+    std::vector<uint8_t> chunk(64u << 20);
+    for (auto & [t, name] : todo) {
+        const size_t off = gguf_get_data_offset(gguf) + gguf_get_tensor_offset(gguf, gguf_find_tensor(gguf, name));
+        const size_t n   = ggml_nbytes(t);
+        ok = ok && fseek(f, (long) off, SEEK_SET) == 0;
+        for (size_t done = 0; ok && done < n; done += chunk.size()) {
+            const size_t len = std::min(chunk.size(), n - done);
+            ok = fread(chunk.data(), 1, len, f) == len;
+            if (ok) {
+                ggml_backend_tensor_set(t, chunk.data(), done, len);
+            }
+        }
+    }
+    if (f != nullptr) {
+        fclose(f);
+    }
+    gguf_free(gguf);
+    ggml_free(meta);
+    if (!ok) {
+        LLAMA_LOG_WARN("%s: failed to read the head from %s\n", __func__, target.path.c_str());
+        buf_private_head.reset();
+        ctx_private_head.reset();
+        buf_private_out.reset();
+        ctx_private_out.reset();
+        return;
+    }
+
+    // the draft model is owned by this draft context alone
+    auto & mut = const_cast<llama_model &>(model);
+    if (t_embd != nullptr) {
+        mut.tok_embd = t_embd;
+    }
+    if (t_out != nullptr) {
+        mut.output = t_out;
+    }
+    LLAMA_LOG_INFO("%s: loaded private %s%s for the draft on %s (output in %s)\n", __func__,
+        t_embd ? "token_embd " : "", t_out ? "output" : "", ggml_backend_dev_name(dev), ggml_backend_buft_name(buft_out));
 }
 
 llm_graph_result * llama_context::get_gf_res_reserve() const {

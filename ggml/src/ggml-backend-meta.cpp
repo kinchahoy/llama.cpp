@@ -2642,6 +2642,8 @@ struct ggml_backend_meta_context {
     bool token_graph = false;
     // sub-backend entry point that switches off its per-subgraph graph cache
     void (*graph_cache_disable)(ggml_backend_t) = nullptr;
+    // Marks the node a lane's next AllReduce reads so the backend can overlap its transfer with compute.
+    bool (*ar_slab_mark)(ggml_backend_t, ggml_tensor *) = nullptr;
     bool inner_graphs_disabled = false;
     bool (*tg_capture_begin)(ggml_backend_t)        = nullptr;
     void * (*tg_capture_end)(ggml_backend_t)        = nullptr;
@@ -2937,6 +2939,8 @@ struct ggml_backend_meta_context {
                     ggml_backend_reg_get_proc_address(simple_reg, "ggml_backend_token_graph_free");
                 graph_cache_disable = (void (*)(ggml_backend_t))
                     ggml_backend_reg_get_proc_address(simple_reg, "ggml_backend_graph_cache_disable");
+                ar_slab_mark = (bool (*)(ggml_backend_t, ggml_tensor *))
+                    ggml_backend_reg_get_proc_address(simple_reg, "ggml_backend_ar_slab_mark");
                 break;
             }
         }
@@ -4139,8 +4143,15 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
                     const char * env = getenv("GGML_META_TOPK_BCAST_ALL");
                     return env != nullptr && atoi(env) != 0;
                 }();
+                // A top-k over the model logits (DFlash2 selector) only feeds mirrored nodes, and the host reads lane 0.
+                // GGML_META_TOPK_BCAST_LOGITS=1 broadcasts it again.
+                static const bool topk_bcast_logits = []() {
+                    const char * env = getenv("GGML_META_TOPK_BCAST_LOGITS");
+                    return env != nullptr && atoi(env) != 0;
+                }();
                 const bool topk_mirrored = node->src[0] != nullptr &&
-                    strncmp(node->src[0]->name, "indexer_score_tokens", 20) == 0;
+                    (strncmp(node->src[0]->name, "indexer_score_tokens", 20) == 0 ||
+                     (!topk_bcast_logits && strcmp(node->src[0]->name, "result_output") == 0));
                 const bool bcast_close = topk_bcast && backend_ctx->tps > 1 &&
                     node->op == GGML_OP_TOP_K &&
                     !(node->src[0] != nullptr && node->src[0]->op == GGML_OP_LIGHTNING_INDEXER) &&
@@ -5000,9 +5011,18 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
         backend_ctx->tps > 1 && backend_ctx->n_stages * backend_ctx->tps == n_backends &&
         backend_ctx->comm_ctxs.size() >= backend_ctx->n_stages) {
 
+        auto * tge = backend_ctx->tg_lookup(cgraph->uid);
+
         // The token graph records every kernel of the token, so the lanes' own per-subgraph caches only add recording work on top.
+        // By default they stay on until a token graph is about to be captured: a context whose graphs never capture
+        // (a draft that alternates two shapes) keeps them. GGML_META_INNER_GRAPHS_EAGER_OFF=1 restores the old rule.
+        static const bool inner_eager_off = []() {
+            const char * e = getenv("GGML_META_INNER_GRAPHS_EAGER_OFF");
+            return e != nullptr && atoi(e) != 0;
+        }();
         if (!backend_ctx->inner_graphs_disabled && backend_ctx->n_stages == 1 &&
-                backend_ctx->graph_cache_disable != nullptr) {
+                backend_ctx->graph_cache_disable != nullptr && (inner_eager_off || !tge->runs.empty() ||
+                 (!tge->failed && tge->warm + 1 > backend_ctx->tg_warm_needed))) {
             for (size_t j = 0; j < n_backends; j++) {
                 backend_ctx->graph_cache_disable(backend_ctx->backend_configs[j].backend);
             }
@@ -5010,7 +5030,6 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend, 
             GGML_LOG_DEBUG("%s: token graph owns the token, per-subgraph graph caches off\n", __func__);
         }
 
-        auto * tge = backend_ctx->tg_lookup(cgraph->uid);
 
         // Replay. Each run is one launch per lane of its stage, then the stage transfer
         // on the host, which is what the next stage's inputs depend on.
@@ -5234,6 +5253,16 @@ per_subgraph_dispatch:
                     i, stage, lane_lo, lane_hi, cg0->n_nodes, first, last, (int) sg.closure);
         }
         const uint64_t prof_t0 = backend_ctx->prof ? ggml_meta_prof_now() : 0;
+
+        if (backend_ctx->ar_slab_mark != nullptr && backend_ctx->tps > 1) {
+            const bool ar = sg.closure == ggml_backend_meta_context::subgraph_closure::AR &&
+                backend_ctx->comm_ctxs[stage] != nullptr;
+            for (size_t j = lane_lo; j < lane_hi; j++) {
+                auto & bcj = backend_ctx->backend_configs[j];
+                ggml_cgraph * cg = bcj.cgraphs[i].cgraph_main;
+                backend_ctx->ar_slab_mark(bcj.backend, ar && cg->n_nodes > 0 ? cg->nodes[cg->n_nodes - 1] : nullptr);
+            }
+        }
 
         // Issuing the lanes in order makes lane_hi-1 arrive at the closure below last, and
         // the AllReduce bills that wait as its own runtime. Hand the trailing lanes to the

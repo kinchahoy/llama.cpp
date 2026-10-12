@@ -794,6 +794,11 @@ ggml_backend_cuda_context::~ggml_backend_cuda_context() {
             CUDA_CHECK(cudaEventDestroy(event));
         }
     }
+    for (cudaEvent_t event : ar_slab.ready) {
+        if (event != nullptr) {
+            CUDA_CHECK(cudaEventDestroy(event));
+        }
+    }
     if (copy_event != nullptr) {
         CUDA_CHECK(cudaEventDestroy(copy_event));
     }
@@ -1090,6 +1095,8 @@ struct ggml_backend_cuda_comm_context {
     // meta backend runs at most one AllReduce per stage at a time, and every
     // rank's launch happens before the next prepare on the same context.
     ggml_cuda_tp::CustomARPlan ar_plan;
+    // True when the current plan is the host-staged internal pipeline instead of ar_plan.
+    bool ar_plan_internal = false;
 
     std::vector<ggml_backend_t> backends;
     std::vector<int>            dev_ids;
@@ -1342,26 +1349,41 @@ static bool ggml_backend_cuda_comm_allreduce_custom(
 //   returns < 0 : not eligible, caller must use ggml_backend_comm_allreduce_tensor
 //   returns   0 : eligible, nothing to launch
 //   returns > 0 : number of ranks the caller must issue via launch_rank
+static bool ggml_backend_cuda_comm_try_allreduce_internal(ggml_backend_cuda_comm_context * comm_ctx, struct ggml_tensor ** tensors);
+
 static int ggml_backend_cuda_comm_allreduce_prepare(void * comm_ctx_v, struct ggml_tensor ** tensors) {
     if (comm_ctx_v == nullptr) {
         return -1;
     }
     auto * comm_ctx = static_cast<ggml_backend_cuda_comm_context *>(comm_ctx_v);
-    if (!ggml_backend_cuda_comm_allreduce_custom_prepare(comm_ctx, tensors)) {
-        return -1;
-    }
+    comm_ctx->ar_plan_internal = false;
     // One-shot stages the input with an async copy issued during prepare, which
     // the fused caller runs before the lanes enqueue their subgraphs - that copy
     // would then read data the subgraph has not written yet. Only the
     // peer-write kernels (broadcast/twoshot) stage inside the kernel itself.
-    if (comm_ctx->ar_plan.nranks > 0 && !comm_ctx->ar_plan.broadcast) {
-        return -1;
+    if (ggml_backend_cuda_comm_allreduce_custom_prepare(comm_ctx, tensors)) {
+        if (comm_ctx->ar_plan.nranks > 0 && !comm_ctx->ar_plan.broadcast) {
+            return -1;
+        }
+        return comm_ctx->ar_plan.nranks;
     }
-    return comm_ctx->ar_plan.nranks;
+    // Without peer writes, the host-staged chunked kernel also stages inside the kernel.
+    if (comm_ctx->ar_pipeline != nullptr && comm_ctx->try_allreduce == ggml_backend_cuda_comm_try_allreduce_internal) {
+        const int nr = ggml_cuda_ar_prepare(comm_ctx->ar_pipeline, comm_ctx->backends.data(), tensors);
+        if (nr > 0) {
+            comm_ctx->ar_plan_internal = true;
+            return nr;
+        }
+    }
+    return -1;
 }
 
 static void ggml_backend_cuda_comm_allreduce_launch_rank(void * comm_ctx_v, int rank) {
     auto * comm_ctx = static_cast<ggml_backend_cuda_comm_context *>(comm_ctx_v);
+    if (comm_ctx->ar_plan_internal) {
+        ggml_cuda_ar_launch_rank(comm_ctx->ar_pipeline, rank);
+        return;
+    }
     ggml_cuda_tp::tp_custom_ar_launch_rank(&comm_ctx->ar_plan, rank);
 }
 
@@ -2725,8 +2747,80 @@ static bool ggml_cuda_match_shared_expert(const ggml_cgraph * graph, int routed_
     return true;
 }
 
+static void ggml_cuda_mul_mat(ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst);
+
+// Number of token slabs for an AllReduce input mat-mul in prefill. GGML_CUDA_AR_SLABS=0 or 1 disables the overlap.
+static int ggml_cuda_ar_slab_count() {
+    static const int n = [] {
+        const char * e = getenv("GGML_CUDA_AR_SLABS");
+        const int v = e != nullptr ? atoi(e) : 4;
+        return std::max(0, std::min(v, ggml_cuda_ar_slab_state::MAX_SLABS));
+    }();
+    return n;
+}
+
+static constexpr int64_t GGML_CUDA_AR_SLAB_MIN_ROWS = 256;
+
+// Meta-backend hook: mark (or with nullptr, unmark) the node whose output the next AllReduce reads.
+// Returns false and leaves nothing marked when the node does not qualify for slab overlap.
+static bool ggml_backend_cuda_ar_slab_mark(ggml_backend_t backend, ggml_tensor * t) {
+    ggml_backend_cuda_context * ctx = (ggml_backend_cuda_context *) backend->context;
+    ctx->ar_slab.target = nullptr;
+    ctx->ar_slab.done   = false;
+    if (t == nullptr || ggml_cuda_ar_slab_count() < 2 || t->op != GGML_OP_MUL_MAT || t->type != GGML_TYPE_F32 ||
+            !ggml_is_contiguous(t) || t->ne[2] != 1 || t->ne[3] != 1 || t->ne[1] < 2*GGML_CUDA_AR_SLAB_MIN_ROWS ||
+            t->src[1]->type != GGML_TYPE_F32 || t->src[1]->ne[2] != 1 || t->src[1]->ne[3] != 1) {
+        return false;
+    }
+    ctx->ar_slab.target = t;
+    return true;
+}
+
+// Compute dst in token slabs and record ar_slab.ready[k] after slab k.
+static void ggml_cuda_mul_mat_ar_slabs(ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
+    ggml_cuda_ar_slab_state & st = ctx.ar_slab;
+    const int     n_req = ggml_cuda_ar_slab_count();
+    const int64_t ne1   = dst->ne[1];
+    const int64_t rows  = std::max(GGML_CUDA_AR_SLAB_MIN_ROWS, GGML_PAD((ne1 + n_req - 1) / n_req, 128));
+    const int     n     = (int) ((ne1 + rows - 1) / rows);
+
+    st.target = nullptr; // the per-slab calls below must take the normal path
+    for (int k = 0; k < n; k++) {
+        if (st.ready[k] == nullptr) {
+            CUDA_CHECK(cudaEventCreateWithFlags(&st.ready[k], cudaEventDisableTiming));
+        }
+        const int64_t r0 = k*rows;
+        const int64_t nr = std::min(rows, ne1 - r0);
+
+        ggml_tensor src1_k = *src1;
+        src1_k.ne[1] = nr;
+        src1_k.nb[2] = src1_k.nb[1]*nr;
+        src1_k.nb[3] = src1_k.nb[2];
+        src1_k.data  = (char *) src1->data + r0*src1->nb[1];
+
+        ggml_tensor dst_k = *dst;
+        dst_k.ne[1] = nr;
+        dst_k.nb[2] = dst_k.nb[1]*nr;
+        dst_k.nb[3] = dst_k.nb[2];
+        dst_k.data  = (char *) dst->data + r0*dst->nb[1];
+        dst_k.src[1] = &src1_k;
+
+        ggml_cuda_mul_mat(ctx, src0, &src1_k, &dst_k);
+        CUDA_CHECK(cudaEventRecord(st.ready[k], ctx.stream()));
+    }
+    st.target    = dst;
+    st.n_slabs   = n;
+    st.slab_rows = rows;
+    st.done      = true;
+}
+
 static void ggml_cuda_mul_mat(ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
     GGML_TENSOR_BINARY_OP_LOCALS
+
+    if (dst == ctx.ar_slab.target && !ctx.ar_slab.done) {
+        ggml_cuda_mul_mat_ar_slabs(ctx, src0, src1, dst);
+        return;
+    }
 
     if (ggml_cuda_op_mul_mat_use_fwht(dst) && ggml_cuda_op_fwht(ctx, src1, dst)) {
         return;
@@ -4748,6 +4842,32 @@ static bool ggml_cuda_moe_weighted_reduction_enabled() {
 }
 
 // try and fuse nodes and return the number of nodes to skip
+// Pick the Q8_1 cache buffer a producer can fill for a single-row output that a later quantized mat-vec in this graph reads as src1.
+// Uses the same key as the consumer, so the consumer finds a hit and skips its own quantize launch.
+static block_q8_1 * ggml_cuda_q8_1_producer_target(ggml_backend_cuda_context & ctx, const ggml_cgraph * cgraph, int out_idx) {
+    static const bool enabled = [] {
+        const char * e = getenv("GGML_CUDA_Q8_1_PRODUCER");
+        return e == nullptr || atoi(e) != 0;
+    }();
+    const ggml_tensor * out = cgraph->nodes[out_idx];
+    if (!enabled || out->ne[1] != 1 || out->ne[2] != 1 || out->ne[3] != 1 || !ggml_is_contiguous(out)) {
+        return nullptr;
+    }
+    bool has_consumer = false;
+    for (int j = out_idx + 1; j < cgraph->n_nodes && !has_consumer; j++) {
+        const ggml_tensor * n = cgraph->nodes[j];
+        has_consumer = n->op == GGML_OP_MUL_MAT && n->src[1] == out && ggml_is_quantized(n->src[0]->type);
+    }
+    if (!has_consumer) {
+        return nullptr;
+    }
+    const int64_t ne_padded = GGML_PAD(out->ne[0], MATRIX_ROW_PADDING);
+    const size_t  nbytes    = (size_t) (ne_padded / QK8_1) * sizeof(block_q8_1);
+    bool hit = false;
+    return (block_q8_1 *) ggml_cuda_q8_1_cache_acquire(ctx, out, /*variant =*/ 0, ne_padded,
+        out->nb[1] / sizeof(float), out->nb[2] / sizeof(float), out->nb[3] / sizeof(float), nbytes, hit);
+}
+
 static int ggml_cuda_try_fuse(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph * cgraph, int i) {
 
     static bool disable_fusion = getenv("GGML_CUDA_DISABLE_FUSION") != nullptr && std::atoi(getenv("GGML_CUDA_DISABLE_FUSION"));
@@ -4756,6 +4876,19 @@ static int ggml_cuda_try_fuse(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph 
     }
 
     ggml_tensor * node = cgraph->nodes[i];
+
+    static const bool fuse_add_rms_norm = [] {
+        const char * e = getenv("GGML_CUDA_FUSE_ADD_RMS_NORM");
+        return e == nullptr || atoi(e) != 0;
+    }();
+    // residual add followed by the next norm: the add result stays a graph output
+    if (fuse_add_rms_norm && node->op == GGML_OP_ADD &&
+            ggml_can_fuse_subgraph(cgraph, i, { GGML_OP_ADD, GGML_OP_RMS_NORM, GGML_OP_MUL }, { i, i + 2 }) &&
+            ggml_cuda_add_rms_norm_mul_supported(node, cgraph->nodes[i + 1], cgraph->nodes[i + 2])) {
+        block_q8_1 * q = ggml_cuda_q8_1_producer_target(*cuda_ctx, cgraph, i + 2);
+        ggml_cuda_op_add_rms_norm_mul(*cuda_ctx, node, cgraph->nodes[i + 1], cgraph->nodes[i + 2], q);
+        return 2;
+    }
 
     if (node->op == GGML_OP_MUL_MAT_ID && cuda_ctx->stream_context().concurrent_events.empty() &&
             ggml_cuda_match_shared_expert(cgraph, i, i + 3) &&
@@ -5913,7 +6046,8 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
 
     ggml_cuda_graph * graph = cuda_ctx->cuda_graph(graph_key);
     if (graph->is_enabled() && !g_cuda_outer_capture && !cuda_ctx->graphs_owner_disabled) {
-        const bool graph_compatible = ggml_cuda_graph_check_compability(cgraph);
+        // slab events are waited on from the AllReduce streams, outside any captured graph
+        const bool graph_compatible = ggml_cuda_graph_check_compability(cgraph) && cuda_ctx->ar_slab.target == nullptr;
         if (graph_compatible) {
             const bool properties_changed = ggml_cuda_graph_update_required(cuda_ctx, cgraph);
 
@@ -7390,6 +7524,9 @@ static void * ggml_backend_cuda_reg_get_proc_address(ggml_backend_reg_t reg, con
     }
     if (strcmp(name, "ggml_backend_graph_cache_disable") == 0) {
         return (void *) ggml_backend_cuda_graph_cache_disable;
+    }
+    if (strcmp(name, "ggml_backend_ar_slab_mark") == 0) {
+        return (void *) ggml_backend_cuda_ar_slab_mark;
     }
     if (strcmp(name, "ggml_backend_token_capture_begin") == 0) {
         return (void *)ggml_backend_cuda_token_capture_begin;

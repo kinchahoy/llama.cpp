@@ -13,6 +13,8 @@
 #include "../src/llama-ext.h" // staging API: llama_set_embeddings_nextn / llama_get_embeddings_nextn_ith (used by MTP)
 
 #include <algorithm>
+#include <atomic>
+#include <thread>
 #include <cassert>
 #include <cmath>
 #include <cstring>
@@ -1011,6 +1013,16 @@ struct common_speculative_impl_draft_eagle3 : public common_speculative_impl {
 };
 
 // DFlash: block-diffusion drafting with a draft-side KV cache injection
+// Defer the draft prompt replay from begin() to the first draft() or process() call, so the first
+// token is sampled before it runs. LLAMA_SPEC_LAZY_PREFILL=0 replays in begin() as before.
+static bool common_speculative_lazy_prefill() {
+    static const bool on = [] {
+        const char * e = getenv("LLAMA_SPEC_LAZY_PREFILL");
+        return e == nullptr || atoi(e) != 0;
+    }();
+    return on;
+}
+
 struct common_speculative_impl_draft_dflash : public common_speculative_impl {
     common_params_speculative_draft params;
 
@@ -1059,7 +1071,44 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
         uint64_t     epoch;
     };
     std::vector<pending_chunk> pending;
+
+    // Lag-one prompt replay on a worker thread, so the host keeps feeding the target's prefill.
+    // While it runs only the worker touches ctx_dft, batch_inject and features_buf; every other
+    // entry point joins it first. LLAMA_DFLASH_ASYNC_REPLAY=0 replays on the calling thread.
+    std::thread       replay_thread;
+    std::atomic<bool> replay_busy{false};
+    bool              replay_ok = true;
+
+    bool replay_join() {
+        if (replay_thread.joinable()) {
+            replay_thread.join();
+        }
+        const bool ok = replay_ok;
+        replay_ok = true;
+        return ok;
+    }
+
+    static bool async_replay() {
+        static const bool on = [] {
+            const char * e = getenv("LLAMA_DFLASH_ASYNC_REPLAY");
+            return e == nullptr || atoi(e) != 0;
+        }();
+        return on;
+    }
+
+    std::vector<const float *> accum_ptrs(const pending_chunk & pc) {
+        std::vector<const float *> accum(target_layer_ids_n, nullptr);
+        for (uint32_t k = 0; k < target_layer_ids_n; ++k) {
+            accum[k] = llama_get_embeddings_layer_inp_accum_seq(params.ctx_tgt, (uint32_t) target_layer_ids[k], pc.seq_id);
+            if (!accum[k]) {
+                GGML_ABORT("DFlash: target layer %d accum not available for seq %d.", target_layer_ids[k], (int) pc.seq_id);
+            }
+        }
+        return accum;
+    }
     bool accum_enabled = false;
+    bool lazy_begun    = false; // begin() left the replay to the next draft()/process()
+    bool in_prompt     = false; // a prompt chunk was seen and begin() has not run yet
 
     common_speculative_impl_draft_dflash(const common_params_speculative & params, uint32_t n_seq,
             common_speculative_type type = COMMON_SPECULATIVE_TYPE_DRAFT_DFLASH)
@@ -1205,6 +1254,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
     }
 
     ~common_speculative_impl_draft_dflash() override {
+        replay_join();
         auto * ctx_dft = this->params.ctx_dft;
         for (llama_seq_id seq_id = 0; seq_id < (llama_seq_id) backend_chains.size(); ++seq_id) {
             if (backend_chains[seq_id] == nullptr) {
@@ -1225,6 +1275,13 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
 
         const int32_t N = (int32_t) prompt.size();
         if (N <= 0) {
+            return;
+        }
+
+        in_prompt = false;
+
+        if (common_speculative_lazy_prefill() && !pending.empty()) {
+            lazy_begun = true;
             return;
         }
 
@@ -1251,12 +1308,14 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
     // pending.size() (the lag-one path) the target keeps computing the newest
     // chunk while the draft works.
     bool flush_pending_upto(size_t count) {
+        if (!replay_join()) {
+            return false;
+        }
         count = std::min(count, pending.size());
         if (count == 0) {
             return true;
         }
         auto * ctx_tgt = params.ctx_tgt;
-        auto * ctx_dft = params.ctx_dft;
 
         // The replay exists to give the draft a KV cache over the prompt, but the
         // draft only proposes a few tokens ahead and attends causally, so rows far
@@ -1265,11 +1324,11 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
         // Keep the newest window and drop the rest: the draft then sees a sliding
         // context instead of the whole prompt. Positions stay absolute, so the
         // skipped span is simply absent from its cache rather than misaligned.
-        // 0 keeps every row. 16384 is the largest value that costs no acceptance:
-        // below it 100k TG slips 15.3 -> 15.2 -> 15.0 as the window shrinks.
+        // 0 keeps every row. Default 4096: on Qwen3.8 DFlash2 with 8-12k prompts it kept acceptance
+        // (2.90 -> 2.90, 2.98 -> 2.95) and cut the replay that lands in the first draft.
         static const int32_t draft_window = []() {
             const char * e = getenv("LLAMA_DSPARK_DRAFT_WINDOW");
-            return e != nullptr ? atoi(e) : 0;
+            return e != nullptr ? atoi(e) : 4096;
         }();
         if (draft_window > 0 && count > 1 && n_seq == 1) {
             const auto & newest = pending[count - 1];
@@ -1281,6 +1340,12 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
             if (drop > 0) {
                 pending.erase(pending.begin(), pending.begin() + drop);
                 count -= drop;
+            }
+            // trim the oldest kept chunk to the window; the accum is position indexed
+            auto & first = pending.front();
+            if (first.p0 < keep_from && keep_from < first.p0 + first.n) {
+                first.n  -= keep_from - first.p0;
+                first.p0  = keep_from;
             }
         }
 
@@ -1294,23 +1359,27 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
             }
         }
 
+        std::vector<pending_chunk> chunks(pending.begin(), pending.begin() + count);
+        std::vector<std::vector<const float *>> accums;
+        for (const auto & pc : chunks) {
+            accums.push_back(accum_ptrs(pc));
+        }
+        pending.erase(pending.begin(), pending.begin() + count);
+        return replay_chunks(chunks, accums);
+    }
+
+    // gather the tap rows of each chunk and run the fused encode + inject decode on the draft
+    bool replay_chunks(const std::vector<pending_chunk> & chunks, const std::vector<std::vector<const float *>> & accums) {
+        auto * ctx_dft = params.ctx_dft;
         // One fused decode per chunk. Upstream folds the DFlash encode into the
         // injecting decode, so the old split - all encodes, then all injects - has
         // nothing left to separate. That grouping existed only because alternating
         // llama_encode and llama_decode on the draft context swapped its graph every
         // call and re-allocated (measured inject 48 -> 1112 ms). With a single call
         // type per chunk the graph stays warm by construction.
-        for (size_t c = 0; c < count; ++c) {
-            const auto & pc = pending[c];
-            std::vector<const float *> accum(target_layer_ids_n, nullptr);
-            for (uint32_t k = 0; k < target_layer_ids_n; ++k) {
-                accum[k] = llama_get_embeddings_layer_inp_accum_seq(
-                    ctx_tgt, (uint32_t) target_layer_ids[k], pc.seq_id);
-                if (!accum[k]) {
-                    GGML_ABORT("DFlash: target layer %d accum not available for seq %d.",
-                            target_layer_ids[k], (int) pc.seq_id);
-                }
-            }
+        for (size_t c = 0; c < chunks.size(); ++c) {
+            const auto & pc    = chunks[c];
+            const auto & accum = accums[c];
 
             // gather straight into the inject batch at n_embd_enc - the features are
             // the fused decode's input, so there is no draft-width hidden state to
@@ -1350,7 +1419,6 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
             }
         }
 
-        pending.erase(pending.begin(), pending.begin() + count);
         return true;
     }
 
@@ -1359,6 +1427,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
     }
 
     bool reset(llama_seq_id seq_id) override {
+        replay_join();
         const size_t n_before = pending.size();
         pending.erase(std::remove_if(pending.begin(), pending.end(),
                     [seq_id](const pending_chunk & chunk) {
@@ -1382,6 +1451,13 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
     bool process(const common_batch & batch_in) override {
         if (batch_in.size() <= 0) {
             return true;
+        }
+
+        if (lazy_begun) {
+            lazy_begun = false;
+            if (!pending.empty() && !flush_pending()) {
+                LOG_ERR("%s: deferred prompt encode replay failed\n", __func__);
+            }
         }
 
         // Target prefill may contain token IDs or multimodal embeddings. Both
@@ -1430,13 +1506,20 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                 const int32_t n_chunk = std::min(n_ubatch, n_rows - offset);
 
                 // a prompt chunk is many rows, a decode chunk is at most 1+n_max
-                // (draft blocks are <= block_size 5). The threshold MUST match the
-                // accum-write gate in llama_context::extract_layer_inputs - a chunk
-                // deferred here but not accumulated there reads zeros at the flush.
+                // (draft blocks are <= block_size 5). The accum-write gate in
+                // llama_context::extract_layer_inputs must not be above this threshold;
+                // a chunk without accum rows gets epoch 0 below and takes the eager path.
                 // 64 missed sub-64 final prompt chunks (2075 = 1024+1024+27) whose
                 // eager fallback re-introduced the mid-prefill pipeline flush,
                 // measured as +22 pct TTFT on tensor at 2075 tokens.
-                const bool is_pp = n_chunk >= 16;
+                // Short prompt tails (the server splits off the last 4 tokens for a checkpoint) are deferred too,
+                // so they do not force the full replay inside the prompt. LLAMA_DFLASH_DEFER_TAIL=0 disables.
+                static const bool defer_tail = []() {
+                    const char * e = getenv("LLAMA_DFLASH_DEFER_TAIL");
+                    return e == nullptr || atoi(e) != 0;
+                }();
+                const bool is_pp = n_chunk >= 16 || (defer_tail && in_prompt);
+                if (n_chunk >= 16) { in_prompt = true; }
                 if (is_pp) { n_pp_rows += n_chunk; }
 
                 // Deferred prompt encode: record the chunk and return without touching
@@ -1472,10 +1555,12 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                             // it honest: deferred chunks hold their draft hidden state in
                             // g_rows until the injects run, ~16 KB per row, and past ~32k
                             // rows that buys nothing anyway - a long prompt does enough
-                            // work per call to hide the drain. 0 flushes every call.
+                            // work per call to hide the drain. 0 flushes every call. Default 2048: a
+                            // single-GPU DFlash draft replays each finished chunk while the target
+                            // computes the next one instead of in the first draft.
                             static const int32_t flush_rows = []() {
                                 const char * e = getenv("LLAMA_DSPARK_FLUSH_ROWS");
-                                return e != nullptr ? atoi(e) : 32768;
+                                return e != nullptr ? atoi(e) : 2048;
                             }();
                             static const bool opportunistic = []() {
                                 const char * e = getenv("LLAMA_DSPARK_OPPORTUNISTIC");
@@ -1499,7 +1584,25 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                                 const auto & last = pending[pending.size() - 2];
                                 do_flush = llama_layer_inp_accum_ready_epoch(ctx_tgt, last.epoch);
                             }
-                            if (do_flush && !flush_pending_upto(pending.size() - 1)) {
+                            if (do_flush && async_replay()) {
+                                // hand the finished chunks to the worker unless it is still busy
+                                if (replay_thread.joinable() && !replay_busy.load() && !replay_join()) {
+                                    return false;
+                                }
+                                if (!replay_thread.joinable()) {
+                                    std::vector<pending_chunk> todo(pending.begin(), pending.end() - 1);
+                                    std::vector<std::vector<const float *>> accums;
+                                    for (const auto & pc : todo) {
+                                        accums.push_back(accum_ptrs(pc));
+                                    }
+                                    pending.erase(pending.begin(), pending.end() - 1);
+                                    replay_busy = true;
+                                    replay_thread = std::thread([this, todo = std::move(todo), accums = std::move(accums)]() {
+                                        replay_ok   = replay_chunks(todo, accums);
+                                        replay_busy = false;
+                                    });
+                                }
+                            } else if (do_flush && !flush_pending_upto(pending.size() - 1)) {
                                 return false;
                             }
                             continue;
@@ -1509,7 +1612,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
 
                 // any chunk taking the eager path must replay older deferred chunks
                 // first so the draft KV injections stay position-ordered
-                if (!pending.empty() && !flush_pending()) {
+                if (!replay_join() || (!pending.empty() && !flush_pending())) {
                     return false;
                 }
 
@@ -1583,7 +1686,8 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
         auto & ctx_dft = params.ctx_dft;
 
         // the draft KV must hold the whole prompt before the noise block decodes
-        if (!pending.empty() && !flush_pending()) {
+        lazy_begun = false;
+        if (!replay_join() || (!pending.empty() && !flush_pending())) {
             LOG_ERR("%s: deferred prompt encode replay failed - skipping drafts\n", __func__);
             for (auto & dp : dparams) {
                 dp.drafting = false;
@@ -1968,6 +2072,10 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
         // one pass here, before generation starts, so the draft quality is identical to the
         // per-chunk path.
         if (deferred_prefill && prefilling) {
+            if (common_speculative_lazy_prefill()) {
+                lazy_begun = true;
+                return;
+            }
             if (!finish_deferred_prefill()) {
                 deferred_prefill_failed = true;
                 SPC_ERR("%s", "deferred MTP prefill replay failed; disabling MTP drafts\n");
@@ -2169,7 +2277,22 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
         return ok;
     }
 
+    bool lazy_begun = false; // begin() left the prompt replay to the next draft()/process()
+
+    void finish_lazy_prefill() {
+        if (!lazy_begun) {
+            return;
+        }
+        lazy_begun = false;
+        if (deferred_prefill && prefilling && !finish_deferred_prefill()) {
+            deferred_prefill_failed = true;
+            SPC_ERR("%s", "deferred MTP prefill replay failed; disabling MTP drafts\n");
+        }
+    }
+
     bool process(const common_batch & batch_in) override {
+        finish_lazy_prefill();
+
         if (batch_in.size() <= 0) {
             return true;
         }
@@ -2220,6 +2343,7 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
     void draft(common_speculative_draft_params_vec & dparams) override {
         auto & ctx_dft = params.ctx_dft;
 
+        finish_lazy_prefill();
         if (deferred_prefill_failed) {
             return;
         }
@@ -3198,7 +3322,32 @@ common_speculative_init_result::common_speculative_init_result(
     // A sidecar draft shares its target's devices, and the tensor-parallel
     // splitter cannot mix repacked and canonical layouts in one group. Drafts
     // are decode-bound where the repack is neutral, so they load canonical.
-    mparams.use_extra_bufts = false;
+    // A sidecar draft keeps the repack: its mirrored weights use the narrow repacked mat-vec. LLAMA_DRAFT_REPACK=0 loads it canonical.
+    {
+        const char * e = getenv("LLAMA_DRAFT_REPACK");
+        if (!has_draft || (e != nullptr && atoi(e) == 0)) {
+            mparams.use_extra_bufts = false;
+        }
+    }
+    // A DFlash draft for a tensor-parallel target runs on the first target device: no AllReduce per draft
+    // layer, and the draft context loads private copies of the shared head (llama_context::load_private_head).
+    // -devd overrides the choice; LLAMA_DFLASH_DRAFT_TP=1 keeps the draft split like the target.
+    std::vector<ggml_backend_dev_t> dft_devs;
+    {
+        const bool spec_dflash = std::find(params.speculative.types.begin(), params.speculative.types.end(),
+                                           COMMON_SPECULATIVE_TYPE_DRAFT_DFLASH) != params.speculative.types.end();
+        const char * e = getenv("LLAMA_DFLASH_DRAFT_TP");
+        if (has_draft && spec_dflash && mparams.split_mode == LLAMA_SPLIT_MODE_TENSOR &&
+                params.speculative.draft.devices.empty() && (e == nullptr || atoi(e) == 0)) {
+            ggml_backend_dev_t dev = mparams.devices != nullptr ? mparams.devices[0] : ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
+            if (dev != nullptr) {
+                dft_devs = { dev, nullptr };
+                mparams.devices    = dft_devs.data();
+                mparams.split_mode = LLAMA_SPLIT_MODE_NONE;
+                LOG_INF("%s: DFlash draft on %s (tensor-parallel target)\n", __func__, ggml_backend_dev_name(dev));
+            }
+        }
+    }
     auto cparams = common_context_params_to_llama(params);
 
     if (spec_mtp) {

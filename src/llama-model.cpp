@@ -2110,7 +2110,13 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
         const int layer_gpu = std::upper_bound(splits.begin(), splits.begin() + n_devices(), float(il - i_gpu_start)/act_gpu_layers) - splits.begin();
         auto * dev = devices.at(layer_gpu).dev;
         LLAMA_LOG_DEBUG("load_tensors: layer %3d assigned to device %s, is_swa = %d\n", il, ggml_backend_dev_name(dev), is_swa);
-        if (il >= (int) hparams.n_layer()) {
+        // The NextN/MTP blocks and the output head (il == n_layer_all) take the repacked layout too.
+        // The narrow repacked mat-vec now beats the canonical one at draft widths. LLAMA_MTP_REPACK=0 keeps them canonical.
+        static const bool mtp_repack = [] {
+            const char * e = getenv("LLAMA_MTP_REPACK");
+            return e == nullptr || atoi(e) != 0;
+        }();
+        if (il >= (int) hparams.n_layer() && !mtp_repack) {
             return {dev, &pimpl->gpu_buft_list_plain.at(dev)};
         }
         return {dev, &pimpl->gpu_buft_list.at(dev)};
