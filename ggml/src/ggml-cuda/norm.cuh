@@ -15,6 +15,12 @@ void ggml_cuda_op_rms_norm_fused_add(ggml_backend_cuda_context & ctx,
                                      ggml_tensor *               mul_tensor,
                                      ggml_tensor *               add_tensor);
 
+bool ggml_cuda_add_rms_norm_mul_supported(const ggml_tensor * add, const ggml_tensor * rms_norm, const ggml_tensor * mul);
+
+// Fused residual add, RMS norm and weight multiply. A non-null q also receives the Q8_1 rows of the result.
+void ggml_cuda_op_add_rms_norm_mul(ggml_backend_cuda_context & ctx, ggml_tensor * add, ggml_tensor * rms_norm,
+                                   ggml_tensor * mul, block_q8_1 * q);
+
 void ggml_cuda_op_rms_norm_back(ggml_backend_cuda_context & ctx, ggml_tensor * dst);
 
 void ggml_cuda_op_l2_norm(ggml_backend_cuda_context & ctx, ggml_tensor * dst);

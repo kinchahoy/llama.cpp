@@ -27,3 +27,11 @@ bool ggml_cuda_ar_allreduce(
     ggml_backend_t        * backends,
     ggml_tensor           ** tensors);
 
+// Split form for graph capture: prepare once, then launch each rank on its own stream.
+// Returns the number of ranks to launch, or -1 if the tensors need the host-driven path.
+int ggml_cuda_ar_prepare(
+    ggml_cuda_ar_pipeline * pipeline,
+    ggml_backend_t        * backends,
+    ggml_tensor           ** tensors);
+
+void ggml_cuda_ar_launch_rank(ggml_cuda_ar_pipeline * pipeline, int rank);

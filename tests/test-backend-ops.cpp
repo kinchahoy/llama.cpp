@@ -6925,6 +6925,33 @@ struct test_conv_3d : public test_case {
     }
 };
 
+// GGML_OP_CONCAT along dim 0 with a transposed second source, as in the GDN conv input
+struct test_concat_transposed : public test_case {
+    const int64_t ne_a0;
+    const int64_t n_ch;
+    const int64_t n_tok;
+    const int64_t n_seq;
+
+    std::string vars() override {
+        return VARS_TO_STR4(ne_a0, n_ch, n_tok, n_seq);
+    }
+
+    test_concat_transposed(int64_t ne_a0 = 3, int64_t n_ch = 96, int64_t n_tok = 70, int64_t n_seq = 1)
+        : ne_a0(ne_a0), n_ch(n_ch), n_tok(n_tok), n_seq(n_seq) {}
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        ggml_tensor * a = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne_a0, n_ch, n_seq);
+        ggml_set_name(a, "a");
+        ggml_tensor * b = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, n_ch, n_tok, n_seq);
+        ggml_set_name(b, "b");
+        ggml_tensor * bt = ggml_permute(ctx, b, 1, 0, 2, 3);
+        ggml_set_name(bt, "b_t");
+        ggml_tensor * out = ggml_concat(ctx, a, bt, 0);
+        ggml_set_name(out, "out");
+        return out;
+    }
+};
+
 // GGML_OP_CONCAT
 struct test_concat : public test_case {
     const ggml_type type;
@@ -11343,6 +11370,10 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
             }
         }
     }
+
+    test_cases.emplace_back(new test_concat_transposed(3, 96, 70, 1));
+    test_cases.emplace_back(new test_concat_transposed(3, 5120, 257, 1));
+    test_cases.emplace_back(new test_concat_transposed(3, 33, 31, 2));
 
     // few long rows, which backends may split across workgroups
     for (int dim : { 0, 1 }) {

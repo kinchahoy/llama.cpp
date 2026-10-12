@@ -10,11 +10,49 @@ static void ggml_cuda_mul_mat_repacked_slice(ggml_backend_cuda_context & ctx,
         const ggml_tensor * src0, const uint8_t * w, const block_q8_1 * xq,
         float * dst_d, int64_t ne00, int64_t ne01, int64_t ne11,
         cudaStream_t stream);
-template <ggml_type WT>
+
+// Rows per workgroup of the single-token Q8_0 mat-vec, one wave per row. Only one 16-wave group fits a CU,
+// so smaller groups shorten the partly empty last dispatch round. GGML_RP_MMV_ROWS selects 16, 8 (default) or 4.
+static int rp_q8_0_mmv_rows() {
+    static const int rows = [] {
+        const char * e = getenv("GGML_RP_MMV_ROWS");
+        const int r = e != nullptr ? atoi(e) : 8;
+        return r == 4 || r == 16 ? r : 8;
+    }();
+    return rows;
+}
+
+template <bool HAS_FUSION>
+static void rp_q8_0_mmv_launch(const uint8_t * w, const block_q8_1 * xq, float * dst_d,
+        const int64_t ne00, const int64_t ne01, const uint8_t * w_gate, const float * x_bias,
+        const float * gate_bias, const ggml_glu_op glu_op, cudaStream_t stream) {
+#define RP_Q8_0_MMV(ROWS) \
+    mul_mat_vec_q8_0_repacked<ROWS, ROWS, false, 64, HAS_FUSION><<<dim3((ne01 + ROWS - 1) / ROWS, 1, 1), ROWS * 64, 0, stream>>>( \
+        w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, \
+        nullptr, nullptr, nullptr, 0, 1, 0, 0, 0, \
+        w_gate, x_bias, gate_bias, glu_op)
+    switch (rp_q8_0_mmv_rows()) {
+        case 4:  RP_Q8_0_MMV(4);  break;
+        case 8:  RP_Q8_0_MMV(8);  break;
+        default: RP_Q8_0_MMV(16); break;
+    }
+#undef RP_Q8_0_MMV
+}
+template <ggml_type WT, bool XPLANAR = false>
 static void ggml_cuda_mul_mat_repacked_nc_t(
         const uint8_t * w, const block_q8_1 * xq, float * dst_d,
         const int64_t ne00, const int64_t ne01, const int64_t ne11,
         const uint32_t xs, const uint32_t ys, cudaStream_t stream);
+
+// Q8_0 narrow batches read planar activations. GGML_RP_NC_PLANAR=0 reads block_q8_1 rows as before.
+static bool rp_nc_planar() {
+    static const bool on = [] {
+        const char * e = getenv("GGML_RP_NC_PLANAR");
+        return e == nullptr || atoi(e) != 0;
+    }();
+    return on;
+}
+#define RP_NC_PLANAR_VARIANT 100
 
 void ggml_cuda_mul_mat_repacked(ggml_backend_cuda_context & ctx,
         const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
@@ -49,14 +87,37 @@ void ggml_cuda_mul_mat_repacked(ggml_backend_cuda_context & ctx,
         // One token, or a narrow batch: plain Q8_1 rows, one weight pass. The
         // tiled path below computes a full 32-wide tile whatever the batch is.
         ggml_cuda_pool_alloc<block_q8_1> src1_q8_1_own;
+        ggml_cuda_pool_alloc<char> src1_planar_own;
         block_q8_1 * src1_q8_1_d;
+        const bool planar = ne11 > 1 && src0->type == GGML_TYPE_Q8_0 && rp_nc_planar();
         {
             const int64_t s11 = src1->nb[1] / sizeof(float);
             const int64_t s12 = src1->nb[2] / sizeof(float);
             const int64_t s13 = src1->nb[3] / sizeof(float);
-            src1_q8_1_d = repack_quantize_src1_q8_1(ctx, src0, src1, ne10, ne10_padded,
-                s11, s12, s13, ne11, ne12, ne13,
-                (size_t) (ne13 * ne12 * ne11 * x_stride), src1_q8_1_own, stream);
+            const size_t nblk = (size_t) (ne13 * ne12 * ne11 * x_stride);
+            if (planar) {
+                bool hit = false;
+                char * buf = ggml_cuda_q8_1_cache_acquire(ctx, src1, RP_NC_PLANAR_VARIANT, ne10_padded,
+                    s11, s12, s13, nblk * sizeof(block_q8_1), hit);
+                if (buf == nullptr) {
+                    buf = src1_planar_own.alloc(ctx.pool(), nblk * sizeof(block_q8_1));
+                }
+                if (!hit) {
+                    if (ne12 == 1 && ne13 == 1) {
+                        rp_quantize_q8_1_planar<<<dim3((ne10_padded + 255) / 256, ne11, 1), 256, 0, stream>>>(
+                            (const float *) src1->data, buf, ne10, s11, x_stride);
+                    } else {
+                        ggml_cuda_pool_alloc<block_q8_1> tmp(ctx.pool(), nblk);
+                        quantize_row_q8_1_cuda((const float *) src1->data, nullptr, tmp.get(),
+                            src0->type, ne10, s11, s12, s13, ne10_padded, ne11, ne12, ne13, stream);
+                        rp_q8_1_to_planar<<<(nblk + 255) / 256, 256, 0, stream>>>(tmp.get(), buf, x_stride, (int64_t) nblk);
+                    }
+                }
+                src1_q8_1_d = (block_q8_1 *) buf;
+            } else {
+                src1_q8_1_d = repack_quantize_src1_q8_1(ctx, src0, src1, ne10, ne10_padded,
+                    s11, s12, s13, ne11, ne12, ne13, nblk, src1_q8_1_own, stream);
+            }
         }
         const uint32_t dst_s1 = dst->nb[1] / sizeof(float);
         for (int64_t i3 = 0; i3 < ne13; i3++) {
@@ -70,8 +131,13 @@ void ggml_cuda_mul_mat_repacked(ggml_backend_cuda_context & ctx,
             } else {
                 switch (src0->type) {
                     case GGML_TYPE_Q8_0:
-                        ggml_cuda_mul_mat_repacked_nc_t<GGML_TYPE_Q8_0>(w, xq, dst_d,
-                            ne00, ne01, ne11, (uint32_t) x_stride, dst_s1, stream);
+                        if (planar) {
+                            ggml_cuda_mul_mat_repacked_nc_t<GGML_TYPE_Q8_0, true>(w, xq, dst_d,
+                                ne00, ne01, ne11, (uint32_t) x_stride, dst_s1, stream);
+                        } else {
+                            ggml_cuda_mul_mat_repacked_nc_t<GGML_TYPE_Q8_0>(w, xq, dst_d,
+                                ne00, ne01, ne11, (uint32_t) x_stride, dst_s1, stream);
+                        }
                         break;
                     case GGML_TYPE_MXFP4:
                         ggml_cuda_mul_mat_repacked_nc_t<GGML_TYPE_MXFP4>(w, xq, dst_d,
@@ -171,7 +237,7 @@ void ggml_cuda_mul_mat_repacked(ggml_backend_cuda_context & ctx,
 }
 
 // Narrow batch (2..8 tokens): one multi-column mat-vec pass per slice.
-template <ggml_type WT>
+template <ggml_type WT, bool XPLANAR>
 static void ggml_cuda_mul_mat_repacked_nc_t(
         const uint8_t * w, const block_q8_1 * xq, float * dst_d,
         const int64_t ne00, const int64_t ne01, const int64_t ne11,
@@ -221,16 +287,41 @@ static void ggml_cuda_mul_mat_repacked_nc_t(
     const bool    work_ok   = n_blocks >= RP_NC_MIN_ACCUM * RP_NC_LANES_WIDE;
     const bool    lanes16_ok = work_ok && (ne01 + 31) / 32 >= min_grid;
     const bool    lanes32_ok = work_ok && (ne01 +  7) /  8 >= min_grid;
-    switch (ne11) {
+    // 16 lanes per row: short rows loop longer before the reduction, and the 4 row groups of a wave share activation reads.
+    // GGML_RP_NC_L16=0 keeps 64 lanes per row for 4-8 columns.
+    static const bool l16 = [] {
+        const char * e = getenv("GGML_RP_NC_L16");
+        return e == nullptr || atoi(e) != 0;
+    }();
+    static const bool rpl4 = [] {
+        const char * e = getenv("GGML_RP_NC_RPL");
+        return e != nullptr && atoi(e) == 4;
+    }();
+    // GGML_RP_NC_23=1 sends 2-3 columns through the 4-8 column shapes below.
+    static const bool nc23 = [] {
+        const char * e = getenv("GGML_RP_NC_23");
+        return e != nullptr && atoi(e) != 0;
+    }();
+    // GGML_RP_NC_LDS=0: every row group reads the activations from L1/L2 instead of a shared LDS tile.
+    static const bool nc_lds = [] {
+        const char * e = getenv("GGML_RP_NC_LDS");
+        return e == nullptr || atoi(e) != 0;
+    }();
+    switch (nc23 && ne11 <= 3 ? ne11 + 100 : ne11) {
         case 2: {
             if (lanes16_ok) {
                 // 16 lanes to a row, 32 rows per block, one row per lane.
                 const dim3 grid((ne01 + 31) / 32, 1, 1);
-                mul_mat_vec_repacked_nc<32, 8, 2, 1, 16, WT><<<grid, 512, 0, stream>>>(
+                if (XPLANAR && nc_lds) {
+                    mul_mat_vec_repacked_nc<32, 8, 2, 1, 16, WT, XPLANAR, XPLANAR><<<grid, 512, 0, stream>>>(
+                        w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys);
+                    break;
+                }
+                mul_mat_vec_repacked_nc<32, 8, 2, 1, 16, WT, XPLANAR><<<grid, 512, 0, stream>>>(
                     w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys);
             } else {
                 const dim3 grid((ne01 + 1) / 2, 1, 1);
-                mul_mat_vec_repacked_nc<2, 2, 2, 1, 64, WT><<<grid, 128, 0, stream>>>(
+                mul_mat_vec_repacked_nc<2, 2, 2, 1, 64, WT, XPLANAR><<<grid, 128, 0, stream>>>(
                     w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys);
             }
         } break;
@@ -238,39 +329,50 @@ static void ggml_cuda_mul_mat_repacked_nc_t(
             if (lanes32_ok) {
                 // 32 lanes to a row, 8 rows per block, one row per lane.
                 const dim3 grid((ne01 + 7) / 8, 1, 1);
-                mul_mat_vec_repacked_nc<8, 4, 3, 1, 32, WT><<<grid, 256, 0, stream>>>(
+                if (XPLANAR && nc_lds) {
+                    mul_mat_vec_repacked_nc<8, 4, 3, 1, 32, WT, XPLANAR, XPLANAR><<<grid, 256, 0, stream>>>(
+                        w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys);
+                    break;
+                }
+                mul_mat_vec_repacked_nc<8, 4, 3, 1, 32, WT, XPLANAR><<<grid, 256, 0, stream>>>(
                     w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys);
             } else {
                 const dim3 grid((ne01 + 1) / 2, 1, 1);
-                mul_mat_vec_repacked_nc<2, 1, 3, 2, 64, WT><<<grid, 64, 0, stream>>>(
+                mul_mat_vec_repacked_nc<2, 1, 3, 2, 64, WT, XPLANAR><<<grid, 64, 0, stream>>>(
                     w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys);
             }
         } break;
-        case 4: {
-            const dim3 grid((ne01 + 1) / 2, 1, 1);
-            mul_mat_vec_repacked_nc<2, 1, 4, 2, 64, WT><<<grid, 64, 0, stream>>>(
-                w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys);
+        // 4-8 columns are bound by the per-column activation reads, not the weights.
+        // GGML_RP_NC_RPL=4 gives each lane 4 rows to reuse each activation block more.
+#define RP_NC_CASE_L(L, NC) \
+        case L: { \
+            if (l16 && lanes16_ok && XPLANAR && nc_lds) { \
+                mul_mat_vec_repacked_nc<32, 4, NC, 2, 16, WT, XPLANAR, XPLANAR><<<dim3((ne01 + 31) / 32, 1, 1), 256, 0, stream>>>( \
+                    w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys); \
+            } else if (l16 && lanes16_ok) { \
+                mul_mat_vec_repacked_nc<32, 4, NC, 2, 16, WT, XPLANAR><<<dim3((ne01 + 31) / 32, 1, 1), 256, 0, stream>>>( \
+                    w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys); \
+            } else if (l16 && lanes32_ok) { \
+                mul_mat_vec_repacked_nc<8, 2, NC, 2, 32, WT, XPLANAR><<<dim3((ne01 + 7) / 8, 1, 1), 128, 0, stream>>>( \
+                    w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys); \
+            } else if (rpl4) { \
+                mul_mat_vec_repacked_nc<4, 1, NC, 4, 64, WT, XPLANAR><<<dim3((ne01 + 3) / 4, 1, 1), 64, 0, stream>>>( \
+                    w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys); \
+            } else { \
+                mul_mat_vec_repacked_nc<2, 1, NC, 2, 64, WT, XPLANAR><<<dim3((ne01 + 1) / 2, 1, 1), 64, 0, stream>>>( \
+                    w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys); \
+            } \
         } break;
-        case 5: {
-            const dim3 grid((ne01 + 1) / 2, 1, 1);
-            mul_mat_vec_repacked_nc<2, 1, 5, 2, 64, WT><<<grid, 64, 0, stream>>>(
-                w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys);
-        } break;
-        case 6: {
-            const dim3 grid((ne01 + 1) / 2, 1, 1);
-            mul_mat_vec_repacked_nc<2, 1, 6, 2, 64, WT><<<grid, 64, 0, stream>>>(
-                w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys);
-        } break;
-        case 7: {
-            const dim3 grid((ne01 + 1) / 2, 1, 1);
-            mul_mat_vec_repacked_nc<2, 1, 7, 2, 64, WT><<<grid, 64, 0, stream>>>(
-                w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys);
-        } break;
-        case 8: {
-            const dim3 grid((ne01 + 1) / 2, 1, 1);
-            mul_mat_vec_repacked_nc<2, 1, 8, 2, 64, WT><<<grid, 64, 0, stream>>>(
-                w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys);
-        } break;
+#define RP_NC_CASE(NC) RP_NC_CASE_L(NC, NC)
+        RP_NC_CASE_L(102, 2)
+        RP_NC_CASE_L(103, 3)
+        RP_NC_CASE(4)
+        RP_NC_CASE(5)
+        RP_NC_CASE(6)
+        RP_NC_CASE(7)
+        RP_NC_CASE(8)
+#undef RP_NC_CASE
+#undef RP_NC_CASE_L
         default: GGML_ABORT("nc mat-vec: unsupported batch width");
     }
 }
@@ -293,10 +395,7 @@ static void ggml_cuda_mul_mat_repacked_slice(ggml_backend_cuda_context & ctx,
                         nullptr, 1, 0, 0, 0);
                     break;
                 }
-                mul_mat_vec_q8_0_repacked<16, 16, false><<<grid, 1024, 0, stream>>>(
-                    w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01,
-                    nullptr, nullptr, nullptr, 0, 1, 0, 0, 0,
-                    nullptr, nullptr, nullptr, GGML_GLU_OP_REGLU);
+                rp_q8_0_mmv_launch<false>(w, xq, dst_d, ne00, ne01, nullptr, nullptr, nullptr, GGML_GLU_OP_REGLU, stream);
             } break;
             case GGML_TYPE_MXFP4: {
                 const dim3 grid((ne01 + 15) / 16, 1, 1);
@@ -433,6 +532,73 @@ static void ggml_cuda_mul_mat_repacked_slice(ggml_backend_cuda_context & ctx,
 // Fused MMV entry for repacked weights (dense): single-token only, fuses the up and
 // gate dot products (shared quantized input) plus optional biases and the GLU op.
 // Dispatch: ggml_cuda_try_fuse `{op,op,GLU}` and `{op,ADD}` repack branches.
+// Fused up/gate for 2-8 columns (Q8_0, dense, no bias).
+static void ggml_cuda_mul_mat_vec_repacked_nc_glu(ggml_backend_cuda_context & ctx,
+        const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst,
+        const ggml_cuda_mm_fusion_args_host * fusion) {
+    GGML_ASSERT(src0->type == GGML_TYPE_Q8_0 && fusion->gate != nullptr);
+    GGML_ASSERT(fusion->x_bias == nullptr && fusion->gate_bias == nullptr);
+    GGML_ASSERT(src1->ne[2] == 1 && src1->ne[3] == 1);
+    const int64_t ne00 = src0->ne[0];
+    const int64_t ne01 = src0->ne[1];
+    const int64_t ne11 = src1->ne[1];
+    GGML_ASSERT(ne11 >= 2 && ne11 <= MMQ_RP_Q8_MMV_MAX_TOKENS);
+    cudaStream_t stream = ctx.stream();
+
+    auto weights = [&](const ggml_tensor * t) {
+        return t->view_src != nullptr && ggml_cuda_repack_tensor_supported(t->view_src)
+            ? repack_view_get_cached(t, t->view_src, stream) : (const uint8_t *) t->data;
+    };
+    const uint8_t * w      = weights(src0);
+    const uint8_t * w_gate = weights(fusion->gate);
+
+    const int64_t ne10_padded = GGML_PAD(ne00, MATRIX_ROW_PADDING);
+    const int64_t x_stride    = ne10_padded / QK8_1;
+    const int64_t s11 = src1->nb[1] / sizeof(float);
+    const size_t  nblk = (size_t) (ne11 * x_stride);
+
+    // planar activations, shared with the unfused narrow path through the q8_1 cache
+    ggml_cuda_pool_alloc<char> own;
+    bool hit = false;
+    char * buf = ggml_cuda_q8_1_cache_acquire(ctx, src1, RP_NC_PLANAR_VARIANT, ne10_padded,
+        s11, src1->nb[2] / sizeof(float), src1->nb[3] / sizeof(float), nblk * sizeof(block_q8_1), hit);
+    if (buf == nullptr) {
+        buf = own.alloc(ctx.pool(), nblk * sizeof(block_q8_1));
+    }
+    if (!hit) {
+        rp_quantize_q8_1_planar<<<dim3((ne10_padded + 255) / 256, ne11, 1), 256, 0, stream>>>(
+            (const float *) src1->data, buf, ne00, s11, x_stride);
+    }
+    const block_q8_1 * xq = (const block_q8_1 *) buf;
+    float * dst_d = (float *) dst->data;
+    const uint32_t xs = (uint32_t) x_stride;
+    const uint32_t ys = (uint32_t) (dst->nb[1] / sizeof(float));
+    const int nsm = ggml_cuda_info().devices[ggml_cuda_get_device()].nsm;
+    const bool l16 = (ne01 + 31) / 32 >= 2LL * nsm;
+    const ggml_glu_op op = fusion->glu_op;
+#define RP_NC_GLU(NC) \
+    case NC: \
+        if (l16) { \
+            mul_mat_vec_repacked_nc_glu<32, 4, NC, 2, 16, true><<<dim3((ne01 + 31) / 32, 1, 1), 256, 0, stream>>>( \
+                w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys, w_gate, op); \
+        } else { \
+            mul_mat_vec_repacked_nc_glu<8, 2, NC, 2, 32, true><<<dim3((ne01 + 7) / 8, 1, 1), 128, 0, stream>>>( \
+                w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, xs, ys, w_gate, op); \
+        } \
+        break;
+    switch (ne11) {
+        RP_NC_GLU(2)
+        RP_NC_GLU(3)
+        RP_NC_GLU(4)
+        RP_NC_GLU(5)
+        RP_NC_GLU(6)
+        RP_NC_GLU(7)
+        RP_NC_GLU(8)
+        default: GGML_ABORT("nc glu: unsupported batch width");
+    }
+#undef RP_NC_GLU
+}
+
 void ggml_cuda_mul_mat_vec_repacked_fused(ggml_backend_cuda_context & ctx,
         const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst,
         const ggml_cuda_mm_fusion_args_host * fusion) {
@@ -440,8 +606,11 @@ void ggml_cuda_mul_mat_vec_repacked_fused(ggml_backend_cuda_context & ctx,
     GGML_ASSERT(dst->type  == GGML_TYPE_F32);
     GGML_ASSERT(src1->nb[0] == sizeof(float));
     GGML_ASSERT(dst->nb[1]  == (size_t) dst->ne[0] * sizeof(float));
-    GGML_ASSERT(dst->ne[1] == 1);   // fused MMV is single-token only
     GGML_ASSERT(fusion != nullptr);
+    if (dst->ne[1] > 1) {
+        ggml_cuda_mul_mat_vec_repacked_nc_glu(ctx, src0, src1, dst, fusion);
+        return;
+    }
 
     const int64_t ne00 = src0->ne[0];
     const int64_t ne01 = src0->ne[1];
@@ -522,10 +691,7 @@ void ggml_cuda_mul_mat_vec_repacked_fused(ggml_backend_cuda_context & ctx,
                 nullptr, 1, 0, 0, 0,
                 w_gate, x_bias_s, gate_bias_s, glu_op);
         } else {
-            mul_mat_vec_q8_0_repacked<16, 16, false, 64, true><<<grid, 1024, 0, stream>>>(
-                w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01,
-                nullptr, nullptr, nullptr, 0, 1, 0, 0, 0,
-                w_gate, x_bias_s, gate_bias_s, glu_op);
+            rp_q8_0_mmv_launch<true>(w, xq, dst_d, ne00, ne01, w_gate, x_bias_s, gate_bias_s, glu_op, stream);
         }
     }
     }

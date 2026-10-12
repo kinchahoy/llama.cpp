@@ -970,7 +970,7 @@ static __global__ void __launch_bounds__(64 * NRL, 2) mmq_gemm_repacked(
 // traffic the same way, on the repacked layout. Dense only: the single-token
 // path and the MoE ids path keep their existing kernels.
 template <int ROWS, int NWAVES, int NCOLS, int RPL = 1, bool HAS_FUSION = false,
-          int LANES = 64, ggml_type WT = GGML_TYPE_Q8_0>
+          int LANES = 64, ggml_type WT = GGML_TYPE_Q8_0, bool XPLANAR = false, bool XLDS = false>
 static __device__ __forceinline__ void mul_mat_vec_repacked_nc_impl(
         const uint8_t * __restrict__ wbase, const block_q8_1 * __restrict__ xq,
         float * __restrict__ y, const uint32_t ne0, const uint32_t ne1,
@@ -1023,11 +1023,37 @@ static __device__ __forceinline__ void mul_mat_vec_repacked_nc_impl(
     float acc[RPL][NCOLS] = {};
     [[maybe_unused]] float accg[GR][GC] = {};
 
+    // XLDS: the workgroup stages a tile of planar activations in LDS once, instead of every row group reading them from L1/L2.
+    static_assert(!XLDS || XPLANAR, "XLDS needs planar activations");
+    constexpr int XT = XLDS ? 64 : 1; // blocks per LDS tile
+    [[maybe_unused]] __shared__ uint4 s_lo[XLDS ? NCOLS * XT : 1];
+    [[maybe_unused]] __shared__ uint4 s_hi[XLDS ? NCOLS * XT : 1];
+    [[maybe_unused]] __shared__ half2 s_ds[XLDS ? NCOLS * XT : 1];
+    const uint32_t t_step = XLDS ? (uint32_t) XT : n_blocks;
+
+    for (uint32_t t0 = 0; t0 < n_blocks; t0 += t_step) {
+    const uint32_t t1 = min(n_blocks, t0 + t_step);
+    if constexpr (XLDS) {
+        __syncthreads();
+        for (int i = threadIdx.x; i < NCOLS * XT; i += NWAVES * 64) {
+            const int c = i / XT;
+            const uint32_t b = t0 + (uint32_t) (i % XT);
+            if (b < t1) {
+                const uint4 * xp4 = reinterpret_cast<const uint4 *>(
+                    reinterpret_cast<const char *>(xq) + (size_t) c * xs * sizeof(block_q8_1));
+                s_lo[i] = xp4[b];
+                s_hi[i] = xp4[xs + b];
+                s_ds[i] = reinterpret_cast<const half2 *>(xp4 + 2 * (size_t) xs)[b];
+            }
+        }
+        __syncthreads();
+    }
+
     // Whole 32-quant blocks per lane step: one weight-scale read and one
     // activation block per column per 32 quants. The half-block stride paid
     // both twice, and at sharded row counts the loop is a handful of
     // iterations, so per-step overhead is most of the kernel.
-    for (uint32_t sb = (uint32_t) lane; sb < n_blocks; sb += (uint32_t) LANES) {
+    for (uint32_t sb = t0 + (uint32_t) lane; sb < t1; sb += (uint32_t) LANES) {
         // Weights for the lane's rows stay in registers; the activation block is
         // re-read per row from L1, which is cheaper than the register pressure
         // of holding NCOLS x 8 ints alongside the accumulators.
@@ -1061,10 +1087,39 @@ static __device__ __forceinline__ void mul_mat_vec_repacked_nc_impl(
         }
 #pragma unroll
         for (int c = 0; c < NCOLS; ++c) {
-            const block_q8_1 * xb = xq + (size_t) c * xs + sb;
-            const float dx = __low2float(xb->ds);
-            [[maybe_unused]] const float sx = __high2float(xb->ds);
-            const int * x = reinterpret_cast<const int *>(xb->qs);
+            float dx;
+            [[maybe_unused]] float sx;
+            int x[8];
+            if constexpr (XLDS) {
+                const int i = c * XT + (int) (sb - t0);
+                const uint4 lo = s_lo[i];
+                const uint4 hi = s_hi[i];
+                const half2 ds = s_ds[i];
+                dx = __low2float(ds);
+                sx = __high2float(ds);
+                x[0] = lo.x; x[1] = lo.y; x[2] = lo.z; x[3] = lo.w;
+                x[4] = hi.x; x[5] = hi.y; x[6] = hi.z; x[7] = hi.w;
+            } else if constexpr (XPLANAR) {
+                // planar activations (see rp_q8_1_to_planar): lanes read contiguous 16-byte runs
+                const uint4 * xp4 = reinterpret_cast<const uint4 *>(
+                    reinterpret_cast<const char *>(xq) + (size_t) c * xs * sizeof(block_q8_1));
+                const uint4 lo = xp4[sb];
+                const uint4 hi = xp4[xs + sb];
+                const half2 ds = reinterpret_cast<const half2 *>(xp4 + 2 * (size_t) xs)[sb];
+                dx = __low2float(ds);
+                sx = __high2float(ds);
+                x[0] = lo.x; x[1] = lo.y; x[2] = lo.z; x[3] = lo.w;
+                x[4] = hi.x; x[5] = hi.y; x[6] = hi.z; x[7] = hi.w;
+            } else {
+                const block_q8_1 * xb = xq + (size_t) c * xs + sb;
+                dx = __low2float(xb->ds);
+                sx = __high2float(xb->ds);
+                const int * xi = reinterpret_cast<const int *>(xb->qs);
+#pragma unroll
+                for (int k = 0; k < 8; ++k) {
+                    x[k] = xi[k];
+                }
+            }
 #pragma unroll
             for (int r = 0; r < RPL; ++r) {
                 int ilo = 0, ihi = 0;
@@ -1105,6 +1160,7 @@ static __device__ __forceinline__ void mul_mat_vec_repacked_nc_impl(
             }
         }
     }
+    } // tile loop
 
 #pragma unroll
     for (int r = 0; r < RPL; ++r) {
@@ -1132,14 +1188,66 @@ static __device__ __forceinline__ void mul_mat_vec_repacked_nc_impl(
 #endif
 }
 
-template <int ROWS, int NWAVES, int NCOLS, int RPL = 1, int LANES = 64, ggml_type WT = GGML_TYPE_Q8_0>
-static __global__ void mul_mat_vec_repacked_nc(
+// quantize_q8_1 straight into the planar layout of rp_q8_1_to_planar (same values).
+static __global__ void rp_quantize_q8_1_planar(const float * __restrict__ x, char * __restrict__ y,
+        const int64_t ne00, const int64_t s01, const int64_t xs) {
+    const int64_t i0 = (int64_t) blockDim.x * blockIdx.x + threadIdx.x;
+    if (i0 >= xs * QK8_1) {
+        return;
+    }
+    const int64_t i1  = blockIdx.y;
+    const float   xi  = i0 < ne00 ? x[i1 * s01 + i0] : 0.0f;
+    float amax = fabsf(xi);
+    float sum  = xi;
+    amax = warp_reduce_max<QK8_1>(amax);
+    sum  = warp_reduce_sum<QK8_1>(sum);
+    const float  d = amax / 127.0f;
+    const int8_t q = amax == 0.0f ? 0 : roundf(xi / d);
+
+    const int64_t blk = i0 / QK8_1;
+    const int     iqs = i0 % QK8_1;
+    char * base = y + i1 * xs * (int64_t) sizeof(block_q8_1);
+    base[(iqs < 16 ? 0 : xs * 16) + blk * 16 + (iqs & 15)] = q;
+    if (iqs == 0) {
+        reinterpret_cast<half2 *>(base + 32 * xs)[blk] = make_half2(d, sum);
+    }
+}
+
+// Split each column of block_q8_1 into planes: qs[0:16] of every block, then qs[16:32], then ds.
+// Same bytes and size as the input, so the narrow mat-vec result does not change.
+static __global__ void rp_q8_1_to_planar(const block_q8_1 * __restrict__ x, char * __restrict__ y,
+        const int64_t xs, const int64_t n) {
+    const int64_t i = (int64_t) blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) {
+        return;
+    }
+    const int64_t col = i / xs;
+    const int64_t sb  = i % xs;
+    const int * q = reinterpret_cast<const int *>(x[i].qs);
+    uint4 * base = reinterpret_cast<uint4 *>(y + col * xs * (int64_t) sizeof(block_q8_1));
+    base[sb]      = make_uint4(q[0], q[1], q[2], q[3]);
+    base[xs + sb] = make_uint4(q[4], q[5], q[6], q[7]);
+    reinterpret_cast<half2 *>(base + 2 * xs)[sb] = x[i].ds;
+}
+
+template <int ROWS, int NWAVES, int NCOLS, int RPL = 1, int LANES = 64, ggml_type WT = GGML_TYPE_Q8_0, bool XPLANAR = false, bool XLDS = false>
+static __global__ void __launch_bounds__(NWAVES * 64) mul_mat_vec_repacked_nc(
         const uint8_t * __restrict__ wbase, const block_q8_1 * __restrict__ xq,
         float * __restrict__ y, const uint32_t ne0, const uint32_t ne1,
         const uint32_t xs, const uint32_t ys) {
-    mul_mat_vec_repacked_nc_impl<ROWS, NWAVES, NCOLS, RPL, false, LANES, WT>(
+    mul_mat_vec_repacked_nc_impl<ROWS, NWAVES, NCOLS, RPL, false, LANES, WT, XPLANAR, XLDS>(
         wbase, xq, y, ne0, ne1, xs, ys, nullptr, nullptr, nullptr,
         GGML_GLU_OP_REGLU, 0);
+}
+
+// Dense narrow batch with the up/gate fusion: out = up * act(gate), no biases.
+template <int ROWS, int NWAVES, int NCOLS, int RPL, int LANES, bool XPLANAR>
+static __global__ void __launch_bounds__(NWAVES * 64) mul_mat_vec_repacked_nc_glu(
+        const uint8_t * __restrict__ wbase, const block_q8_1 * __restrict__ xq,
+        float * __restrict__ y, const uint32_t ne0, const uint32_t ne1,
+        const uint32_t xs, const uint32_t ys, const uint8_t * __restrict__ wbase_gate, const ggml_glu_op glu_op) {
+    mul_mat_vec_repacked_nc_impl<ROWS, NWAVES, NCOLS, RPL, true, LANES, GGML_TYPE_Q8_0, XPLANAR>(
+        wbase, xq, y, ne0, ne1, xs, ys, wbase_gate, nullptr, nullptr, glu_op, 0);
 }
 
 // MoE narrow batch: one assignment per block, one launch for all of them.

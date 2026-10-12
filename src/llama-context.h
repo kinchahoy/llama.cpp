@@ -295,6 +295,7 @@ public:
 
 private:
     llm_graph_result * get_gf_res_prev();
+    void load_private_head(const llama_model & target);
 
     llm_graph_params graph_params(
                         llm_graph_result * res,
@@ -398,6 +399,13 @@ private:
     // keep fitting the reserved plan. Rebuilt by sched_reserve.
     ggml_context_ptr        ctx_layer_inp_dev;
     ggml_backend_buffer_ptr buf_layer_inp_dev;
+
+    // Private copies of the target's token embedding and output head for a draft that runs on
+    // devices which cannot read the target's buffers (e.g. a single-GPU DFlash draft for a TP target).
+    ggml_context_ptr        ctx_private_head;
+    ggml_backend_buffer_ptr buf_private_head;
+    ggml_context_ptr        ctx_private_out;
+    ggml_backend_buffer_ptr buf_private_out;
     std::vector<ggml_tensor *> layer_inp_dev;
 
     struct sampling_info {
