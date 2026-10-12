@@ -661,9 +661,11 @@ static size_t ggml_backend_cuda_repack_buffer_type_get_alloc_size(
 static const ggml_backend_buffer_type_i ggml_backend_cuda_repack_buffer_type_interface = {
     ggml_backend_cuda_repack_buffer_type_get_name,
     ggml_backend_cuda_repack_buffer_type_alloc_buffer,
+    nullptr,
     ggml_backend_cuda_repack_buffer_type_get_alignment,
     nullptr,
     ggml_backend_cuda_repack_buffer_type_get_alloc_size,
+    nullptr,
     nullptr,
 };
 

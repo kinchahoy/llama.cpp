@@ -159,3 +159,64 @@ Port the active gfx906 patch kit linked from vr/README.md to the current officia
 Upstream head: `e358d59178377be4c58ba567925e05faadbccb57`. Pre-merge MX head: `8535054eb819d4a4a3faf267a238df792ebc2f4f`. The merge has 15 conflicting files and retains the active runtime overlay. Q8 repack files, gfx906 MMQ configuration, and AllReduce are byte-identical to the pre-merge source. Upstream CUDA/MUSA/BF16 changes are carried alongside the gfx906 dispatch. The conflict decisions follow the table above.
 
 The final single standard run measured 424.57 PP2048 / 28.86 TG256 tokens/s at depth 16384. The gfx906 Release benchmark target built successfully. The new port kit contains the measured source overlay and raw results, and its 114 runtime files replay exactly against the resolved tree. See the link in [README.md](README.md).
+
+
+## 2026-10-11 reconciliation
+
+Pre-merge MX head: `5d6e2c4121e73ff39ac54802e33093ba16fe7752`. Upstream head: `08ffba21e5c2f1728b6b405c05ff3913f65706d4`. This is an ordinary upstream merge with local conflict reconciliation. The October 1 patch kit remains a pinned historical snapshot; it does not reproduce this tree.
+
+The merge keeps the HIP host-staged AllReduce, Q8 repack kernels, gfx906 MMQ configuration, activation cache, parallel scheduler staging, recurrent snapshot ring, and deferred draft prefill. Upstream changes include the mixed token/embedding batch API, speculative rejection sampling, MoE weight-copy callback, MMQ precision/padding changes, and DFlash output-head sharing correction. The Q8 repack buffer interface adds the two new optional interface slots. The recurrent graph keeps the local explicit copy inputs and gather path. Wide TOP_K keeps stable tie selection while using upstream row chunking. GDN keeps upstream kernels on other devices and the previous one-column/two-warp generation launch on gfx906; the local chunked snapshot kernel stays in use for its supported cases.
+
+### Build and measurements
+
+Build on the two-MI60 server with the same ILP flags as the pre-merge build:
+
+```sh
+cmake -S . -B build-ilp \
+  -DGGML_HIP=ON \
+  -DGGML_HIP_GRAPHS=ON \
+  -DGGML_HIP_RCCL=OFF \
+  -DLLAMA_OPENSSL=ON \
+  -DAMDGPU_TARGETS=gfx906 \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DHIP_COMPILER=clang \
+  -DCMAKE_PREFIX_PATH="$(rocm-sdk path --cmake)" \
+  -DCMAKE_HIP_FLAGS="-mllvm -amdgpu-sched-strategy=max-ilp" \
+  -DCMAKE_CXX_FLAGS="-O3 -Wno-unused-command-line-argument"
+cmake --build build-ilp --config Release -j16
+```
+
+The full build passes with ROCm SDK Clang 24. The comparison below uses the same command before and after the merge, with the default AllReduce and overlap unset:
+
+```sh
+env -u GGML_CUDA_TP_OVERLAP build-ilp/bin/llama-bench \
+  -hf unsloth/Qwen3.8-27B-GGUF:Q8_0 --offline \
+  -ngl 999 -fa on -sm tensor -dev ROCm0/ROCm1 \
+  -b 2048 -ub 2048 -p 2048 -n 256 -r 1 -o jsonl --no-warmup
+```
+
+| Tree | PP2048 tokens/s | TG256 tokens/s |
+| --- | ---: | ---: |
+| Pre-merge | 499.66 | 31.54 |
+| Merged with upstream scalar GDN launch | 482.94 | 30.43 |
+| Merged with gfx906 GDN launch preserved | 506.89 | 30.01 |
+
+These are single measurements without warmup, at depth 0. The final measurement is +1.4% PP and -4.8% TG relative to the fresh pre-merge baseline. Restoring the gfx906 GDN launch recovers prompt throughput in this check; it does not demonstrate recovery of generation throughput. Raw records are in [results/2026-10-11-head-merge](results/2026-10-11-head-merge). The merged binary still reports the pre-merge build commit because the merge is not committed when built.
+
+The requested CLI workload (`-f flake.nix -st -b 2048 -ub 2048 -c 150000 --spec-type none --spec-draft-n-max 2 --temp 0.0 --top-k 1 -s 42 -n 256 --simple-io`, with the same model, devices, tensor split and flash attention) measures 452.2 PP / 29.7 TG. The user's earlier 461.5 / 30.8 is historical, rather than a fresh paired CLI baseline. The synthetic depth-0 benchmark and CLI prompt/context numbers are separate workloads. No Q4, MTP, DFlash, vision, or long-context scaling performance claim is made from these runs.
+
+### Validation and remaining limits
+
+- Existing GPU GDN/KDA reference cases: 45/45 pass after final kernel reconciliation, including snapshot and direct-cache cases.
+- Existing wide TOP_K reference cases: 76/76 pass, including tied values and infinities.
+- Existing gfx906 tensor-parallel harness: `--n 1 --check` and `--n 2048 --check` pass with `GGML_CUDA_TP_OVERLAP` unset; both report `allreduce=default overlap=off wire=f32`.
+- Allocator, batch allocator, and server component CTest cases pass.
+- The CTest model-generation fixture fails on missing `deepseek41.expert_feed_forward_length`, so the dependent recurrent test does not run through CTest. Direct execution against the generated Qwen3.5 dense, Qwen3.5 MoE, and Qwen3Next fixtures passes seven checks and skips two unsupported Qwen3Next rollback checks with normal scheduler allocation.
+- The strict `GGML_SCHED_DEBUG_REALLOC=1` diagnostic aborts on an unexpected graph reallocation for the Qwen3.5 dense fixture. This allocation diagnostic remains unresolved; the normal-allocation replay checks do not establish that graph reservations are optimal.
+- The upstream `vendor/nlohmann/json-deep-nesting.patch` contains trailing spaces in patch context. Preserve that vendored patch verbatim; the other staged paths pass the whitespace check.
+
+### DFlash2 vision follow-up
+
+The linked [vision-position fix](https://github.com/z-lab/llama.cpp-fork/pull/4/changes/46d78b7fa5de4a6526c9b950a15d48682285f1d7) is not included in this merge. It gives injected target feature rows consecutive draft-cache positions and starts the next draft block after the draft cache's maximum position. This avoids copying repeated vision M-RoPE positions directly into a one-dimensional draft cache.
+
+A separate follow-up patch is needed for this fork. Its DFlash path has deferred feature accumulation keyed by target positions, skips pinned image chunks, and uses target positions for draft-block/rollback alignment. The merged mixed-batch API also permits tokens and embeddings together, which the current DFlash process guard skips. Applying the old patch alone would leave these cases unresolved. Keep target feature row identity separate from draft-cache positions throughout eager injection, deferred flush, drafting and rollback, then validate a real screenshot request and its text continuation against non-speculative output. The upstream DFlash output-head sharing correction carried by this merge addresses a different problem. DFlash2 vision remains unvalidated and should not be treated as fixed by this update.
