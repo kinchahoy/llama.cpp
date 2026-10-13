@@ -71,8 +71,10 @@ Carry both the immediate pre-port result and the older performance reference int
 
 ## Preserve the performance paths
 
+Preserve DFlash prompt state per sequence through `begin()` and `reset()`. Persistent layer taps must cover graph-reservation rounding for `n_seq_max`; three slots with ubatch 2048 reserve 2049 rows. Run mixed prefill/generation and slot reuse checks after speculative changes.
+
 - Keep `q8_repack/` upload layout, buffer registration, per-lane buffer selection, dense/MoE dispatch, single-token fused FFN dispatch, narrow-batch dispatch, and occupancy thresholds together. Canonical kernels cannot consume the repacked two-plane layout. Preserve the checks on both gate and up weights before fusing. `--no-repack` disables this path.
-- Keep both host and device gfx906 MMQ selectors in `mmq.cuh`, the 512-thread Q8_0 configuration in `mmq-config-gfx906.cuh`, and the J > 64 occupancy/MoE gate. Keep the GCN MMVQ table and the special five-column Q8 topology. Q4_0 and Q4_K continue through the canonical tuned paths; do not widen the Q8-only repack predicates to other quants.
+- Keep both host and device gfx906 MMQ selectors in `mmq.cuh`, the 512-thread Q8_0 configuration in `mmq-config-gfx906.cuh`, and the J > 64 occupancy/MoE gate. Keep the GCN MMVQ table and the special five-column Q8 topology. Current repack admission includes K-quants; inspect the type and shape predicates before changing dispatch. The specialized Q8 kernels and generic repacked K-quant kernels have different capabilities.
 - HIP must enter the first `#if !defined(GGML_USE_MUSA)` branch of `allreduce.cu`. This branch contains the host-staged pipeline used by normal tensor parallelism. A later `#elif defined(GGML_USE_HIP)` branch contains an overlap-only experiment, but HIP already matched the first branch. Do not infer the active path from that later branch or add `!defined(GGML_USE_HIP)` to the first guard. Normal execution must not require `GGML_CUDA_TP_OVERLAP=1`.
 - Preserve concurrent per-lane graph dispatch, repack-aware allocation, shared-expert sharding, and its output reduction. Keep the scheduler dependencies and persistent tap readback events; adding host synchronization to each ubatch can erase the PP gain.
 - Keep noncontiguous large-row argsort on the GPU. The padded row must fit shared memory; the 64 KiB gfx906 limit allows 16384 indices. An old 1024-column gate sends sparse attention through synchronous CPU transfers. Retain wide-row strided kernels and 64-bit byte addressing.
@@ -158,68 +160,11 @@ Send this with the active kit and this guide available in the workspace:
 Port the active gfx906 patch kit linked from vr/README.md to the current official ggml-org/llama.cpp head. Follow vr/MERGE-GFX906.md. Use an isolated clean worktree for injection; use an upstream merge if MX is already installed. Apply all five patch groups. Prioritize MI50/MI60 Q8_0 performance, then preserve Q4_0 and Q4_K. Retain repack layout and dispatch, gfx906 MMQ/MMVQ tuning, normal HIP host-staged AllReduce without a TP-overlap flag, parallel lane dispatch, shared-expert sharding and scheduler dependencies. Reconcile all conflicts and automatically merged interfaces before any build or test. Then build llama-bench and llama-cli. Compare the pre-port and post-port binaries with identical llama-bench settings and confirm with the CLI workload in vr/README.md; use longer generation when the test budget permits. Keep historical depth-16384 results separate from the current CLI workload. Report the immediate baseline and the older 30.28 TG reference separately; do not declare the historical gap recovered without evidence. Export and document a new pinned kit for the next port. Leave changes uncommitted and do not push or submit a PR.
 ```
 
-## 2026-10-01 reconciliation
+## Historical merge checks
 
-Upstream head: `e358d59178377be4c58ba567925e05faadbccb57`. Pre-merge MX head: `8535054eb819d4a4a3faf267a238df792ebc2f4f`. The merge has 15 conflicting files and retains the active runtime overlay. Q8 repack files, gfx906 MMQ configuration, and AllReduce are byte-identical to the pre-merge source. Upstream CUDA/MUSA/BF16 changes are carried alongside the gfx906 dispatch. The conflict decisions follow the table above.
+The [October 1/11 reconciliation record](old/2026-10-12/MERGE-GFX906-before-cleanup.md#2026-10-01-reconciliation) retains exact source identities, build commands, measurements, reference tests and unresolved allocation diagnostics. Those numbers predate the October 12 optimizations.
 
-The final single standard run measured 424.57 PP2048 / 28.86 TG256 tokens/s at depth 16384. The gfx906 Release benchmark target built successfully. The new port kit contains the measured source overlay and raw results, and its 114 runtime files replay exactly against the resolved tree. See the link in [README.md](README.md).
-
-
-## 2026-10-11 reconciliation
-
-Pre-merge MX head: `5d6e2c4121e73ff39ac54802e33093ba16fe7752`. Upstream head: `08ffba21e5c2f1728b6b405c05ff3913f65706d4`. This is an ordinary upstream merge with local conflict reconciliation. The October 1 patch kit remains a pinned historical snapshot; it does not reproduce this tree.
-
-The merge keeps the HIP host-staged AllReduce, Q8 repack kernels, gfx906 MMQ configuration, activation cache, parallel scheduler staging, recurrent snapshot ring, and deferred draft prefill. Upstream changes include the mixed token/embedding batch API, speculative rejection sampling, MoE weight-copy callback, MMQ precision/padding changes, and DFlash output-head sharing correction. The Q8 repack buffer interface adds the two new optional interface slots. The recurrent graph keeps the local explicit copy inputs and gather path. Wide TOP_K keeps stable tie selection while using upstream row chunking. GDN keeps upstream kernels on other devices and the previous one-column/two-warp generation launch on gfx906; the local chunked snapshot kernel stays in use for its supported cases.
-
-### Build and measurements
-
-Build on the two-MI60 server with the same ILP flags as the pre-merge build:
-
-```sh
-cmake -S . -B build-ilp \
-  -DGGML_HIP=ON \
-  -DGGML_HIP_GRAPHS=ON \
-  -DGGML_HIP_RCCL=OFF \
-  -DLLAMA_OPENSSL=ON \
-  -DAMDGPU_TARGETS=gfx906 \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DHIP_COMPILER=clang \
-  -DCMAKE_PREFIX_PATH="$(rocm-sdk path --cmake)" \
-  -DCMAKE_HIP_FLAGS="-mllvm -amdgpu-sched-strategy=max-ilp" \
-  -DCMAKE_CXX_FLAGS="-O3 -Wno-unused-command-line-argument"
-cmake --build build-ilp --config Release -j16
-```
-
-The full build passes with ROCm SDK Clang 24. The comparison below uses the same command before and after the merge, with the default AllReduce and overlap unset:
-
-```sh
-env -u GGML_CUDA_TP_OVERLAP build-ilp/bin/llama-bench \
-  -hf unsloth/Qwen3.8-27B-GGUF:Q8_0 --offline \
-  -ngl 999 -fa on -sm tensor -dev ROCm0/ROCm1 \
-  -b 2048 -ub 2048 -p 2048 -n 256 -r 1 -o jsonl --no-warmup
-```
-
-| Tree | PP2048 tokens/s | TG256 tokens/s |
-| --- | ---: | ---: |
-| Pre-merge | 499.66 | 31.54 |
-| Merged with upstream scalar GDN launch | 482.94 | 30.43 |
-| Merged with gfx906 GDN launch preserved | 506.89 | 30.01 |
-
-These are single measurements without warmup, at depth 0. The final measurement is +1.4% PP and -4.8% TG relative to the fresh pre-merge baseline. Restoring the gfx906 GDN launch recovers prompt throughput in this check; it does not demonstrate recovery of generation throughput. Raw records are in [results/2026-10-11-head-merge](results/2026-10-11-head-merge). The merged binary still reports the pre-merge build commit because the merge is not committed when built.
-
-The requested CLI workload (`-f flake.nix -st -b 2048 -ub 2048 -c 150000 --spec-type none --spec-draft-n-max 2 --temp 0.0 --top-k 1 -s 42 -n 256 --simple-io`, with the same model, devices, tensor split and flash attention) measures 452.2 PP / 29.7 TG. The user's earlier 461.5 / 30.8 is historical, rather than a fresh paired CLI baseline. The synthetic depth-0 benchmark and CLI prompt/context numbers are separate workloads. No Q4, MTP, DFlash, vision, or long-context scaling performance claim is made from these runs.
-
-### Validation and remaining limits
-
-- Existing GPU GDN/KDA reference cases: 45/45 pass after final kernel reconciliation, including snapshot and direct-cache cases.
-- Existing wide TOP_K reference cases: 76/76 pass, including tied values and infinities.
-- Existing gfx906 tensor-parallel harness: `--n 1 --check` and `--n 2048 --check` pass with `GGML_CUDA_TP_OVERLAP` unset; both report `allreduce=default overlap=off wire=f32`.
-- Allocator, batch allocator, and server component CTest cases pass.
-- The CTest model-generation fixture fails on missing `deepseek41.expert_feed_forward_length`, so the dependent recurrent test does not run through CTest. Direct execution against the generated Qwen3.5 dense, Qwen3.5 MoE, and Qwen3Next fixtures passes seven checks and skips two unsupported Qwen3Next rollback checks with normal scheduler allocation.
-- The strict `GGML_SCHED_DEBUG_REALLOC=1` diagnostic aborts on an unexpected graph reallocation for the Qwen3.5 dense fixture. This allocation diagnostic remains unresolved; the normal-allocation replay checks do not establish that graph reservations are optimal.
-- The upstream `vendor/nlohmann/json-deep-nesting.patch` contains trailing spaces in patch context. Preserve that vendored patch verbatim; the other staged paths pass the whitespace check.
-
-### DFlash2 vision follow-up
+## DFlash2 vision follow-up
 
 The linked [vision-position fix](https://github.com/z-lab/llama.cpp-fork/pull/4/changes/46d78b7fa5de4a6526c9b950a15d48682285f1d7) is not included in this merge. It gives injected target feature rows consecutive draft-cache positions and starts the next draft block after the draft cache's maximum position. This avoids copying repeated vision M-RoPE positions directly into a one-dimensional draft cache.
 

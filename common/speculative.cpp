@@ -1108,13 +1108,14 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
     }
     bool accum_enabled = false;
     bool lazy_begun    = false; // begin() left the replay to the next draft()/process()
-    bool in_prompt     = false; // a prompt chunk was seen and begin() has not run yet
+    std::vector<bool> in_prompt; // cleared by begin(), restored by reset()
 
     common_speculative_impl_draft_dflash(const common_params_speculative & params, uint32_t n_seq,
             common_speculative_type type = COMMON_SPECULATIVE_TYPE_DRAFT_DFLASH)
         : common_speculative_impl(type, n_seq, params.draft.n_max)
         , params(params.draft)
         , is_dspark(type == COMMON_SPECULATIVE_TYPE_DRAFT_DSPARK)
+        , in_prompt(n_seq, true)
     {
         auto * ctx_tgt = this->params.ctx_tgt;
         auto * ctx_dft = this->params.ctx_dft;
@@ -1278,7 +1279,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
             return;
         }
 
-        in_prompt = false;
+        in_prompt[seq_id] = false;
 
         if (common_speculative_lazy_prefill() && !pending.empty()) {
             lazy_begun = true;
@@ -1441,6 +1442,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
         }
 
         if (seq_id >= 0 && seq_id < (llama_seq_id) smpls.size()) {
+            in_prompt[seq_id] = true;
             common_sampler_reset(smpls[seq_id].get());
         }
 
@@ -1518,8 +1520,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                     const char * e = getenv("LLAMA_DFLASH_DEFER_TAIL");
                     return e == nullptr || atoi(e) != 0;
                 }();
-                const bool is_pp = n_chunk >= 16 || (defer_tail && in_prompt);
-                if (n_chunk >= 16) { in_prompt = true; }
+                const bool is_pp = in_prompt[seq_id] && (n_chunk >= 16 || defer_tail);
                 if (is_pp) { n_pp_rows += n_chunk; }
 
                 // Deferred prompt encode: record the chunk and return without touching

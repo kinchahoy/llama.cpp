@@ -1,0 +1,77 @@
+{
+  "mode": "dflash",
+  "ctx": 261888,
+  "command": [
+    "/home/raistlin/infer/mx-llama.cpp/build-ilp/bin/llama-server",
+    "-hf",
+    "unsloth/Qwen3.8-27B-GGUF:Q8_0",
+    "--offline",
+    "--no-mmproj",
+    "-ngl",
+    "999",
+    "-dev",
+    "ROCm0,ROCm1",
+    "-sm",
+    "tensor",
+    "-fa",
+    "on",
+    "-ctk",
+    "f16",
+    "-ctv",
+    "f16",
+    "-b",
+    "2046",
+    "-ub",
+    "2046",
+    "-c",
+    "261888",
+    "-np",
+    "3",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8093",
+    "--slots",
+    "-lv",
+    "4",
+    "--spec-type",
+    "draft-dflash",
+    "-ts",
+    "43,57",
+    "--spec-draft-hf",
+    "z-lab/Qwen3.8-27B-DFlash2-GGUF:Q8_0",
+    "--spec-draft-model",
+    "Qwen3.8-27B-DFlash2-Q8_0.gguf",
+    "--spec-draft-n-max",
+    "5"
+  ],
+  "environment": {
+    "CHECK_BATCH": "2046",
+    "CHECK_SPLIT": "43,57",
+    "CHECK_LABEL": "-balanced43"
+  },
+  "idle_bytes": [
+    29724307456,
+    31518007296
+  ],
+  "slots": [
+    {
+      "id": 0,
+      "n_ctx": 87296,
+      "speculative": true,
+      "is_processing": false
+    },
+    {
+      "id": 1,
+      "n_ctx": 87296,
+      "speculative": true,
+      "is_processing": false
+    },
+    {
+      "id": 2,
+      "n_ctx": 87296,
+      "speculative": true,
+      "is_processing": false
+    }
+  ]
+}

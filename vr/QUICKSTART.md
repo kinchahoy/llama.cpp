@@ -1,6 +1,6 @@
 # Quickstart: build and run on two gfx906 GPUs
 
-For the MI60 + MI50 box with Qwen3.8-27B Q8_0. Measured numbers and details: [TP profile findings](2026-10-12-tp-profile-findings.md), [roofline](2026-10-12-roofline.md).
+For the MI60 + MI50 box with Qwen3.8-27B Q8_0. Current measured results: [performance](PERFORMANCE.md). Historical profiles and designs are linked from [the archive](old/README.md).
 
 ## Build
 
@@ -28,7 +28,7 @@ CLI:
   --temp 0.0 --top-k 1 -s 42
 ```
 
-Fastest generation (speculative, MTP depth 2; final boss `-f flake.nix -n 4000`: PP 546-558, TG 55-62 vs 32-35.6 plain):
+MTP depth 2 (single request; useful on long documents and `flake.nix`):
 
 ```sh
 ./build-ilp/bin/llama-cli \
@@ -43,6 +43,8 @@ Greedy text is not bit-identical to plain decode: the batched verify kernels rou
 
 Server: the same model and GPU flags with `llama-server` and `--host` / `--port`.
 
+For three simultaneous server slots, use the [three-slot validation and context limits](2026-10-12-three-slots.md). The fixed source supports default batch/ubatch 2048 with persistent taps and prompt-tail deferral. Build the fixes before using these settings. Keep the target split at 50/50 until the final optimization pass. Single-request speculative gains do not predict concurrent throughput.
+
 What matters:
 
 | Flag | Use | Why |
@@ -50,12 +52,26 @@ What matters:
 | `-sm tensor -dev ROCm0,ROCm1` | always | Tensor parallel over both GPUs |
 | `-fa on` | always | Flash attention |
 | `-b 2048 -ub 2048` | default choice | Best measured PP; 4096 was slower |
-| `-ts` | 50/50 for chat; `53/47` for prompt-heavy work | 53/47: PP 702 vs 684, TG 35.6 vs 36.8 (one split for both phases) |
+| `-ts` | 50/50 until final tuning | Hold split constant while comparing other settings |
 | `-c` | as needed | Capacity only; it does not slow short prompts |
 | `-bs` | do not use | Backend sampling is refused with `-sm tensor` |
 | `--spec-type draft-mtp --spec-draft-n-max 2` | for faster generation | MTP; depth 2 beat 3 at 4000 tokens (56.7 vs 53.8-55.5), 1 and 4 are slower |
 | `--spec-draft-p-min` | do not use | Variable verify widths: TG drops to about 30 |
-| `--spec-type draft-dflash` | not now | n4000 n-max 5: PP 533, TG 51.4 (MTP2: 546 / 55.1); PP is now on the limit, TG is lower |
+| `--spec-type draft-dflash` | compare with MTP2 for one request | Later five-prompt mean TG 55.5 vs MTP2 52.3; longest document favors MTP2 |
+
+DFlash2, five draft tokens (single request):
+
+```sh
+./build-ilp/bin/llama-cli \
+  -hf unsloth/Qwen3.8-27B-GGUF:Q8_0 --offline \
+  -ngl 999 -dev ROCm0,ROCm1 -sm tensor -fa on \
+  -b 2048 -ub 2048 -c 32768 --temp 0 --top-k 1 -s 42 \
+  --spec-type draft-dflash --spec-draft-n-max 5 \
+  --spec-draft-hf z-lab/Qwen3.8-27B-DFlash2-GGUF:Q8_0 \
+  --spec-draft-model Qwen3.8-27B-DFlash2-Q8_0.gguf
+```
+
+The offline command requires cached weights. DFlash vision remains unvalidated. See [performance](PERFORMANCE.md) for workload comparisons and correctness limits.
 
 ## Environment
 

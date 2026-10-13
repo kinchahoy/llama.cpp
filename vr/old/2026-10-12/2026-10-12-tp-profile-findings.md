@@ -1,6 +1,8 @@
 # Two-GPU TP profile: where PP and TG time goes
 
-Date: 2026-10-12. Source: HEAD `8d73dc74e` working tree, binary `build-ilp` (reports build `5d6e2c412`). Model: `unsloth/Qwen3.8-27B-GGUF:Q8_0`. All runs: `-ngl 999 -fa on -sm tensor -dev ROCm0/ROCm1`, `GGML_CUDA_TP_OVERLAP` unset unless stated. Raw outputs and analysis scripts: [results/2026-10-12-tp-profile](results/2026-10-12-tp-profile). Speculative decoding is out of scope.
+Historical record. Earlier recommendations and task deadlines describe the recorded tree; use the [current vr guide](../../README.md) for operating instructions. Exact pre-cleanup bytes are preserved in `before-cleanup.tar.gz`.
+
+Date: 2026-10-12. Source: HEAD `8d73dc74e` working tree, binary `build-ilp` (reports build `5d6e2c412`). Model: `unsloth/Qwen3.8-27B-GGUF:Q8_0`. All runs: `-ngl 999 -fa on -sm tensor -dev ROCm0/ROCm1`, `GGML_CUDA_TP_OVERLAP` unset unless stated. Raw outputs and analysis scripts: [results/2026-10-12-tp-profile](../../results/2026-10-12-tp-profile). Speculative decoding is out of scope.
 
 ## Summary
 
@@ -39,7 +41,7 @@ The ROCm1 identification is from VBIOS and display outputs; confirm the CU count
 - Single-GPU TG of 22.76 t/s is about 660 GB/s of weight streaming. Perfect 2-way TP would reach about 45 t/s; measured TP is 30.2.
 - `GGML_CUDA_TP_OVERLAP=1` gives no gain and printed no overlap log line in this run. It is not known whether it engaged.
 - ubatch 4096 is slower than 2048 for this test.
-- These are llama-bench numbers. Confirm `-ts 56/44` with the [CLI workflow](README.md#benchmark-workflow) before adopting it.
+- These are llama-bench numbers. Confirm `-ts 56/44` with the [CLI workflow](../../README.md#benchmark-workflow) before adopting it.
 
 ## PP profile (one 2048-token ubatch, `-ts 50/50`)
 

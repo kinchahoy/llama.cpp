@@ -1,5 +1,7 @@
 # 2026-10-12 TP optimization work status
 
+Historical record. Earlier recommendations and task deadlines describe the recorded tree; use the [current vr guide](../../README.md) for operating instructions. Exact pre-cleanup bytes are preserved in `before-cleanup.tar.gz`.
+
 Running log for the plan in [2026-10-12-tp-profile-findings.md](2026-10-12-tp-profile-findings.md). Newest entry last. If the server crashed, resume from the last entry. Baseline binary: `build-ilp` (546.7 PP2048 / 30.2 TG128 at -ts 50/50).
 
 Permissions: llama-bench, rocprofv3, test-backend-ops OK. Long llama-cli runs OK until 2026-10-12 05:55 PDT, then ask.

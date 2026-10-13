@@ -864,6 +864,9 @@ void llama_context::sched_reserve() {
             n_taps += enabled ? 1 : 0;
         }
         if (want_static && n_taps > 0 && model.dev_output()) {
+            // Graph reservation rounds token counts up to a whole sequence batch.
+            const int64_t n_tap_rows = std::max<int64_t>(cparams.n_ubatch,
+                    ((int64_t(n_tokens) + n_seqs - 1) / n_seqs) * n_seqs);
             const ggml_init_params ip = {
                 /*.mem_size   =*/ ggml_tensor_overhead() * (size_t) n_taps,
                 /*.mem_buffer =*/ nullptr,
@@ -873,7 +876,7 @@ void llama_context::sched_reserve() {
             for (uint32_t il = 0; il < cparams.embeddings_layer_inp.size(); ++il) {
                 if (cparams.embeddings_layer_inp[il]) {
                     ggml_tensor * t = ggml_new_tensor_2d(ctx_layer_inp_dev.get(), GGML_TYPE_F32,
-                            model.hparams.n_embd, cparams.n_ubatch);
+                            model.hparams.n_embd, n_tap_rows);
                     ggml_format_name(t, "layer_inp_dev-%u", il);
                     layer_inp_dev[il] = t;
                 }
@@ -885,8 +888,8 @@ void llama_context::sched_reserve() {
                 layer_inp_dev.assign(cparams.embeddings_layer_inp.size(), nullptr);
                 ctx_layer_inp_dev.reset();
             } else {
-                LLAMA_LOG_INFO("%s: %d persistent tap tensors on %s (%zu x %u each)\n", __func__,
-                        n_taps, ggml_backend_buft_name(buft), (size_t) model.hparams.n_embd, cparams.n_ubatch);
+                LLAMA_LOG_INFO("%s: %d persistent tap tensors on %s (%zu x %" PRId64 " each)\n", __func__,
+                        n_taps, ggml_backend_buft_name(buft), (size_t) model.hparams.n_embd, n_tap_rows);
             }
         }
     }

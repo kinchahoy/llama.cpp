@@ -30,7 +30,7 @@ index 64093da7f23728ab2193aa6cd10db7bf855ce1cd..c78a5e09383bf4577368318da1433362
      }
  
 diff --git a/common/speculative.cpp b/common/speculative.cpp
-index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa79405a03d 100644
+index c285111b85007a8ee4a48e185d96572694f09182..1124c001d9d8809f3897c46c59955472ab097132 100644
 --- a/common/speculative.cpp
 +++ b/common/speculative.cpp
 @@ -13,6 +13,8 @@
@@ -59,7 +59,7 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
  struct common_speculative_impl_draft_dflash : public common_speculative_impl {
      common_params_speculative_draft params;
  
-@@ -1059,7 +1071,44 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1059,13 +1071,51 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
          uint64_t     epoch;
      };
      std::vector<pending_chunk> pending;
@@ -100,11 +100,18 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
 +    }
      bool accum_enabled = false;
 +    bool lazy_begun    = false; // begin() left the replay to the next draft()/process()
-+    bool in_prompt     = false; // a prompt chunk was seen and begin() has not run yet
++    std::vector<bool> in_prompt; // cleared by begin(), restored by reset()
  
      common_speculative_impl_draft_dflash(const common_params_speculative & params, uint32_t n_seq,
              common_speculative_type type = COMMON_SPECULATIVE_TYPE_DRAFT_DFLASH)
-@@ -1205,6 +1254,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+         : common_speculative_impl(type, n_seq, params.draft.n_max)
+         , params(params.draft)
+         , is_dspark(type == COMMON_SPECULATIVE_TYPE_DRAFT_DSPARK)
++        , in_prompt(n_seq, true)
+     {
+         auto * ctx_tgt = this->params.ctx_tgt;
+         auto * ctx_dft = this->params.ctx_dft;
+@@ -1205,6 +1255,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
      }
  
      ~common_speculative_impl_draft_dflash() override {
@@ -112,11 +119,11 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
          auto * ctx_dft = this->params.ctx_dft;
          for (llama_seq_id seq_id = 0; seq_id < (llama_seq_id) backend_chains.size(); ++seq_id) {
              if (backend_chains[seq_id] == nullptr) {
-@@ -1228,6 +1278,13 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1228,6 +1279,13 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
              return;
          }
  
-+        in_prompt = false;
++        in_prompt[seq_id] = false;
 +
 +        if (common_speculative_lazy_prefill() && !pending.empty()) {
 +            lazy_begun = true;
@@ -126,7 +133,7 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
          // replay any chunks still deferred (matches what the eager path would have
          // already injected by this point) so the coverage check below sees the
          // draft KV in its final state
-@@ -1251,12 +1308,14 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1251,12 +1309,14 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
      // pending.size() (the lag-one path) the target keeps computing the newest
      // chunk while the draft works.
      bool flush_pending_upto(size_t count) {
@@ -142,7 +149,7 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
  
          // The replay exists to give the draft a KV cache over the prompt, but the
          // draft only proposes a few tokens ahead and attends causally, so rows far
-@@ -1265,11 +1324,11 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1265,11 +1325,11 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
          // Keep the newest window and drop the rest: the draft then sees a sliding
          // context instead of the whole prompt. Positions stay absolute, so the
          // skipped span is simply absent from its cache rather than misaligned.
@@ -157,7 +164,7 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
          }();
          if (draft_window > 0 && count > 1 && n_seq == 1) {
              const auto & newest = pending[count - 1];
-@@ -1282,6 +1341,12 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1282,6 +1342,12 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                  pending.erase(pending.begin(), pending.begin() + drop);
                  count -= drop;
              }
@@ -170,7 +177,7 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
          }
  
          // one wait covers every chunk in scope - stream order means the event of
-@@ -1294,23 +1359,27 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1294,23 +1360,27 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
              }
          }
  
@@ -209,7 +216,7 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
  
              // gather straight into the inject batch at n_embd_enc - the features are
              // the fused decode's input, so there is no draft-width hidden state to
-@@ -1350,7 +1419,6 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1350,7 +1420,6 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
              }
          }
  
@@ -217,7 +224,7 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
          return true;
      }
  
-@@ -1359,6 +1427,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1359,6 +1428,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
      }
  
      bool reset(llama_seq_id seq_id) override {
@@ -225,7 +232,15 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
          const size_t n_before = pending.size();
          pending.erase(std::remove_if(pending.begin(), pending.end(),
                      [seq_id](const pending_chunk & chunk) {
-@@ -1384,6 +1453,13 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1372,6 +1442,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+         }
+ 
+         if (seq_id >= 0 && seq_id < (llama_seq_id) smpls.size()) {
++            in_prompt[seq_id] = true;
+             common_sampler_reset(smpls[seq_id].get());
+         }
+ 
+@@ -1384,6 +1455,13 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
              return true;
          }
  
@@ -239,7 +254,7 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
          // Target prefill may contain token IDs or multimodal embeddings. Both
          // produce the target-layer features used to seed the draft KV cache, so
          // embeddings are injected too, except the pinned ones skipped below.
-@@ -1430,13 +1506,20 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1430,13 +1508,19 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                  const int32_t n_chunk = std::min(n_ubatch, n_rows - offset);
  
                  // a prompt chunk is many rows, a decode chunk is at most 1+n_max
@@ -259,12 +274,11 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
 +                    const char * e = getenv("LLAMA_DFLASH_DEFER_TAIL");
 +                    return e == nullptr || atoi(e) != 0;
 +                }();
-+                const bool is_pp = n_chunk >= 16 || (defer_tail && in_prompt);
-+                if (n_chunk >= 16) { in_prompt = true; }
++                const bool is_pp = in_prompt[seq_id] && (n_chunk >= 16 || defer_tail);
                  if (is_pp) { n_pp_rows += n_chunk; }
  
                  // Deferred prompt encode: record the chunk and return without touching
-@@ -1472,10 +1555,12 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1472,10 +1556,12 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                              // it honest: deferred chunks hold their draft hidden state in
                              // g_rows until the injects run, ~16 KB per row, and past ~32k
                              // rows that buys nothing anyway - a long prompt does enough
@@ -279,7 +293,7 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
                              }();
                              static const bool opportunistic = []() {
                                  const char * e = getenv("LLAMA_DSPARK_OPPORTUNISTIC");
-@@ -1499,7 +1584,25 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1499,7 +1585,25 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
                                  const auto & last = pending[pending.size() - 2];
                                  do_flush = llama_layer_inp_accum_ready_epoch(ctx_tgt, last.epoch);
                              }
@@ -306,7 +320,7 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
                                  return false;
                              }
                              continue;
-@@ -1509,7 +1612,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1509,7 +1613,7 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
  
                  // any chunk taking the eager path must replay older deferred chunks
                  // first so the draft KV injections stay position-ordered
@@ -315,7 +329,7 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
                      return false;
                  }
  
-@@ -1583,7 +1686,8 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
+@@ -1583,7 +1687,8 @@ struct common_speculative_impl_draft_dflash : public common_speculative_impl {
          auto & ctx_dft = params.ctx_dft;
  
          // the draft KV must hold the whole prompt before the noise block decodes
@@ -325,7 +339,7 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
              LOG_ERR("%s: deferred prompt encode replay failed - skipping drafts\n", __func__);
              for (auto & dp : dparams) {
                  dp.drafting = false;
-@@ -1968,6 +2072,10 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+@@ -1968,6 +2073,10 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
          // one pass here, before generation starts, so the draft quality is identical to the
          // per-chunk path.
          if (deferred_prefill && prefilling) {
@@ -336,7 +350,7 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
              if (!finish_deferred_prefill()) {
                  deferred_prefill_failed = true;
                  SPC_ERR("%s", "deferred MTP prefill replay failed; disabling MTP drafts\n");
-@@ -2169,7 +2277,22 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+@@ -2169,7 +2278,22 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
          return ok;
      }
  
@@ -359,7 +373,7 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
          if (batch_in.size() <= 0) {
              return true;
          }
-@@ -2220,6 +2343,7 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+@@ -2220,6 +2344,7 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
      void draft(common_speculative_draft_params_vec & dparams) override {
          auto & ctx_dft = params.ctx_dft;
  
@@ -367,7 +381,7 @@ index c285111b85007a8ee4a48e185d96572694f09182..1aad902f09c48113cdd9c453050c9aa7
          if (deferred_prefill_failed) {
              return;
          }
-@@ -3198,7 +3322,32 @@ common_speculative_init_result::common_speculative_init_result(
+@@ -3198,7 +3323,32 @@ common_speculative_init_result::common_speculative_init_result(
      // A sidecar draft shares its target's devices, and the tensor-parallel
      // splitter cannot mix repacked and canonical layouts in one group. Drafts
      // are decode-bound where the repack is neutral, so they load canonical.
@@ -2086,7 +2100,7 @@ index 03a0b480ce73899c9a57daa585964e30887acbb4..ee1b41df4f9908d33fc6621d21c1b873
  // Expert token counts are per expert, so at verify widths nearly every active
  // expert holds a single assignment and the 32-wide tile computes 32 columns to
 diff --git a/src/llama-context.cpp b/src/llama-context.cpp
-index b979d8a374b334a8b01746783c65453b6ef3c30d..f85597129a4ce07dfd816f0ef4674d59a66bb2e6 100644
+index b979d8a374b334a8b01746783c65453b6ef3c30d..bc3fca79383e0237f304a12cec6cd3cadc7b38f1 100644
 --- a/src/llama-context.cpp
 +++ b/src/llama-context.cpp
 @@ -1,6 +1,7 @@
@@ -2108,7 +2122,37 @@ index b979d8a374b334a8b01746783c65453b6ef3c30d..f85597129a4ce07dfd816f0ef4674d59
          }
      }
  
-@@ -1880,6 +1885,7 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
+@@ -859,6 +864,9 @@ void llama_context::sched_reserve() {
+             n_taps += enabled ? 1 : 0;
+         }
+         if (want_static && n_taps > 0 && model.dev_output()) {
++            // Graph reservation rounds token counts up to a whole sequence batch.
++            const int64_t n_tap_rows = std::max<int64_t>(cparams.n_ubatch,
++                    ((int64_t(n_tokens) + n_seqs - 1) / n_seqs) * n_seqs);
+             const ggml_init_params ip = {
+                 /*.mem_size   =*/ ggml_tensor_overhead() * (size_t) n_taps,
+                 /*.mem_buffer =*/ nullptr,
+@@ -868,7 +876,7 @@ void llama_context::sched_reserve() {
+             for (uint32_t il = 0; il < cparams.embeddings_layer_inp.size(); ++il) {
+                 if (cparams.embeddings_layer_inp[il]) {
+                     ggml_tensor * t = ggml_new_tensor_2d(ctx_layer_inp_dev.get(), GGML_TYPE_F32,
+-                            model.hparams.n_embd, cparams.n_ubatch);
++                            model.hparams.n_embd, n_tap_rows);
+                     ggml_format_name(t, "layer_inp_dev-%u", il);
+                     layer_inp_dev[il] = t;
+                 }
+@@ -880,8 +888,8 @@ void llama_context::sched_reserve() {
+                 layer_inp_dev.assign(cparams.embeddings_layer_inp.size(), nullptr);
+                 ctx_layer_inp_dev.reset();
+             } else {
+-                LLAMA_LOG_INFO("%s: %d persistent tap tensors on %s (%zu x %u each)\n", __func__,
+-                        n_taps, ggml_backend_buft_name(buft), (size_t) model.hparams.n_embd, cparams.n_ubatch);
++                LLAMA_LOG_INFO("%s: %d persistent tap tensors on %s (%zu x %" PRId64 " each)\n", __func__,
++                        n_taps, ggml_backend_buft_name(buft), (size_t) model.hparams.n_embd, n_tap_rows);
+             }
+         }
+     }
+@@ -1880,6 +1888,7 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
      if (!graph_reuse_disable && gf_res_prev_active == res && res->can_reuse(gparams)) {
          //LLAMA_LOG_DEBUG("%s: reusing previous graph\n", __func__);
  
@@ -2116,7 +2160,7 @@ index b979d8a374b334a8b01746783c65453b6ef3c30d..f85597129a4ce07dfd816f0ef4674d59
          // with pipeline parallelism, the previous graph_compute_async may still be running
          // on the GPU. we must synchronize before set_inputs to avoid overwriting input tensors
          // that the previous compute is still reading.
-@@ -2834,7 +2840,13 @@ bool llama_context::extract_layer_inputs(const llm_graph_result * res, size_t to
+@@ -2834,7 +2843,13 @@ bool llama_context::extract_layer_inputs(const llm_graph_result * res, size_t to
      // sequence runs so identical positions in different slots cannot collide.
      static const int32_t accum_min = []() {
          const char * e = getenv("LLAMA_TAP_ACCUM_MIN");
@@ -2131,7 +2175,7 @@ index b979d8a374b334a8b01746783c65453b6ef3c30d..f85597129a4ce07dfd816f0ef4674d59
      }();
  
      struct accum_run {
-@@ -2845,7 +2857,12 @@ bool llama_context::extract_layer_inputs(const llm_graph_result * res, size_t to
+@@ -2845,7 +2860,12 @@ bool llama_context::extract_layer_inputs(const llm_graph_result * res, size_t to
      };
      std::vector<accum_run> accum_runs;
  
@@ -2145,7 +2189,7 @@ index b979d8a374b334a8b01746783c65453b6ef3c30d..f85597129a4ce07dfd816f0ef4674d59
                      (int32_t) n_tokens >= accum_min;
      for (size_t i = 0; accum_ok && i < n_tokens; ++i) {
          const llama_pos pos = ubatch.pos[i];
-@@ -2903,12 +2920,14 @@ bool llama_context::extract_layer_inputs(const llm_graph_result * res, size_t to
+@@ -2903,12 +2923,14 @@ bool llama_context::extract_layer_inputs(const llm_graph_result * res, size_t to
  
          ggml_backend_t backend = ggml_backend_sched_get_tensor_backend(sched.get(), t);
          GGML_ASSERT(backend != nullptr);
@@ -2163,7 +2207,7 @@ index b979d8a374b334a8b01746783c65453b6ef3c30d..f85597129a4ce07dfd816f0ef4674d59
          if (layer_accum_ok) {
              const size_t row_bytes = row_floats * sizeof(float);
              for (const auto & run : accum_runs) {
-@@ -3149,6 +3168,116 @@ uint32_t llama_context::graph_max_nodes(uint32_t n_tokens) const {
+@@ -3149,6 +3171,116 @@ uint32_t llama_context::graph_max_nodes(uint32_t n_tokens) const {
      return res;
  }
  
