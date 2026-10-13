@@ -1,5 +1,7 @@
 # gfx906 optimization ideas to test: Q8 first, Q4 and Q6 next
 
+Historical record. Earlier recommendations and task deadlines describe the recorded tree; use the [current vr guide](../../README.md) for operating instructions. Exact pre-cleanup bytes are preserved in `before-cleanup.tar.gz`.
+
 Date: 2026-10-11. Scope: two gfx906 GPUs, ROCm, tensor parallelism, Qwen3.8-27B. This is a research shortlist, not a set of measured improvements. No runtime code was changed and no new benchmarks were run for this review.
 
 ## Start here
@@ -14,7 +16,7 @@ There is no demonstrated drop-in 20-40% improvement over this fork in the review
 
 ## Workload and existing reference
 
-Use the [current benchmark workflow](README.md#benchmark-workflow). This 256-token CLI run is the trusted quick check; confirm improvements with longer generation, such as `-n 4000`. `llama-bench` is a faster screening tool with less weight for the real workload. Explore batch/ubatch 2048/2048 and 4096/4096 as separate comparisons.
+Use the [current benchmark workflow](../../README.md#benchmark-workflow). This 256-token CLI run is the trusted quick check; confirm improvements with longer generation, such as `-n 4000`. `llama-bench` is a faster screening tool with less weight for the real workload. Explore batch/ubatch 2048/2048 and 4096/4096 as separate comparisons.
 
 ```sh
 ./build-ilp/bin/llama-cli \
@@ -25,7 +27,7 @@ Use the [current benchmark workflow](README.md#benchmark-workflow). This 256-tok
   --temp 0.0 --top-k 1 -s 42 -n 256 --simple-io
 ```
 
-The [October 11 merge record](MERGE-GFX906.md#2026-10-11-reconciliation) reports 452.2 PP / 29.7 TG tokens/s for this CLI workload. Its separate synthetic depth-0 benchmark reports 506.89 PP2048 / 30.01 TG256 with the preserved gfx906 GDN launch. These are different workloads. The synthetic results are single measurements without warmup; neither establishes a repeatable improvement from any idea below.
+The [October 11 merge record](../../MERGE-GFX906.md#2026-10-11-reconciliation) reports 452.2 PP / 29.7 TG tokens/s for this CLI workload. Its separate synthetic depth-0 benchmark reports 506.89 PP2048 / 30.01 TG256 with the preserved gfx906 GDN launch. These are different workloads. The synthetic results are single measurements without warmup; neither establishes a repeatable improvement from any idea below.
 
 `-c 150000` is capacity, not 150000 populated KV positions. `flake.nix` was 7246 bytes when inspected. Deep-context attention and mask changes need an additional test with real populated context. `--spec-type none` disables drafting; draft-depth and draft-head changes do not accelerate this baseline.
 
@@ -49,7 +51,7 @@ Local source inspected at HEAD `c0dae49eec7002af91f3030026418a8fff9ee5bd`, toget
 
 **Source:** [Stew block 08](https://github.com/stew675/llama-cpp-rdna-boosts/blob/main/patches/0008-rdna-boosts-block-08-fused-core-prefill-kernels-and-.patch), plus the norm/gated-unary quantization sections of the [delivery notes](https://github.com/stew675/llama-cpp-rdna-boosts/blob/main/patches/README.md). The transferable idea is to populate the quantization cache from the producer while retaining the existing matmul consumer.
 
-**Local opportunity:** [norm.cu](../ggml/src/ggml-cuda/norm.cu), `ggml_cuda_op_rms_norm_fused`, writes F32. [repack-common.cuh](../ggml/src/ggml-cuda/q8_repack/repack-common.cuh), `repack_quantize_src1_q8_1`, later launches quantization on a cache miss. The cache is already enabled by default; adding another general cache is not the task.
+**Local opportunity:** [norm.cu](../../../ggml/src/ggml-cuda/norm.cu), `ggml_cuda_op_rms_norm_fused`, writes F32. [repack-common.cuh](../../../ggml/src/ggml-cuda/q8_repack/repack-common.cuh), `repack_quantize_src1_q8_1`, later launches quantization on a cache miss. The cache is already enabled by default; adding another general cache is not the task.
 
 **First implementation:** single-token RMSNorm+weight multiplication also writes the exact row-wise Q8_1 cache layout needed by repacked matvec. Preserve the F32 output for other consumers. Extend to gated-unary producers only after the first case pays.
 
@@ -59,7 +61,7 @@ Local source inspected at HEAD `c0dae49eec7002af91f3030026418a8fff9ee5bd`, toget
 
 **Source:** activation reuse in [Stew block 08](https://github.com/stew675/llama-cpp-rdna-boosts/blob/main/patches/0008-rdna-boosts-block-08-fused-core-prefill-kernels-and-.patch); the proposed grouped-layout extension comes from local code inspection.
 
-**Local opportunity:** the narrow path in [mul-mat.cu](../ggml/src/ggml-cuda/q8_repack/mul-mat.cu) calls the shared cache helper. The wide path allocates grouped MMQ workspace and calls `quantize_mmq_q8_1_cuda` per matmul/chunk. Several projections can consume the same activation.
+**Local opportunity:** the narrow path in [mul-mat.cu](../../../ggml/src/ggml-cuda/q8_repack/mul-mat.cu) calls the shared cache helper. The wide path allocates grouped MMQ workspace and calls `quantize_mmq_q8_1_cuda` per matmul/chunk. Several projections can consume the same activation.
 
 **First implementation:** reuse an identical grouped quantization between two consumers. Key it by layout, input shape/strides, slice/chunk offset and quantization precision. Row-wise and grouped layouts are not interchangeable. Affine K-quants also need the correct grouped sum layout.
 
@@ -69,7 +71,7 @@ Local source inspected at HEAD `c0dae49eec7002af91f3030026418a8fff9ee5bd`, toget
 
 **Source:** the gate+up+GLU fusion strategy in [Stew block 13](https://github.com/stew675/llama-cpp-rdna-boosts/blob/main/patches/0013-rdna-boosts-block-13-fused-MoE-gate-up-GLU-MMQ-mmvq-.patch). Adapting it to dense repacked K-quants is a local proposal, not a measured upstream result.
 
-**Local opportunity:** [repack-common.cu](../ggml/src/ggml-cuda/q8_repack/repack-common.cu) already admits Q4_K/Q6_K weights for repacking. `ggml_cuda_repack_mmv_fusion_supported` admits only Q8_0/MXFP4 for dense fusion; the MoE predicate admits additional K-quants. [mul-mat.cu](../ggml/src/ggml-cuda/q8_repack/mul-mat.cu) already contains generic fused dispatch arms, so inspect and validate those before writing another kernel. The repack README understates current quant coverage; use source predicates as the authority.
+**Local opportunity:** [repack-common.cu](../../../ggml/src/ggml-cuda/q8_repack/repack-common.cu) already admits Q4_K/Q6_K weights for repacking. `ggml_cuda_repack_mmv_fusion_supported` admits only Q8_0/MXFP4 for dense fusion; the MoE predicate admits additional K-quants. [mul-mat.cu](../../../ggml/src/ggml-cuda/q8_repack/mul-mat.cu) already contains generic fused dispatch arms, so inspect and validate those before writing another kernel. The repack README understates current quant coverage; use source predicates as the authority.
 
 **First implementation:** validate one-token dense Q4_K and Q6_K fused dispatch and epilogues, then admit only supported shapes/types. Check both gate and up layouts and quant types. Preserve bias handling and affine activation sums. Do not just widen the admission predicate without proving the full path.
 
@@ -79,7 +81,7 @@ Local source inspected at HEAD `c0dae49eec7002af91f3030026418a8fff9ee5bd`, toget
 
 **Source:** Milpster's [README](https://github.com/milpster/gfx906-llama-cpp#readme) describes a Q6_K I=64 wave64 tile. Its [profiling/experiment record](https://github.com/milpster/gfx906-llama-cpp/blob/master/bench/FINDINGS.md) also documents failed inner-loop changes. [Stew block 04](https://github.com/stew675/llama-cpp-rdna-boosts/blob/main/patches/0004-rdna-boosts-block-04-RDNA4-WMMA-flash-attn-Q6_K-mmq-.patch) is a secondary Q6 prefill lead; its full patch could not be fetched in this review.
 
-**Local opportunity:** [mmq-config-gfx906.cuh](../ggml/src/ggml-cuda/mmq-config-gfx906.cuh) specializes Q8/MXFP4 and otherwise falls back to the RDNA2 table. Its Q6_K entries use I=128. But supported repacked Q6 tensors can bypass canonical MMQ entirely.
+**Local opportunity:** [mmq-config-gfx906.cuh](../../../ggml/src/ggml-cuda/mmq-config-gfx906.cuh) specializes Q8/MXFP4 and otherwise falls back to the RDNA2 table. Its Q6_K entries use I=128. But supported repacked Q6 tensors can bypass canonical MMQ entirely.
 
 **First experiment:** log/profile dispatch. For canonical Q6 tensors that matter, sweep I=64 versus 128 with appropriate threads and J widths. For repacked tensors, tune the existing generic GEMM's geometry instead. Match the row-sharded TP grid, not a full-row single-GPU benchmark.
 
@@ -89,7 +91,7 @@ Local source inspected at HEAD `c0dae49eec7002af91f3030026418a8fff9ee5bd`, toget
 
 **Source:** [Stew block 11](https://github.com/stew675/llama-cpp-rdna-boosts/blob/main/patches/0011-rdna-boosts-block-11-skip-CUDA-graphs-for-multi-toke.patch) and its [delivery explanation](https://github.com/stew675/llama-cpp-rdna-boosts/blob/main/patches/README.md). The direct patch fetch failed; this idea was reviewed from the delivery notes.
 
-**Local opportunity:** [ggml-cuda.cu](../ggml/src/ggml-cuda/ggml-cuda.cu) has warmup and unstable-entry handling but no general prefill exclusion in its compatibility check. However, the [meta backend](../ggml/src/ggml-backend-meta.cpp) owns whole-token capture and can disable child graphs. Establish whether prefill capture actually happens in this configuration before changing anything.
+**Local opportunity:** [ggml-cuda.cu](../../../ggml/src/ggml-cuda/ggml-cuda.cu) has warmup and unstable-entry handling but no general prefill exclusion in its compatibility check. However, the [meta backend](../../../ggml/src/ggml-backend-meta.cpp) owns whole-token capture and can disable child graphs. Establish whether prefill capture actually happens in this configuration before changing anything.
 
 **Tests:** instrument capture/update counts, then compare cold first response and warm repeated PP separately. Retain TG replay. Detect tokens from actual matmul operands, including `MUL_MAT_ID`; an expert dimension is not a token count. Do not globally disable graphs and attribute the aggregate difference to this idea.
 
@@ -97,7 +99,7 @@ Local source inspected at HEAD `c0dae49eec7002af91f3030026418a8fff9ee5bd`, toget
 
 **Source:** [Stew blocks 08 and 15](https://github.com/stew675/llama-cpp-rdna-boosts/tree/main/patches) and their [release overview](https://github.com/stew675/llama-cpp-rdna-boosts/blob/main/README.md): convolution preparation and beta-sigmoid fusion are relevant patterns. Hyperconnection and QSA work belongs to other architectures.
 
-**Local opportunity:** [gated_delta_net.cu](../ggml/src/ggml-cuda/gated_delta_net.cu) already has gfx906 one-column/two-warp decode and a chunked path. Start with the beta producer and convolution input copies around this operation, rather than replacing the recurrent kernel with a WMMA implementation.
+**Local opportunity:** [gated_delta_net.cu](../../../ggml/src/ggml-cuda/gated_delta_net.cu) already has gfx906 one-column/two-warp decode and a chunked path. Start with the beta producer and convolution input copies around this operation, rather than replacing the recurrent kernel with a WMMA implementation.
 
 **Tests:** identify graph patterns that survive TP splitting; fuse one at a time. Run GDN/KDA operator cases, retained-state snapshots, rollback and real-model output checks. Measure the operation's share of step time first. A large kernel speedup on a small share of TG cannot yield a large total speedup.
 
@@ -117,7 +119,7 @@ The inspected block 10 keeps upstream dense Q8/Q4_K/Q5_K VDR and gates wider exp
 
 Derived visibility masks can reduce prefill allocations. Quantized KV can reduce storage and reads, but native in-kernel dequantization can lose to staging. Milpster reports such a loss on its gfx906 lane. Neither memory saving guarantees throughput.
 
-**Local experiment:** first measure mask/conversion allocations in the existing [flash-attention code](../ggml/src/ggml-cuda/fattn.cu). Prototype derived masks on the non-matrix tile path only for eligible single-sequence prefill, retaining packed fallback. Separately compare F16 KV, F16-K/Q8-V and Q8-K/Q8-V at identical populated depth.
+**Local experiment:** first measure mask/conversion allocations in the existing [flash-attention code](../../../ggml/src/ggml-cuda/fattn.cu). Prototype derived masks on the non-matrix tile path only for eligible single-sequence prefill, retaining packed fallback. Separately compare F16 KV, F16-K/Q8-V and Q8-K/Q8-V at identical populated depth.
 
 **Tests:** depth 0, 16k and a representative deep context; PP, TG, peak VRAM and numerical quality. Verify GPU dispatch for every mixed KV type. Cover masked/freed cells, M-RoPE, multiple sequences and position shifts. Keep an unsupported mask form from falling back to CPU. Weight quantization and KV quantization are separate axes.
 
@@ -125,7 +127,7 @@ Derived visibility masks can reduce prefill allocations. Quantized KV can reduce
 
 **Source:** [Stew block 13's aligned staging workaround](https://github.com/stew675/llama-cpp-rdna-boosts/blob/main/patches/0013-rdna-boosts-block-13-fused-MoE-gate-up-GLU-MMQ-mmvq-.patch).
 
-**Local opportunity:** `ggml_backend_cuda_buffer_set_tensor_2d` in [ggml-cuda.cu](../ggml/src/ggml-cuda/ggml-cuda.cu) directly issues H2D 2D copies. A non-four-byte width can take a poor ROCm path. Q6_K block size makes this worth checking on shard uploads.
+**Local opportunity:** `ggml_backend_cuda_buffer_set_tensor_2d` in [ggml-cuda.cu](../../../ggml/src/ggml-cuda/ggml-cuda.cu) directly issues H2D 2D copies. A non-four-byte width can take a poor ROCm path. Q6_K block size makes this worth checking on shard uploads.
 
 **First experiment:** trace actual upload widths and time them. If affected, stage an aligned copy and perform the final unaligned D2D copy. Prove source bounds for the last row; rounding a read width upward must not read beyond the mapped allocation.
 
@@ -153,17 +155,17 @@ This is a relevance screen from the linked patch descriptions and selected sourc
 | 14 qwen4exp/QSA | Flash-Next/QSA/hyperconnection work is a separate model campaign. |
 | 15 memory and fusions | F/H; retain eligible patterns and fallback semantics. |
 
-Sources: [patch directory](https://github.com/stew675/llama-cpp-rdna-boosts/tree/main/patches), [project overview](https://github.com/stew675/llama-cpp-rdna-boosts/blob/main/README.md). The local [merge guide](MERGE-GFX906.md#preserve-the-performance-paths) explains the AllReduce and repack paths that must survive.
+Sources: [patch directory](https://github.com/stew675/llama-cpp-rdna-boosts/tree/main/patches), [project overview](https://github.com/stew675/llama-cpp-rdna-boosts/blob/main/README.md). The local [merge guide](../../MERGE-GFX906.md#preserve-the-performance-paths) explains the AllReduce and repack paths that must survive.
 
 ## DFlash2 vision fix: still open
 
-**Status from local evidence:** [October 11 DFlash2 follow-up](MERGE-GFX906.md#dflash2-vision-follow-up). The upstream output-head sharing correction is included. The vision-position fix is not included, and DFlash2 vision is unvalidated.
+**Status from local evidence:** [October 11 DFlash2 follow-up](../../MERGE-GFX906.md#dflash2-vision-follow-up). The upstream output-head sharing correction is included. The vision-position fix is not included, and DFlash2 vision is unvalidated.
 
 **Original source:** [z-lab vision-position change, commit 46d78b7fa5de4a6526c9b950a15d48682285f1d7](https://github.com/z-lab/llama.cpp-fork/pull/4/changes/46d78b7fa5de4a6526c9b950a15d48682285f1d7). That page could not be fetched during this review; the description here comes from our existing merge record and local implementation, not a fresh verification of the remote diff.
 
 The intended correction gives injected feature rows consecutive draft-cache positions and starts the next draft block after the draft cache maximum. Repeated vision M-RoPE positions cannot serve as unique positions in that one-dimensional cache.
 
-Our [DFlash implementation](../common/speculative.cpp) also defers feature chunks keyed by target positions, skips pinned image chunks, and aligns draft/rollback operations using target positions. The merge notes flag mixed token/embedding batches as another unresolved case. Porting only the old injection-position hunk does not settle these interactions.
+Our [DFlash implementation](../../../common/speculative.cpp) also defers feature chunks keyed by target positions, skips pinned image chunks, and aligns draft/rollback operations using target positions. The merge notes flag mixed token/embedding batches as another unresolved case. Porting only the old injection-position hunk does not settle these interactions.
 
 **Next work:** separate target feature row identity from draft-cache positions across eager injection, deferred flush, drafting and rollback; inspect mixed-batch handling and pinned-image semantics; validate an actual screenshot prompt plus a text continuation against non-speculative execution. Include text-only regression and rejected-draft rollback tests. This is correctness work before a vision performance claim.
 

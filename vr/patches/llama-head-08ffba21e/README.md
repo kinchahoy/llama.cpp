@@ -1,6 +1,6 @@
 # MX gfx906 overlay against llama.cpp 08ffba21e
 
-Upstream base: `08ffba21e5c2f1728b6b405c05ff3913f65706d4` (ggml-org/llama.cpp, 2026-10-11). Target: snapshot tree `refs/port-snapshots/gfx906-20261012` (`4bbd50f7`), i.e. MX overlay `8d73dc74e` plus the uncommitted 2026-10-12 TP work.
+Upstream base: `08ffba21e5c2f1728b6b405c05ff3913f65706d4` (ggml-org/llama.cpp, 2026-10-11). Target: snapshot tree `refs/port-snapshots/gfx906-20261012` (`bf7b95184082c982eeaa9384a3b24a14a268d3e8`), containing HEAD `a39e959d9` plus the local three-slot DFlash fixes. No commit was created.
 
 | Patch | Files | Content |
 | --- | ---: | --- |
@@ -8,11 +8,13 @@ Upstream base: `08ffba21e5c2f1728b6b405c05ff3913f65706d4` (ggml-org/llama.cpp, 2
 | `0002-ggml-hip-gfx906-kernels.patch` | 39 | CUDA/HIP backend: Q8 repack, gfx906 MMQ/MMVQ tuning, host-staged AllReduce, GDN kernels |
 | `0003-llama-model-runtime.patch` | 38 | `src/`, `include/`, `gguf-py/`: models, split KV, recurrent snapshots, MTP/DFlash |
 | `0004-common-tools-tests-harness.patch` | 13 | `common/`, `tools/`, `tests/`, root `CMakeLists.txt`, `vr/` TP harness |
-| `0005-tp-token-graph-fusions-ar-overlap.patch` | 10 | 2026-10-12 work: capture-safe AllReduce + whole-token graph, add+norm+Q8_1 fusion, mat-vec rows, duplex and slab-overlapped prefill AllReduce, transposed concat |
+| `0005-tp-token-graph-fusions-ar-overlap.patch` | 19 | 2026-10-12 work: capture-safe AllReduce + whole-token graph, add+norm+Q8_1 fusion, mat-vec rows, duplex and slab-overlapped prefill AllReduce, transposed concat, narrow verify improvements, draft repack/private head/async replay, AllReduce lifetime correction, per-sequence DFlash prompt state and rounded tap allocation |
 
 0001-0004 touch disjoint files. 0005 applies on top of them. Apply in numeric order. `EXCLUDED.txt` lists non-runtime paths (docs, results, scratch files) that are not in any patch; copy `vr/` separately if wanted.
 
-Measured on two gfx906 (MI60 + MI50): Qwen3.8-27B Q8_0 llama-bench 551.8 -> 682.0 PP2048, 30.2 -> 36.8 TG128 versus the overlay without 0005. Details: [findings](../../2026-10-12-tp-profile-findings.md).
+Measured on two gfx906 (MI60 + MI50): Qwen3.8-27B Q8_0 llama-bench 551.8 -> 682.0 PP2048, 30.2 -> 36.8 TG128 versus the overlay without 0005. Details: [findings](../../old/2026-10-12/2026-10-12-tp-profile-findings.md).
+
+Replay verification: 133 manifest entries, zero mismatches; all five SHA256 checks pass. The export uses a temporary Git index and preserves the user's real index. Three-slot regression evidence is in the [server report](../../2026-10-12-three-slots.md).
 
 ## Merge onto a new upstream head
 
