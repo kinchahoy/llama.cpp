@@ -1,6 +1,6 @@
 # gfx906: current guide
 
-For the two 32 GiB MI60/MI50 GPUs and Qwen3.8-27B Q8_0. Updated 2026-10-12.
+For the two 32 GiB MI60/MI50 GPUs and Qwen3.8-27B Q8_0. Updated 2026-10-19.
 
 | Document | Purpose |
 | --- | --- |
@@ -9,7 +9,7 @@ For the two 32 GiB MI60/MI50 GPUs and Qwen3.8-27B Q8_0. Updated 2026-10-12.
 | [Performance](PERFORMANCE.md) | Latest results, workload differences and measurement method |
 | [Research](RESEARCH.md) | Remaining experiments and unresolved correctness work |
 | [Merge guide](MERGE-GFX906.md) | Preserve the runtime overlay when updating upstream |
-| [Active patch kit](patches/llama-head-08ffba21e/README.md) | Apply, regenerate and verify the five runtime patches |
+| [Active patch kit](patches/llama-head-797de63b2/README.md) | Apply, regenerate and verify the five runtime patches |
 | [Historical records](old/README.md) | Earlier measurements, designs and handoffs; recent edits preserved |
 
 Use a fixed 50/50 tensor split for comparisons and capacity checks. Tune the split only after choosing the other settings. Keep `GGML_CUDA_TP_OVERLAP` unset; the normal HIP path uses host-staged AllReduce without P2P.

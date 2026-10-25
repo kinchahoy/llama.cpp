@@ -1,6 +1,6 @@
 # Merging llama.cpp heads for MI50/MI60 (gfx906)
 
-Short procedure: [active patch kit README](patches/llama-head-08ffba21e/README.md). This page is the long reference.
+Short procedure: [active patch kit README](patches/llama-head-797de63b2/README.md). This page is the long reference.
 
 Keep the accepted MX runtime overlay when moving to a new ggml-org/llama.cpp head. The active kit is linked in [README.md](README.md); `OLD-IGNORE/patches` is archived and must not replace it. Resolve all source interfaces before configuring, building, or testing. A text-clean merge is not evidence that the fast kernels still dispatch.
 
@@ -11,7 +11,7 @@ Use this route for a clean upstream checkout. Use a normal upstream merge when t
 Set these three absolute paths. `LLAMA_REPO` is an existing Git checkout; `PORT_DIR` must not exist. The new detached worktree isolates the port from any work in the original checkout. These commands fetch the official head, retain its exact commit, ensure the kit's upstream base objects are available, and stop at the first patch conflict. They do not build, benchmark, or commit.
 
 ```sh
-KIT=/home/raistlin/infer/mx-llama.cpp/vr/patches/llama-head-08ffba21e
+KIT=/home/raistlin/infer/mx-llama.cpp/vr/patches/llama-head-797de63b2
 LLAMA_REPO=/path/to/llama.cpp
 PORT_DIR=/path/to/llama-gfx906
 (
@@ -20,7 +20,7 @@ PORT_DIR=/path/to/llama-gfx906
     (cd "$KIT" && sha256sum -c SHA256SUMS)
     git -C "$LLAMA_REPO" fetch https://github.com/ggml-org/llama.cpp.git master
     UPSTREAM_HEAD=$(git -C "$LLAMA_REPO" rev-parse FETCH_HEAD)
-    KIT_BASE=08ffba21e5c2f1728b6b405c05ff3913f65706d4
+    KIT_BASE=797de63b2fa7396dcc8caca76834c699ac84e1c3
     if ! git -C "$LLAMA_REPO" cat-file -e "$KIT_BASE^{commit}"; then
         git -C "$LLAMA_REPO" fetch https://github.com/ggml-org/llama.cpp.git "$KIT_BASE"
     fi
