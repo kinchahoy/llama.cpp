@@ -3,6 +3,7 @@
 #include "repack.cuh"
 #include "repack-common.cuh"
 #include "repack-kernels.cuh"
+#include "flashnext-moe.cuh"
 #include "../quantize.cuh"
 #include "../mmq.cuh"
 #include "../mmid.cuh"
@@ -72,6 +73,14 @@ void ggml_cuda_mul_mat_id_repacked(ggml_backend_cuda_context & ctx,
         block_q8_1 * src1_q8_1_d = repack_quantize_src1_q8_1(ctx, src0, src1, ne10,
             ne10_padded, s11, s11 * n_cols, s11 * n_cols, n_cols, 1, 1,
             (size_t) (n_cols * x_stride), src1_q8_1_own, stream);
+
+        if (src0->type == GGML_TYPE_IQ4_NL && flashnext_repacked_moe_enabled()) {
+            const dim3 grouped_grid((ne01 + 7)/8, (unsigned) n_assign);
+            flashnext_iq4_repacked_grouped<<<grouped_grid, 128, 0, stream>>>(
+                w, src1_q8_1_d, dst_d, ne00, ne01, ids_src1.get(), ids_dst.get(),
+                expert_bounds.get(), ne02, expert_stride, x_stride, dst_s1);
+            return;
+        }
 
         // Four rows per block, two waves. Five geometries were measured at
         // the verify widths and all landed within five percent; this was best.

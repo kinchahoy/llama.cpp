@@ -1,26 +1,5 @@
-<!-- fork banner -->
-> **mx-llama.cpp** - a fork of llama.cpp for multi-GPU inference. Backend-generic,
-> kernel tuning for AMD gfx906 (MI50).
-> Images: **[mxxm/mx-llama.cpp](https://hub.docker.com/r/mxxm/mx-llama.cpp)**
+This fork retains gfx906 inference improvements for MI50/MI60 GPUs. See the [gfx906 guide](vr/README.md) for setup, measurements, and updating from upstream.
 
-```
--sm tensor          [0 1 2 3 4 5 6 7]                  upstream: one group, all layers
--sm tensor -tps 2   [0 1] -> [2 3] -> [4 5] -> [6 7]   4 groups of 2, pipelined
-```
-
-| | |
-|---|---|
-| **Multi-stage tensor parallelism** | `-tps T` groups the GPUs and pipelines layers across the groups |
-| **DeepSeek-V4-Flash on `-sm tensor`** | fork routing kept after upstream's own split landed: GPU-side lightning indexer at any context length, static rollback topology |
-| **DeepSeek-V4.1-Flash on `-sm layer`** | architecture support: compressed tiers driven by model metadata, hyper-connection mix shifted by one sublayer, head fold without `output_hc_*` tensors, Engram n-gram hash memory read on demand from two 48.6 GiB tables |
-| **Qwen3.8-Flash-Next on `-sm tensor`** | PLE gather table sharded across the TP group (27 GiB on UD-Q4_K_XL, larger at higher quants), opt-in load-time prefault of that table, NextN/MTP draft head, lazy tensor read under `-lm dio` |
-| **Speculative decoding** | MTP draft heads on Qwen3.6 and Qwen3.8-Flash-Next, DSpark on DeepSeek-V4-Flash, DFlash, all under tensor parallelism, MTP KV staging, recurrent state rewound from a snapshot ring instead of rebuilt |
-| **Custom GPU AllReduce** | peer-write, beats the RCCL ring for generation over PCIe |
-| **Weight repack** | GPU-side weight layout for gfx906, on by default, all split modes: Q8_0, MXFP4, IQ4_NL, Q4_K, Q5_K, Q6_K and Q5_1. Q8_0 path by [iacopPBK](https://github.com/iacopPBK) |
-
-[FEATURES.md](FEATURES.md) - flags, measurements, scope. Base: upstream `b10760`.
-
----
 # llama.cpp
 
 ![llama](https://raw.githubusercontent.com/ggml-org/llama.brand/refs/heads/master/cover/llama-cpp/cover-llama-cpp-dark.svg)

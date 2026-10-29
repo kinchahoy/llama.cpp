@@ -11517,6 +11517,16 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
         }
     }
 
+    // Flash Next verification: broadcast gate/up and per-expert down inputs.
+    for (ggml_type type : {GGML_TYPE_IQ2_S, GGML_TYPE_IQ4_NL}) {
+        for (int n : {2, 3, 4}) {
+            const int k = type == GGML_TYPE_IQ2_S ? 2560 : 640;
+            test_cases.emplace_back(new test_mul_mat_id(type, GGML_TYPE_F32, 16, 10, true, 17, n, k, 20, true));
+            test_cases.emplace_back(new test_mul_mat_id(type, GGML_TYPE_F32, 16, 10, false, 17, n, k, 20, true));
+            test_cases.emplace_back(new test_mul_mat_id_dup(type, GGML_TYPE_F32, 16, 10, false, 17, n, k));
+        }
+    }
+
     // skipped slots (negative ids)
     for (ggml_type type_a : {GGML_TYPE_F32, GGML_TYPE_F16, GGML_TYPE_BF16, GGML_TYPE_Q4_0, GGML_TYPE_Q4_K, GGML_TYPE_Q8_0, GGML_TYPE_MXFP4}) {
         for (int n_used : {1, 2, 4}) {

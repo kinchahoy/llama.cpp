@@ -1,0 +1,61 @@
+0.00.024.601 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.026.395 W srv  server_setup: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.030.101 I srv    load_model: loading model '/home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/c8b5954a88c2775c546b92593eda40ea041d3176/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00003.gguf'
+0.00.031.102 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+[shexp-split] splitting shared experts across the TP group (LLAMA_SHEXP_SPLIT=0 to disable)
+0.05.937.807 W q8_repack: repacking q8_0 tensors on device 0 (first: output_hc_down.weight, 3481600 bytes)
+0.05.941.543 W q8_repack: repacking q8_0 tensors on device 1 (first: output_hc_down.weight, 3481600 bytes)
+0.05.947.165 W q8_repack: repacking q6_K tensors on device 0 (first: output.weight, 260736000 bytes)
+0.06.206.089 W q8_repack: repacking q6_K tensors on device 1 (first: output.weight, 260736000 bytes)
+0.06.524.270 W q8_repack: repacking iq4_nl tensors on device 0 (first: blk.0.ffn_down_exps.weight, 188743680 bytes)
+0.06.627.363 W q8_repack: repacking iq4_nl tensors on device 1 (first: blk.0.ffn_down_exps.weight, 283115520 bytes)
+0.15.864.770 W TP custom AR: peer access not available between GPU 0 and 1
+0.15.864.773 W TP custom AR: peer access not available between GPU 1 and 0
+0.15.864.773 W TP custom AR: disabled because full peer access is not available
+0.16.019.466 I cmn          init: llama threadpool init, n_threads = 4
+0.16.408.471 I common_speculative_init_result: loading draft model '/home/raistlin/.cache/models/qwen38-flash-next-mtp/MTP/mtp-Qwen3.8-Flash-Next-Q8_0.gguf'
+0.18.298.577 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 100096, kv_unified = 'false'
+0.19.897.764 W [repack-moe-fusion] type=q8_0 cols=2 fused up/gate mat-vec engaged
+0.19.905.463 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.19.905.500 I srv  server_run_i: model loaded
+0.19.905.501 I srv  server_on_li: listening on http://127.0.0.1:59241
+0.20.074.145 I slot get_availabl: id  0 | task -1 | selected slot by LRU, n_tokens = 0, t_last = -1
+0.20.074.214 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+0.21.323.874 W launch_gated_delta_net: gdn-chunk-snapshots: keep_rs chunked path TAKEN (default)
+0.23.540.001 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   1066, progress = 0.51, t =   3.47 s / 307.60 tokens per second
+0.24.812.175 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   1581, progress = 0.75, t =   4.74 s / 333.71 tokens per second
+0.26.076.657 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   2093, progress = 1.00, t =   6.00 s / 348.70 tokens per second
+MTP check step 0 GPU=513 CPU=1144 probability=0.00161612
+MTP check step 1 GPU=264 CPU=2574 probability=0.0492176
+0.26.708.065 I spec        draft: device MTP chain active
+MTP check step 0 GPU=310 CPU=4087 probability=0.0175229
+MTP check step 1 GPU=310 CPU=5707 probability=0.161161
+MTP check step 0 GPU=13 CPU=310 probability=3.51688e-05
+MTP check step 1 GPU=13 CPU=310 probability=0.000520532
+MTP check step 0 GPU=264 CPU=1156 probability=0.00019543
+MTP check step 1 GPU=279 CPU=1156 probability=0.00681914
+MTP check step 0 GPU=13 CPU=13 probability=0.920955
+MTP check step 1 GPU=13 CPU=13 probability=0.929195
+MTP check step 0 GPU=16713 CPU=3162 probability=0.00356701
+MTP check step 1 GPU=16713 CPU=3162 probability=0.0052761
+MTP check step 0 GPU=286 CPU=290 probability=4.18618e-07
+MTP check step 1 GPU=82 CPU=290 probability=6.23413e-06
+MTP check step 0 GPU=264 CPU=264 probability=0.859653
+MTP check step 1 GPU=264 CPU=264 probability=0.883303
+MTP check step 0 GPU=786 CPU=911 probability=1.70525e-06
+MTP check step 1 GPU=40 CPU=911 probability=5.58126e-08
+MTP check step 0 GPU=307 CPU=1274 probability=6.9342e-05
+MTP check step 1 GPU=999 CPU=1274 probability=7.2499e-05
+MTP check step 0 GPU=344 CPU=706 probability=7.37013e-08
+MTP check step 1 GPU=344 CPU=706 probability=2.45471e-09
+MTP check step 0 GPU=13 CPU=999 probability=0.0142791
+MTP check step 1 GPU=13 CPU=999 probability=0.0170141
+0.27.532.083 I slot print_timing: id  0 | task 0 | prompt eval time =    6182.06 ms /  2097 tokens (    2.95 ms per token,   339.21 tokens per second)
+0.27.532.085 I slot print_timing: id  0 | task 0 |        eval time =    1275.78 ms /    16 tokens (   85.05 ms per token,    11.76 tokens per second)
+0.27.532.086 I slot print_timing: id  0 | task 0 |       total time =    7457.84 ms /  2113 tokens
+0.27.532.088 I slot print_timing: id  0 | task 0 |    graphs reused =         10
+0.27.532.088 I slot print_timing: id  0 | task 0 |   graph reallocs =          0    /     0        (same size) / (changed size)
+0.27.532.091 I slot print_timing: id  0 | task 0 | draft acceptance = 0.08696 (    2 accepted /    23 generated), mean len =  1.17
+0.27.532.107 I statistics        draft-mtp: #calls(b,p,g,a) =    1     18     12     12, #gen drafts =     12, #acc drafts =     2, #gen tokens =     23, #acc tokens =     2, #mean acc len = 1.17, #acc rate/pos = (0.167), dur(b,p,g,a) = 0.009, 12.983, 508.926, 0.031 ms
+0.27.532.180 I slot      release: id  0 | task 0 | stop processing: n_tokens = 2112, truncated = 0
+0.27.533.355 I srv    operator(): operator(): cleaning up before exit...

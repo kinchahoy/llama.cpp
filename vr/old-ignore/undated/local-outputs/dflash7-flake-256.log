@@ -1,0 +1,58 @@
+0.00.736.455 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.737.966 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.742.021 I srv    load_model: loading model 'unsloth/Qwen3.8-27B-GGUF:Q8_0'
+0.00.902.903 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+0.01.310.587 W model has unused tensor blk.64.attn_norm.weight (size = 20480 bytes) -- ignoring
+0.01.310.594 W model has unused tensor blk.64.post_attention_norm.weight (size = 20480 bytes) -- ignoring
+0.01.310.602 W model has unused tensor blk.64.attn_q.weight (size = 66846720 bytes) -- ignoring
+0.01.310.605 W model has unused tensor blk.64.attn_k.weight (size = 5570560 bytes) -- ignoring
+0.01.310.607 W model has unused tensor blk.64.attn_v.weight (size = 5570560 bytes) -- ignoring
+0.01.310.617 W model has unused tensor blk.64.attn_output.weight (size = 33423360 bytes) -- ignoring
+0.01.310.620 W model has unused tensor blk.64.attn_q_norm.weight (size = 1024 bytes) -- ignoring
+0.01.310.622 W model has unused tensor blk.64.attn_k_norm.weight (size = 1024 bytes) -- ignoring
+0.01.310.624 W model has unused tensor blk.64.ffn_gate.weight (size = 94699520 bytes) -- ignoring
+0.01.310.627 W model has unused tensor blk.64.ffn_down.weight (size = 94699520 bytes) -- ignoring
+0.01.310.629 W model has unused tensor blk.64.ffn_up.weight (size = 94699520 bytes) -- ignoring
+0.01.310.633 W model has unused tensor blk.64.nextn.eh_proj.weight (size = 55705600 bytes) -- ignoring
+0.01.310.636 W model has unused tensor blk.64.nextn.enorm.weight (size = 20480 bytes) -- ignoring
+0.01.310.639 W model has unused tensor blk.64.nextn.hnorm.weight (size = 20480 bytes) -- ignoring
+0.01.310.646 W model has unused tensor blk.64.nextn.shared_head_norm.weight (size = 20480 bytes) -- ignoring
+[shexp-split] splitting shared experts across the TP group (LLAMA_SHEXP_SPLIT=0 to disable)
+0.02.613.160 W q8_repack: repacking q8_0 tensors on device 0 (first: blk.0.attn_qkv.weight, 27852800 bytes)
+0.02.623.145 W q8_repack: repacking q8_0 tensors on device 1 (first: blk.0.attn_qkv.weight, 27852800 bytes)
+0.07.291.826 W TP custom AR: peer access not available between GPU 0 and 1
+0.07.291.830 W TP custom AR: peer access not available between GPU 1 and 0
+0.07.291.831 W TP custom AR: disabled because full peer access is not available
+0.08.078.016 I cmn          init: llama threadpool init, n_threads = 4
+0.08.446.904 I common_speculative_init_result: loading draft model '/home/raistlin/.cache/huggingface/hub/models--z-lab--Qwen3.8-27B-DFlash2-GGUF/snapshots/2d9571f8ce46e151f61c6499c99dee6079e1d610/Qwen3.8-27B-DFlash2-Q8_0.gguf'
+0.09.767.836 W TP custom AR: peer access not available between GPU 0 and 1
+0.09.767.842 W TP custom AR: peer access not available between GPU 1 and 0
+0.09.767.843 W TP custom AR: disabled because full peer access is not available
+0.09.825.635 W load_hparams: Qwen-VL models require at minimum 1024 image tokens to function correctly on grounding tasks
+0.09.825.640 W load_hparams: if you encounter problems with accuracy, try adding --image-min-tokens 1024
+0.09.825.640 W load_hparams: more info: https://github.com/ggml-org/llama.cpp/issues/16842
+
+0.10.224.697 I srv    load_model: loaded multimodal model, '/home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-27B-GGUF/snapshots/4ca720788d1e01f1bff70c033e0d0028fd02e502/mmproj-BF16.gguf'
+0.10.224.717 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 100096, kv_unified = 'false'
+0.10.224.745 I common_speculative_impl_draft_dflash: adding speculative implementation 'draft-dflash'
+0.10.224.746 I common_speculative_impl_draft_dflash: - n_max=3, n_min=0, p_min=0.00
+0.10.224.747 I common_speculative_impl_draft_dflash: - block_size=8, mask_token_id=248070, n_extract=5, sample_from_anchor=true
+0.14.274.116 I common_speculative_impl_draft_dflash: deferred prompt encode enabled
+0.14.443.388 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.14.443.430 I srv  llama_server: model loaded
+0.14.443.431 I srv  llama_server: listening on http://127.0.0.1:53099
+0.14.622.827 I slot get_availabl: id  0 | task -1 | selected slot by LRU, t_last = -1
+0.14.623.032 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+0.15.473.591 W launch_gated_delta_net: gdn-chunk-snapshots: keep_rs chunked path TAKEN (default)
+0.19.952.567 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   2093, progress = 1.00, t =   4.48 s / 467.04 tokens per second
+0.23.260.507 I slot print_timing: id  0 | task 0 | n_gen =    111, tg =  36.52 t/s, tg_3s =  36.85 t/s
+0.26.268.493 I slot print_timing: id  0 | task 0 | n_gen =    245, tg =  40.53 t/s, tg_3s =  44.55 t/s
+0.26.498.006 I slot print_timing: id  0 | task 0 | prompt eval time =    5625.34 ms /  2097 tokens (    2.68 ms per token,   372.78 tokens per second)
+0.26.498.010 I slot print_timing: id  0 | task 0 |        eval time =    6249.40 ms /   256 tokens (   24.51 ms per token,    40.80 tokens per second)
+0.26.498.011 I slot print_timing: id  0 | task 0 |       total time =   11874.74 ms /  2353 tokens
+0.26.498.014 I slot print_timing: id  0 | task 0 |    graphs reused =         84
+0.26.498.018 I slot print_timing: id  0 | task 0 | draft acceptance = 0.64615 (  168 accepted /   260 generated), mean len =  2.93
+0.26.498.050 I statistics     draft-dflash: #calls(b,p,g,a) =    1     91     87     87, #gen drafts =     87, #acc drafts =    72, #gen tokens =    260, #acc tokens =   168, #mean acc len = 2.93, #acc rate/pos = (0.828, 0.621, 0.483), dur(b,p,g,a) = 0.002, 1025.251, 1631.447, 0.027 ms, p(tgtsync,gather,encode,readnextn,inject) = 1.344, 3.719, 0.000, 0.000, 129.010 ms, prompt(tgtsync,gather,encode,inject) = 90, 130.307, 0.000, 669.869 ms over 2086 rows
+0.26.498.160 I slot      release: id  0 | task 0 | stop processing: n_tokens = 2352, truncated = 0
+0.26.499.753 I srv    operator(): operator(): cleaning up before exit...
+0.26.517.092 W ~llama_context:  ROCm_Host compute buffer size of 199.6718 MiB, does not match expectation of  56.0703 MiB

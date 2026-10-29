@@ -1,0 +1,60 @@
+{
+  "name": "candidate-27b-plain",
+  "rates": [
+    [
+      "585.0",
+      "35.6"
+    ]
+  ],
+  "returncode": 0,
+  "seconds": 18.919689893722534,
+  "command": [
+    "/home/raistlin/infer/mx-llama.cpp/.worktrees/flashnext-fast/build-fast/bin/llama-cli",
+    "-m",
+    "/home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-27B-GGUF/snapshots/4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-Q8_0.gguf",
+    "--offline",
+    "-ngl",
+    "999",
+    "-dev",
+    "ROCm0,ROCm1",
+    "-sm",
+    "tensor",
+    "-ts",
+    "1,1",
+    "-fa",
+    "on",
+    "-b",
+    "2048",
+    "-ub",
+    "2048",
+    "-c",
+    "100096",
+    "-ctk",
+    "q8_0",
+    "-ctv",
+    "q8_0",
+    "--temp",
+    "0",
+    "--top-k",
+    "1",
+    "--seed",
+    "42",
+    "-f",
+    "/home/raistlin/infer/mx-llama.cpp/flake.nix",
+    "-n",
+    "256",
+    "-st",
+    "--no-display-prompt",
+    "--simple-io",
+    "--log-verbosity",
+    "3"
+  ],
+  "device": true,
+  "grouped": true,
+  "prompt_sha256": "fe8d514fa094db2d26b29e4819d5585658533e0f552815620bd1bd54fdb1e475",
+  "stdout_sha256": "98a7ef7939fa7d235211636b667de5673962ded8dc201028f4c140945aff0ee1",
+  "timings": [
+    "0.18.130.577 I slot print_timing: id  0 | task 0 | prompt eval time =    3584.61 ms /  2097 tokens (    1.71 ms per token,   585.00 tokens per second)",
+    "0.18.130.580 I slot print_timing: id  0 | task 0 |        eval time =    7171.03 ms /   256 tokens (   28.12 ms per token,    35.56 tokens per second)"
+  ]
+}
