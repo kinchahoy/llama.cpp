@@ -561,6 +561,11 @@ static void gguf_merge(const split_params & split_params) {
             for (size_t done = 0; done < n_bytes; ) {
                 const size_t n = (n_bytes - done) < chunk ? (n_bytes - done) : chunk;
                 f_input.read((char *)read_data.data(), n);
+                if (!f_input) {
+                    fprintf(stderr, "%s: failed to read %zu bytes at offset %zu, input file may be truncated
+", __func__, n, offset + done);
+                    exit(EXIT_FAILURE);
+                }
                 if (!split_params.dry_run) {
                     fout.write((const char *)read_data.data(), n);
                 }

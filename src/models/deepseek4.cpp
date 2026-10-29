@@ -708,7 +708,7 @@ ggml_tensor * llama_model_deepseek4::graph::build_top_k_mask(
     GGML_ASSERT(top_k);
 
     if (cparams.fused_top_k_mask) {
-        ggml_tensor * kq_mask_top_k = build_fused_top_k_mask(kq_mask, top_k, nullptr, nullptr, nullptr, nullptr, il);
+        ggml_tensor * kq_mask_top_k = build_fused_top_k_mask(kq_mask, top_k, il);
         cb(kq_mask_top_k, name, il);
 
         return kq_mask_top_k;
@@ -1525,7 +1525,6 @@ llama_model_deepseek4::graph_mtp::graph_mtp(const llama_model & model, const llm
     ggml_tensor * residual = inpL;
     ggml_tensor * post = nullptr;
     ggml_tensor * comb = nullptr;
-
     ggml_tensor * cur = build_hc_pre(inpL,
             layer.hc_attn_fn,
             layer.hc_attn_scale,

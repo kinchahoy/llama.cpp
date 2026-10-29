@@ -4,7 +4,7 @@ Keep upstream interfaces and the smallest local delta that preserves the gfx906 
 
 Keep the separate `play-qwen-off` output-style project out of this performance patch chain. The accepted grouped-MoE subset from `flashnext-fast` belongs in this patch chain, including its tests and dispatch/fallback guards. Its separate GPU-feedback experiment does not. Model priorities are listed in [the current guide](README.md#priorities-and-separate-work).
 
-Previous checkpoint: `84932540a0b8fbcd67128b8615da434763c185ec`, merged through official `344be0a60074e6395da3c4a4f300f7361df5a67d`. The [current kit](patches/llama-head-344be0a60-grouped-moe/README.md) exports that checkpoint plus the accepted grouped-MoE subset, including the later attention/vector-dot fixes. Use the reviewed branch as the source of truth.
+Current overlay base: official `418f905a4efe910d2a75636bbe65d48eca38790a`. The active [patch kit](patches/llama-head-418f905a4/README.md) exports the reviewed port for this head. The previous checkpoint (`84932540a0b8fbcd67128b8615da434763c185ec` on `344be0a60074e6395da3c4a4f300f7361df5a67d`) is historical; do not reuse its intermediate tree for a new upstream base. Use the reviewed current branch as the source of truth.
 
 ## Prepare and merge
 
@@ -24,6 +24,7 @@ During this merge, ours is MX and theirs is new official upstream. Inspect both 
 Preserve these connected paths:
 
 - Repack upload/layout, dispatch, fused consumers, gfx906 MMQ/MMVQ tuning, existing supported quants, and opt-in grouped MoE weight reuse for narrow IQ2_S/IQ4_NL batches.
+- Preserve gfx906 row-first MMQ traversal when reconciling upstream launch-axis changes. The first 418f port changed this traversal and showed a large PP loss; the accepted tree restores the gfx906 ordering. The active narrow IQ2_S single-token expert path is limited to one output column and even rows; odd rows retain the prior fallback.
 - Upstream HIP host-staged AllReduce plus the local graph-replay, duplex/slab overlap and scheduler integration: HIP must enter the first `#if !defined(GGML_USE_MUSA)` path in `ggml/src/ggml-cuda/allreduce.cu`, without requiring `GGML_CUDA_TP_OVERLAP=1`.
 - Parallel lanes, shared-expert reduction, token graphs, and scheduler/readback dependencies; avoid new per-ubatch host synchronization.
 - Split KV, recurrent rollback, MTP planning, and DFlash per-sequence state. Rounded reservations can need 2049 tap rows for ubatch 2048. Chunked GDN must write all requested snapshots with the correct output stride.
@@ -63,7 +64,7 @@ REPO=$(cat "$SESSION_DIR/source-repo")
 PORT_DIR="$SESSION_DIR/port"
 UPSTREAM_HEAD=$(cat "$SESSION_DIR/upstream-sha")
 UPSTREAM_SHORT=$(git -C "$PORT_DIR" rev-parse --short=9 "$UPSTREAM_HEAD")
-KIT="$REPO/vr/patches/llama-head-344be0a60-grouped-moe"
+KIT="$REPO/vr/patches/llama-head-418f905a4"
 cd "$PORT_DIR"
 test -z "$(git ls-files -u)"
 git diff --exit-code
@@ -107,7 +108,7 @@ Document the new base, intermediate/target tree IDs and refs, build/check result
 
 ## Performance and handoff
 
-Benchmarks require explicit user OK for the exact baseline/candidate commands and combined time limit. The helper's `bench` command previews PP2048/TG128 at depth 0, batch/ubatch 2048, full offload, flash attention, 50/50 TP, warmup and one repetition. Only after approval add `--run-approved`. Pass the candidate binary as the optional third positional argument for the post-merge run. Each invocation has a 110-second timeout plus 5 seconds to terminate.
+Benchmarks require explicit user OK for the exact baseline/candidate commands and combined time limit. The helper's `bench` command previews PP2048/TG128 at depth 0, batch/ubatch 2048, full offload, flash attention, 50/50 TP, warmup and one repetition. Only after approval add `--run-approved`. Pass the candidate binary as the optional third positional argument for the post-merge run. Each invocation has a 110-second timeout plus 5 seconds to terminate. For this host, the requested common CPU-thread setting is `-t 20 -tb 20`; it is a comparison setting, not a claim that 20 threads are optimal.
 
 Use the same immutable model files, GPUs, environment and settings. The helper records commands, binary hash, library paths, cache and output, but cannot prove a binary matches a source tree. Check build identity and keep each binary with its own libraries. Do not compare different context depths or workloads as if matched. Diagnose a regression before proposing tuning.
 

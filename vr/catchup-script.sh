@@ -134,7 +134,7 @@ case "$ACTION" in
         cmd=(env -u GGML_CUDA_TP_OVERLAP timeout --kill-after=5s 110s
             "$BINARY" -m "$MODEL" --offline -ngl 999 -sm tensor
             -dev ROCm0/ROCm1 -ts 1/1 -fa on -b 2048 -ub 2048
-            -p 2048 -n 128 -d 0 -r 1 -o json)
+            -t 20 -p 2048 -n 128 -d 0 -r 1 -o json)
         printf 'Command (warmup enabled; one repetition per PP/TG test):\n'
         printf '%q ' "${cmd[@]}"
         printf '\n'

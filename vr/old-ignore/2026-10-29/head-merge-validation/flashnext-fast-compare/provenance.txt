@@ -1,0 +1,15 @@
+experiment_head=fdc8e5b65cd6120b2f89e509d5f354bda4a3a30b
+experiment_build=.worktrees/flashnext-fast/build-fast
+experiment_cli_sha256=77a6d3043d4443cc293c01d058047b80329a44da20e73db83cd7150c88b9ce5f
+experiment_libllama_sha256=de0434e54b41fecd9156fdb41b8e1384ea0229f67a6796d8a36410e3a127775e
+experiment_libllama_common_sha256=4837e94781fbcbe5e846d0991e5a286f6d4fcecf8c6327a9bc73b67263eef70d
+experiment_libggml_hip_sha256=b201266dd71ec6739c22935c2326ed7b06f8a7081ce0b37c80d9ac5637426f45
+source_manifest=source-manifest.json (all 16 listed source hashes match current files)
+release=ON
+cxx_and_hip_compiler=/home/raistlin/amd-clean/therock-venv/.venv/lib/python3.14/site-packages/_rocm_sdk_devel/llvm/bin/clang++
+hip_flags=-mllvm -amdgpu-sched-strategy=max-ilp
+hip_graphs=ON
+hip_mmq_mfma=ON
+hip_no_vmm=ON
+hip_rccl=OFF
+The executable and libraries were built in the preserved flashnext-fast worktree; ldd resolves its own build-fast/bin HIP-linked llama libraries and the same TheRock runtime. No rebuild or source/worktree changes were made for this comparison. CMakeCache files for both binaries are archived alongside this record.

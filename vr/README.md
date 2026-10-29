@@ -1,13 +1,13 @@
 # gfx906 guide
 
-Local enhancements for two 32 GiB gfx906 GPUs (MI50/MI60), primarily tested with Qwen3.8-27B Q8_0. Built on [MX](https://github.com/mixa3607/mx-llama.cpp) and [iacopPBK's gfx906 work](https://github.com/iacopPBK/llama.cpp-gfx906); see [credits](IMPROVEMENTS.md#built-on). The merged official base is `344be0a60`; source snapshots and benchmark identities are recorded in the performance reports.
+Local enhancements for two 32 GiB gfx906 GPUs (MI50/MI60), primarily tested with Qwen3.8-27B Q8_0. Built on [MX](https://github.com/mixa3607/mx-llama.cpp) and [iacopPBK's gfx906 work](https://github.com/iacopPBK/llama.cpp-gfx906); see [credits](IMPROVEMENTS.md#built-on). The active overlay targets official llama.cpp `418f905a4efe910d2a75636bbe65d48eca38790a`; source snapshots and benchmark identities are recorded in the performance reports.
 
 | Guide | Purpose |
 | --- | --- |
 | [Improvements](IMPROVEMENTS.md) | What changed, why it helps, and what to revisit |
 | [Performance](PERFORMANCE.md) | Representative measurements and their limits |
 | [Catch up](how-to-catchup.md) | Merge upstream, validate briefly, and refresh patches |
-| [Current patch kit](patches/llama-head-344be0a60-grouped-moe/README.md) | Replayable checkpoint overlay plus accepted grouped MoE |
+| [Current patch kit](patches/llama-head-418f905a4/README.md) | Replayable overlay for the accepted official-head base |
 | [Historical records](old-ignore/README.md) | Dated benchmarks, experiments, and superseded workflows |
 
 ## Priorities and separate work
@@ -45,12 +45,14 @@ This example requires the cached model. Keep a 50/50 tensor split while comparin
 ./build-ilp/bin/llama-cli \
   -hf unsloth/Qwen3.8-27B-GGUF:Q8_0 --offline \
   -ngl 999 -dev ROCm0,ROCm1 -sm tensor -ts 1,1 -fa on \
-  -b 2048 -ub 2048 -c 32768 --temp 0 --top-k 1 -s 42
+  -b 2048 -ub 2048 -c 32768 -t 20 -tb 20 --temp 0 --top-k 1 -s 42
 ```
+
+Twenty CPU threads are the requested comparison setting for this host, not a claim that 20 is optimal for every workload.
 
 For single-request MTP, append `--spec-type draft-mtp --spec-draft-n-max 2 --spec-draft-backend-sampling`. This is a useful starting point, not a universal winner; concurrency and prompt length change the result. Use the same model/GPU flags with `llama-server` for serving, setting host and port explicitly.
 
-Keep HIP graphs enabled and `GGML_CUDA_TP_OVERLAP` unset. The normal HIP AllReduce path does not need that switch. Most local optimizations are enabled by default; historical environment sweeps are in the archive.
+Keep HIP graphs enabled, RCCL off for the current mixed PCIe-lane topology, and `GGML_CUDA_TP_OVERLAP` unset. HIP uses the upstream host-staged AllReduce path plus the local graph-safe counters and slab/duplex overlap hooks; the normal path does not require the overlap environment switch. Most local optimizations are enabled by default; historical environment sweeps are in the archive.
 
 ## Validation
 

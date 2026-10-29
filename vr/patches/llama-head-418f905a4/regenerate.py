@@ -13,8 +13,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 DEFAULT_BASE = "418f905a4efe910d2a75636bbe65d48eca38790a"
-DEFAULT_MID = "2fe701f8a0bdcea569d8281954c0f980b50b1b2b"
-DEFAULT_TARGET = "12229543ad2d128b4663a2f9839401dfb7bec6cb"
+DEFAULT_MID = "342d4ab70e1b6042f36beaba46ea924921b65ad0"
+DEFAULT_TARGET = "fb7da801711c102d7d6bebec3b35c2f5030d3769"
 
 PATCHES = (
     "0001-ggml-core-and-tp-meta-backend.patch",

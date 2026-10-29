@@ -1,3 +1,5 @@
+> Final integration: master now uses official base `418f905a4` with the tested gfx906 traversal restoration and IQ2_S single-token tuning. The original regressing snapshot below is historical; see the [current kit](../../../patches/llama-head-418f905a4/README.md) and [performance summary](../../../PERFORMANCE.md).
+
 # Official-head merge validation, 2026-10-29
 
 Official head: `418f905a4efe910d2a75636bbe65d48eca38790a`. Candidate branch `experiment/catchup-418f905a4`, runtime tree `12229543ad2d128b4663a2f9839401dfb7bec6cb`. Parent baseline build reports `84932540a`; its exact accepted-grouped source snapshot is `fbdb024841f459a285357de1163c9b34f4c29c4e` (before the dead HIP branch removal).
@@ -28,3 +30,11 @@ Measured GPU-check wall time: 68.575 seconds for the initial Q8/failed Next chec
 The Next setup uses the cached Unsloth target revision `c8b5954a88c2775c546b92593eda40ea041d3176`, three IQ3_XXS shards, and the self-contained Q8_0 MTP sidecar. Fixed 50/50 TP, Q8 K/V, context capacity 100096, batch/ubatch 1024/512, single-GPU draft on ROCm1, grouped expert reuse on, GPU feedback off, greedy seed 42, and `-lm dio` on both binaries. The exact expanded commands and all GGML/LLAMA/HIP environment overrides are recorded above. The prompt is the repository's `flake.nix`; its hash identifies the actual bytes.
 
 The target shards total about 82 GB on disk, not all GPU-resident. Known host PLE placement is part of fitting the two 32 GiB GPUs and 96 GB RAM; this is not a maximum-capacity test. Full target-weight hashing was interrupted to avoid disk contention; an incomplete `.sha256` file is not an identity check for all shards. Revision paths and shard sizes are recorded instead.
+
+## 2026-10-29 preserved Flash Next experiment comparison
+
+The preserved `flashnext-fast` binary was built from the 2026-10-25 experiment at `fdc8e5b65cd6120b2f89e509d5f354bda4a3a30b`. Its CLI/library hashes match the experiment's `source-manifest.json`; all 16 listed source file hashes still match. `ldd` resolves the executable's own `build-fast` libraries. Its Release/HIP compiler options match the accepted baseline build configuration. No rebuild or worktree edits were made.
+
+With the same Flash Next DIO command and environment as the preceding comparison, the accepted baseline measured **349.53 PP / 39.18 TG** and the preserved experiment measured **350.50 / 39.47 tok/s**. This is +0.3% PP and +0.7% TG in one run per binary, within the scale of single-run variation. Both runs exited 0 (34.01s baseline; 36.13s experiment), processed 2,097 prompt tokens and generated 128 tokens. Draft acceptance matched at 73/107 (0.68224), mean length 2.35. Normalized generated text matched exactly (529 characters; SHA256 `7c9cebe84420a20e67a9bca2bcca42e04e9b0498a3fa2c705fff16290cdfed8f`). The preserved experiment does not reproduce the newer candidate's PP drop.
+
+The full [commands](flashnext-fast-compare/commands.txt), [environment](flashnext-fast-compare/env.txt), [status and elapsed times](flashnext-fast-compare/status.txt), [raw stdout/stderr](flashnext-fast-compare/), [binary and loaded-library hashes](flashnext-fast-compare/binaries.sha256), [source manifest](flashnext-fast-compare/source-manifest.json), and [provenance](flashnext-fast-compare/provenance.txt) are archived. Prompt and model shard hashes are in the same directory. This is a single matched pair, not a repeated benchmark or a promotion claim.

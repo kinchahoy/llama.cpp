@@ -207,4 +207,3 @@ numbers land in `compiled_kernel_stats/`.
   one token. Bias and scale subgraphs, and every batch wider than one token, use
   the unfused path.
 - Q8_0 and MXFP4 are supported by the layout machinery.
-

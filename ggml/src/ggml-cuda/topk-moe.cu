@@ -432,7 +432,7 @@ static void launch_topk_moe_cuda(ggml_backend_cuda_context & ctx,
             ggml_cuda_kernel_launch(topk_moe_cuda<288, has_bias>, launch_params,
                 logits, weights, ids, bias, n_rows, n_expert_used, clamp_val, scale_val, config);
             break;
-        case 384: // DeepSeek-V4.1-Flash
+        case 384: // DeepSeek V4.1
             ggml_cuda_kernel_launch(topk_moe_cuda<384, has_bias>, launch_params,
                 logits, weights, ids, bias, n_rows, n_expert_used, clamp_val, scale_val, config);
             break;
