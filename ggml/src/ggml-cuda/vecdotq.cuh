@@ -40,18 +40,18 @@ static __device__ __forceinline__ int2 get_int_from_table_16(const int & q4, con
     const uint32_t q_odd  = (q4 >> 4);
 
     // Perform lookups in the lower half of the table (indices 0-7).
-    uint32_t v_even_low = __builtin_amdgcn_perm(values[1], values[0], q_even & 0x07070707);
-    uint32_t v_odd_low = __builtin_amdgcn_perm(values[1], values[0], q_odd & 0x07070707);
+    uint32_t v_even_low = ggml_hip_perm(values[1], values[0], q_even & 0x07070707);
+    uint32_t v_odd_low  = ggml_hip_perm(values[1], values[0], q_odd & 0x07070707);
 
     // Perform lookups in the upper half of the table (indices 8-15).
-    uint32_t v_even_high = __builtin_amdgcn_perm(values[3], values[2], q_even & 0x07070707);
-    uint32_t v_odd_high = __builtin_amdgcn_perm(values[3], values[2], q_odd & 0x07070707);
+    uint32_t v_even_high = ggml_hip_perm(values[3], values[2], q_even & 0x07070707);
+    uint32_t v_odd_high  = ggml_hip_perm(values[3], values[2], q_odd & 0x07070707);
 
     // Select between the low and high results based on the MSB of each index nibble.
     uint32_t mask_even = 0x03020100 | ((q_even & 0x08080808) >> 1);
-    uint32_t res_x = __builtin_amdgcn_perm(v_even_high, v_even_low, mask_even);
+    uint32_t res_x     = ggml_hip_perm(v_even_high, v_even_low, mask_even);
     uint32_t mask_odd = 0x03020100 | ((q_odd & 0x08080808) >> 1);
-    uint32_t res_y = __builtin_amdgcn_perm(v_odd_high, v_odd_low, mask_odd);
+    uint32_t res_y     = ggml_hip_perm(v_odd_high, v_odd_low, mask_odd);
 
     return make_int2(res_x, res_y);
 #elif !defined(GGML_USE_MUSA)
@@ -720,10 +720,10 @@ static __device__ __forceinline__ float vec_dot_q1_0_q8_1(
         const uint32_t q2_indices = (q2_bits & 0x01) | ((q2_bits & 0x02) << 7) | ((q2_bits & 0x04) << 14) | ((q2_bits & 0x08) << 21);
         const uint32_t q3_indices = (q3_bits & 0x01) | ((q3_bits & 0x02) << 7) | ((q3_bits & 0x04) << 14) | ((q3_bits & 0x08) << 21);
 
-        const int v0 = __builtin_amdgcn_perm(0x000001FF, 0x000001FF, q0_indices);
-        const int v1 = __builtin_amdgcn_perm(0x000001FF, 0x000001FF, q1_indices);
-        const int v2 = __builtin_amdgcn_perm(0x000001FF, 0x000001FF, q2_indices);
-        const int v3 = __builtin_amdgcn_perm(0x000001FF, 0x000001FF, q3_indices);
+        const int v0 = ggml_hip_perm(0x000001FF, 0x000001FF, q0_indices);
+        const int v1 = ggml_hip_perm(0x000001FF, 0x000001FF, q1_indices);
+        const int v2 = ggml_hip_perm(0x000001FF, 0x000001FF, q2_indices);
+        const int v3 = ggml_hip_perm(0x000001FF, 0x000001FF, q3_indices);
 #else
         // unpack crumbs into nibble indices
         const int n0 = __byte_perm(0x11100100, 0x11100100, q >> 0); // [0, 1, 4, 5] [ 8,  9, 12, 13]
@@ -777,8 +777,8 @@ static __device__ __forceinline__ float vec_dot_q2_0_q8_1(
         const uint32_t qx_indices = (q & 0x03) | ((q & 0x0C) << 6) | ((q & 0x30) << 12) | ((q & 0xC0) << 18);
         const uint32_t qy_bits    = q >> 8;
         const uint32_t qy_indices = (qy_bits & 0x03) | ((qy_bits & 0x0C) << 6) | ((qy_bits & 0x30) << 12) | ((qy_bits & 0xC0) << 18);
-        const int qx = __builtin_amdgcn_perm(0x020100FF, 0x020100FF, qx_indices);
-        const int qy = __builtin_amdgcn_perm(0x020100FF, 0x020100FF, qy_indices);
+        const int      qx         = ggml_hip_perm(0x020100FF, 0x020100FF, qx_indices);
+        const int      qy         = ggml_hip_perm(0x020100FF, 0x020100FF, qy_indices);
 #else
         // unpack even and odd crumbs into byte values
         const int qe = __byte_perm(0x020100FF, 0x020100FF, q >> 0);
@@ -1232,6 +1232,13 @@ static __device__ __forceinline__ float vec_dot_iq2_s_q8_1(
 #define VDR_IQ3_XXS_Q8_1_MMVQ 2
 #define VDR_IQ3_XXS_Q8_1_MMQ  2
 
+#if defined(GGML_USE_HIP) && defined(__gfx906__)
+static __device__ __forceinline__ uint32_t iq3_xxs_sign_mask(const uint32_t signs) {
+    const uint32_t bits = __umul24(signs & 0x0f, 0x00204081) & 0x01010101;
+    return (bits << 8) - bits;
+}
+#endif
+
 static __device__ __forceinline__ float vec_dot_iq3_xxs_q8_1(
     const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
 
@@ -1247,6 +1254,17 @@ static __device__ __forceinline__ float vec_dot_iq3_xxs_q8_1(
         const int2 grid_pos = make_int2(iq3xxs_grid[q3[l0 + 0]], iq3xxs_grid[q3[l0 + 1]]);
         const uint32_t signs = unpack_ksigns(aux32 >> (7*l0/2));
 
+#if defined(GGML_USE_HIP) && defined(__gfx906__)
+        const uint32_t signs0 = iq3_xxs_sign_mask(signs);
+        const uint32_t signs1 = iq3_xxs_sign_mask(signs >> 4);
+        const int u0 = get_int_b4(bq8_1[iqs/2].qs, l0 + 0);
+        const int u1 = get_int_b4(bq8_1[iqs/2].qs, l0 + 1);
+
+        sumi = ggml_cuda_dp4a(grid_pos.x ^ signs0, u0, sumi);
+        sumi = ggml_cuda_dp4a(grid_pos.y ^ signs1, u1, sumi);
+        sumi -= ggml_cuda_dp4a(signs0, u0, ggml_cuda_dp4a(signs1, u1, 0));
+#else
+
         const int signs0 = __vcmpne4(signs & 0x08040201, 0);
         const int grid_l = __vsub4(grid_pos.x ^ signs0, signs0);
 
@@ -1259,6 +1277,7 @@ static __device__ __forceinline__ float vec_dot_iq3_xxs_q8_1(
 
         sumi = ggml_cuda_dp4a(grid_l, u0, sumi);
         sumi = ggml_cuda_dp4a(grid_h, u1, sumi);
+#endif
     }
 
     const int ls = aux32 >> 28;

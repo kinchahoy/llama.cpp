@@ -274,15 +274,23 @@ static __global__ void flash_attn_ext_vec(
 
 #pragma unroll
             for (int j = 0; j < ncols; ++j) {
-                float sum = vec_dot_KQ(K + i_KQ*nb11, Q_reg[j], Q_i32[j], Q_ds[j]);
-                sum = warp_reduce_sum<nthreads_KQ>(sum);
-
-                if (use_logit_softcap) {
-                    sum = logit_softcap*tanhf(sum);
+                float mask_value = 0.0f;
+                if (mask && (ncols == 1 || ic0 + j < int(ne01.z))) {
+                    mask_value = slope*__half2float(maskh[j*s31 + i_KQ]);
                 }
 
-                if (mask && (ncols == 1 || ic0 + j < int(ne01.z))) {
-                    sum += slope*__half2float(maskh[j*s31 + i_KQ]);
+                float sum;
+                if (mask_value == -INFINITY) {
+                    sum = -INFINITY;
+                } else {
+                    sum = vec_dot_KQ(K + i_KQ*nb11, Q_reg[j], Q_i32[j], Q_ds[j]);
+                    sum = warp_reduce_sum<nthreads_KQ>(sum);
+
+                    if (use_logit_softcap) {
+                        sum = logit_softcap*tanhf(sum);
+                    }
+
+                    sum += mask_value;
                 }
 
                 KQ_max_new[j] = fmaxf(KQ_max_new[j], sum + FATTN_KQ_MAX_OFFSET);
@@ -321,7 +329,7 @@ static __global__ void flash_attn_ext_vec(
 #endif // V_DOT2_F32_F16_AVAILABLE
         }
 
-        ggml_cuda_syncwarp();
+        ggml_cuda_syncwarp(); // Needed for KQ synchronization.
 
 #pragma unroll
         for (int k0 = 0; k0 < WARP_SIZE; k0 += V_cols_per_iter) {
@@ -362,6 +370,16 @@ static __global__ void flash_attn_ext_vec(
             for (int j = 0; j < ncols; ++j) {
                 KQ_k[j] = KQ[j*nthreads + k];
             }
+
+            bool any_weight = false;
+#pragma unroll
+            for (int j = 0; j < ncols; ++j) {
+                any_weight = any_weight || KQ_k[j] != 0.0f;
+            }
+            if (!any_weight) {
+                continue;
+            }
+
 #pragma unroll
             for (int i_VKQ_0 = 0; i_VKQ_0 < D/2; i_VKQ_0 += nthreads_V*V_rows_per_thread/2) {
                 float2 tmp[V_rows_per_thread/2];
@@ -378,6 +396,8 @@ static __global__ void flash_attn_ext_vec(
             }
 #endif // V_DOT2_F32_F16_AVAILABLE
         }
+
+        ggml_cuda_syncwarp(); // Needed for KQ synchronization.
     }
 
     if (sinks && blockIdx.y == 0) {

@@ -8,14 +8,6 @@
 #include <stdexcept>
 #include <string>
 
-static float dsv4_rope_attn_factor(float freq_scale, float ext_factor) {
-    if (ext_factor == 0.0f) {
-        return 1.0f;
-    }
-
-    return 1.0f / (1.0f + 0.1f*logf(1.0f/freq_scale));
-}
-
 void llama_model_deepseek4::load_arch_hparams(llama_model_loader & ml) {
     if (hparams.n_layer_nextn > 0) {
         const uint32_t n_layer_main = hparams.n_layer_all - hparams.n_layer_nextn;
@@ -368,8 +360,23 @@ ggml_tensor * llama_model_deepseek4::graph::build_hc_pre(
         ggml_tensor ** comb,
         int il,
         ggml_tensor ** pre_out,
-        ggml_tensor  * mix_in,
-        bool           collapse) const {
+        ggml_tensor * mix_in,
+        bool collapse) const {
+    ggml_tensor * pre = build_hc_mixes(x, hc_fn, hc_scale, hc_base, post, comb, false, il);
+    if (pre_out) *pre_out = pre;
+    if (!collapse) return nullptr;
+    return build_hc_pre(x, mix_in ? mix_in : pre, il);
+}
+
+ggml_tensor * llama_model_deepseek4::graph::build_hc_mixes(
+        ggml_tensor * x,
+        ggml_tensor * hc_fn,
+        ggml_tensor * hc_scale,
+        ggml_tensor * hc_base,
+        ggml_tensor ** post,
+        ggml_tensor ** comb,
+        bool f32_src,
+        int il) const {
     const int64_t hc         = hparams.dsv4_hc_mult;
     const int64_t hc_dim     = hc*n_embd;
     const int64_t hc_mix_dim = (2 + hc)*hc;
@@ -381,6 +388,10 @@ ggml_tensor * llama_model_deepseek4::graph::build_hc_pre(
     ggml_tensor * flat = ggml_reshape_2d(ctx0, x, hc_dim, nt);
     ggml_tensor * flat_norm = ggml_rms_norm(ctx0, flat, norm_rms_eps);
     ggml_tensor * mixes = ggml_mul_mat(ctx0, hc_fn, flat_norm);
+    if (f32_src && !ggml_is_quantized(hc_fn->type)) {
+        // F32 weights (model.py hc_pre runs in fp32): request F32 inputs, the mixes are near-tie sensitive
+        ggml_prec_set_src(mixes, GGML_PREC_F32, 1);
+    }
     cb(mixes, "hc_mixes", il);
 
     ggml_tensor * scale_pre  = dsv4_view_1d(ctx0, hc_scale, 1, 0);
@@ -394,10 +405,6 @@ ggml_tensor * llama_model_deepseek4::graph::build_hc_pre(
     pre = ggml_sigmoid(ctx0, pre);
     pre = ggml_scale_bias(ctx0, pre, 1.0f, hparams.dsv4_hc_eps);
     cb(pre, "hc_pre", il);
-
-    if (pre_out) {
-        *pre_out = pre;
-    }
 
     *post = dsv4_view_2d(ctx0, mixes, hc, nt, hc);
     *post = dsv4_hc_affine(ctx0, *post, scale_post, base_post);
@@ -420,16 +427,7 @@ ggml_tensor * llama_model_deepseek4::graph::build_hc_pre(
     }
     cb(*comb, "hc_comb", il);
 
-    // V4 collapses with the mix this sublayer just computed.
-    // V4.1 hands its coefficients to the NEXT sublayer instead - attention uses the previous block's ffn mix, the FFN uses this block's attention mix - so the caller passes the carried one.
-    // A caller that replaces the collapse with its own selection (V4.1 layer 0, which has no carried mix yet) must not get a mix built here.
-    // A built but unused mix registers a fused node that no backend is ever assigned.
-    // The fusion probe then reads that as missing support and disables the fused hc_pre for every layer.
-    if (!collapse) {
-        return nullptr;
-    }
-    ggml_tensor * result = build_hc_pre(x, mix_in ? mix_in : pre, il);
-    return result;
+    return pre;
 }
 
 ggml_tensor * llama_model_deepseek4::graph::build_hc_post(
@@ -708,6 +706,13 @@ ggml_tensor * llama_model_deepseek4::graph::build_top_k_mask(
         int il) const {
     GGML_ASSERT(kq_mask);
     GGML_ASSERT(top_k);
+
+    if (cparams.fused_top_k_mask) {
+        ggml_tensor * kq_mask_top_k = build_fused_top_k_mask(kq_mask, top_k, nullptr, nullptr, nullptr, nullptr, il);
+        cb(kq_mask_top_k, name, il);
+
+        return kq_mask_top_k;
+    }
 
     ggml_tensor * kq_mask_all = ggml_fill(ctx0, kq_mask, -INFINITY);
     kq_mask_all = ggml_view_4d(ctx0, kq_mask_all, 1, kq_mask_all->ne[0], kq_mask_all->ne[1], kq_mask_all->ne[3],
@@ -1312,24 +1317,6 @@ llama_model_deepseek4::graph::graph(const llama_model & model, const llm_graph_p
     const bool hc_shift = model.hc_head_fn == nullptr;
     ggml_tensor * carry_pre = nullptr;
 
-    // LLAMA_DSV41_NO_ENGRAM=1 skips the engram contribution, to tell a broken gate from a broken stack.
-    // The flag is read here rather than inside the loop because an input that no consumer reads is still expanded, and an expanded input with no buffer aborts at load.
-    static const bool engram_off = [] {
-        const char * e = getenv("LLAMA_DSV41_NO_ENGRAM");
-        const bool off = e != nullptr && atoi(e) != 0;
-        if (off) {
-            LLAMA_LOG_WARN("deepseek41: LLAMA_DSV41_NO_ENGRAM=1, engram disabled\n");
-        }
-        return off;
-    }();
-
-    // one row index per hash column per table, hashed host side from the token history
-    ggml_tensor * inp_engram = nullptr;
-    if (hparams.engram_n_layers > 0 && !engram_off) {
-        inp_engram = build_inp_engram(model);
-        ggml_build_forward_expand(gf, inp_engram);
-    }
-
     for (int il = 0; il < n_layer; ++il) {
         if ((size_t) il < cparams.embeddings_layer_inp.size() && cparams.embeddings_layer_inp[il]) {
             res->t_layer_inp[il] = build_hc_mean(inpL);
@@ -1338,12 +1325,6 @@ llama_model_deepseek4::graph::graph(const llama_model & model, const llm_graph_p
             // the dependency chain in a different DFS order than the natural build
             // and interleaves every device boundary, adding 2 sched splits per
             // boundary under -sm layer (measured 65 vs 51 splits)
-        }
-
-        // the engram writes into the residual before the block body, so the whole layer sees it.
-        if (!engram_off && model.layers[il].engram_embed) {
-            inpL = build_engram(model, inpL, inp_engram, il);
-            cb(inpL, "engram_out", il);
         }
 
         ggml_tensor * residual = inpL;
