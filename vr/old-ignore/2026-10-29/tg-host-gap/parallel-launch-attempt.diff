@@ -1,0 +1,53 @@
+diff --git a/ggml/src/ggml-backend-meta.cpp b/ggml/src/ggml-backend-meta.cpp
+index c68db50ec..6d8fb534c 100644
+--- a/ggml/src/ggml-backend-meta.cpp
++++ b/ggml/src/ggml-backend-meta.cpp
+@@ -2298,6 +2298,8 @@ struct ggml_backend_meta_lane_dispatcher {
+     struct job {
+         ggml_backend_t backend = nullptr;
+         ggml_cgraph *  cgraph  = nullptr;
++        void *         exec    = nullptr; // token graph replay, used instead of cgraph
++        void         (*launch)(ggml_backend_t, void *) = nullptr;
+         ggml_status    status  = GGML_STATUS_SUCCESS;
+     };
+ 
+@@ -2370,7 +2372,9 @@ struct ggml_backend_meta_lane_dispatcher {
+                         return;
+                     }
+                     job & jb = jobs[w];
+-                    if (jb.cgraph != nullptr) {
++                    if (jb.launch != nullptr) {
++                        jb.launch(jb.backend, jb.exec);
++                    } else if (jb.cgraph != nullptr) {
+                         jb.status = ggml_backend_graph_compute_async(jb.backend, jb.cgraph);
+                     }
+                     if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+@@ -2411,6 +2415,7 @@ struct ggml_backend_meta_lane_dispatcher {
+                 ret = jb.status;
+             }
+             jb.cgraph = nullptr;
++            jb.launch = nullptr;
+             jb.status = GGML_STATUS_SUCCESS;
+         }
+         return ret;
+@@ -3761,10 +3766,18 @@ static enum ggml_status ggml_backend_meta_graph_compute(ggml_backend_t backend,
+                 if (!ready) { break; }
+             }
+             if (ready) {
++                // hipGraphLaunch blocks the host for about 1 ms, so launch lanes 1.. on the workers
+                 for (const auto & r : tge->runs) {
+-                    for (size_t k = 0; k < n_backends; k++) {
+-                        backend_ctx->tg_graph_launch(backend_ctx->backend_configs[k].backend, r.exec[k]);
++                    auto & disp = backend_ctx->dispatcher;
++                    for (size_t k = 1; k < n_backends; k++) {
++                        auto & jb  = disp.jobs[k - 1];
++                        jb.backend = backend_ctx->backend_configs[k].backend;
++                        jb.exec    = r.exec[k];
++                        jb.launch  = backend_ctx->tg_graph_launch;
+                     }
++                    disp.dispatch_async();
++                    backend_ctx->tg_graph_launch(backend_ctx->backend_configs[0].backend, r.exec[0]);
++                    disp.join();
+                 }
+                 if (tge->covered >= backend_ctx->n_subgraphs) {
+                     return GGML_STATUS_SUCCESS;

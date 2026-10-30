@@ -1,0 +1,8 @@
+# N1 notes
+- Step1 (baseline-equivalent instrumented build): DFlash5 draft ctx: 273 graph builds, 0 reused (build+sched alloc 0.36 ms each, 98 ms total over run) -> rebuild itself is cheap. Target ctx reuses 130.
+- Draft is NOT on the meta backend here: it runs on ROCm0 as a plain single-device ctx (speculative.cpp ~3425), so meta tg_lookup/uid is irrelevant; replay is via ggml-cuda HIP graphs (uid or node-props compare, key = nodes[0],n_nodes,ne1).
+- rocprofv3 (base, d5): thread 302383 (draft) 17400 hipLaunchKernel, 129 hipStreamBeginCapture/hipGraphInstantiate, only 387 hipGraphLaunch: HIP graph is re-captured about every step, not replayed. So draft node properties change every call; investigating why (N1_DBG print in ggml_cuda_graph_update_required).
+- Instrumentation (n1-results/instrumentation.patch, reverted in tree): N1_DBG2 per-call log in ggml_backend_cuda_graph_compute (dev0, draft generate graph n=691 nodes): 67 calls warm=1 use=1 upd=0 (HIP graph replay), only 2 re-captures, 2 warmups. Inject graph (n=58) also replays. Node props are stable across rebuilds (2 prop changes in 256 tokens).
+- The 129 captures / 17400 hipLaunchKernel in the trace come from the meta target lanes (small per-subgraph graphs), not the draft.
+- Cost of the rebuild: 273 builds * 0.36 ms (reset+build_graph+sched alloc) = 98 ms over a 512-token run (~8.5 s) = ~1.1%. Upper bound of N1 gain about 1% (<=0.7 ms/step of ~80 ms), noise is 1-3 t/s. Two sched allocations would double the draft compute buffer for that.
+- Decision: mechanism NOT confirmed as described (stale since the draft moved to a single device with HIP-graph prop-compare reuse); no fix implemented. Baseline d5 TG: 57.3 (mx-final build-rb), 60.1 (instrumented tree, text identical).

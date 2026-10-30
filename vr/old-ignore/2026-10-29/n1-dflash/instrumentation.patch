@@ -1,0 +1,61 @@
+diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
+index 198a73e16..96cd28f41 100644
+--- a/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -3513,6 +3513,7 @@ static bool ggml_cuda_graph_update_required(ggml_backend_cuda_context * cuda_ctx
+         }
+ 
+         if (res || memcmp(&graph->node_props[i], &prop, sizeof(prop)) != 0) {
++            if (!res && getenv("N1_DBG")) { auto & o = graph->node_props[i]; fprintf(stderr, "N1 prop change n=%d i=%d op=%s %s ne1 %ld->%ld data %d src_ptr %d\n", cgraph->n_nodes, i, ggml_op_name(cgraph->nodes[i]->op), cgraph->nodes[i]->name, (long) o.node.ne[1], (long) prop.node.ne[1], o.node.data != prop.node.data, memcmp(o.node_src_data_ptrs, prop.node_src_data_ptrs, sizeof(o.node_src_data_ptrs)) != 0); }
+             graph->node_props[i] = prop;
+             res = true;
+         }
+@@ -5765,6 +5766,7 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend,
+     }
+ #endif // USE_CUDA_GRAPH
+ 
++    if (getenv("N1_DBG2")) { fprintf(stderr, "N1 call dev=%d n=%d en=%d unst=%d warm=%d use=%d upd=%d\n", cuda_ctx->device, cgraph->n_nodes, (int) graph->is_enabled(), (int) graph->unstable_disabled, (int) graph->warmup_complete, (int) use_cuda_graph, (int) cuda_graph_update_required); }
+     if (use_cuda_graph && cuda_graph_update_required) {
+         // Start CUDA graph capture
+         {
+diff --git a/src/llama-context.cpp b/src/llama-context.cpp
+index 21994b7fd..0ab0588a4 100644
+--- a/src/llama-context.cpp
++++ b/src/llama-context.cpp
+@@ -621,6 +621,9 @@ llama_context::llama_context(
+ }
+ 
+ llama_context::~llama_context() {
++    if (getenv("LLAMA_GRAPH_STATS")) {
++        fprintf(stderr, "graph_stats ctx=%p reused=%d builds=%d build_ms=%.1f\n", (void *) this, n_reused, dbg_n_build, dbg_t_build/1000.0);
++    }
+     // wait for any pending asynchronous copies into the output buffers before they are freed
+     synchronize();
+ 
+@@ -1850,6 +1853,7 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
+ 
+         gf_res_prev_active = nullptr;
+         res->reset();
++        const int64_t t_b0 = ggml_time_us();
+ 
+         ggml_backend_sched_reset(sched.get());
+         ggml_backend_sched_set_eval_callback(sched.get(), cparams.cb_eval, cparams.cb_eval_user_data);
+@@ -1873,6 +1877,7 @@ llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, ll
+         }
+ 
+         gf_res_prev_active = res;
++        dbg_n_build++; dbg_t_build += ggml_time_us() - t_b0;
+     }
+ 
+     // set the input data for the input tensors
+diff --git a/src/llama-context.h b/src/llama-context.h
+index 2ed66edd4..0385ceec1 100644
+--- a/src/llama-context.h
++++ b/src/llama-context.h
+@@ -523,5 +523,6 @@ private:
+     mutable int32_t n_p_eval = 0; // number of tokens in eval calls for the prompt (with batch size > 1)
+     mutable int32_t n_eval   = 0; // number of eval calls
+ 
++    int dbg_n_build = 0; int64_t dbg_t_build = 0;
+     mutable int32_t n_reused = 0; // number of times the previous graph was reused
+ };
