@@ -1,6 +1,6 @@
 # Fork rebuild on upstream 36a0e2ffc (2026-10-29)
 
-The fork rebuilt as clean upstream `36a0e2ffc` plus a smaller overlay. Each patch is cumulative and applies on its own to `36a0e2ffc` (`git apply --index`). Progress notes are in [../2026-10-29-rebuild-status.md](../2026-10-29-rebuild-status.md).
+The fork rebuilt as clean upstream `36a0e2ffc` plus a smaller overlay. Each patch is cumulative and applies on its own to `36a0e2ffc` (`git apply --index`). Progress notes are in [status-log.md](status-log.md).
 
 | Stage | Patch | Added / removed lines vs upstream | Files |
 | --- | --- | ---: | ---: |
@@ -11,7 +11,7 @@ The fork rebuilt as clean upstream `36a0e2ffc` plus a smaller overlay. Each patc
 
 ## Results
 
-Two gfx906, `-sm tensor`, `scripts/bench_stage.sh` (r2) and `scripts/fn_reps.sh` (Flash Next r5). All builds use `scripts/configure_stage.sh`, which matches the build-ilp flags (`-mllvm -amdgpu-sched-strategy=max-ilp`, CXX `-O3`). A build without these flags is about 2-3% slower on 27B.
+Two gfx906, `-sm tensor`, `vr/scripts/bench_stage.sh` (r2) and `vr/scripts/fn_reps.sh` (Flash Next r5). All builds use `vr/scripts/configure_stage.sh`, which matches the build-ilp flags (`-mllvm -amdgpu-sched-strategy=max-ilp`, CXX `-O3`). A build without these flags is about 2-3% slower on 27B.
 
 | Stage | 27B Q8_0 PP2048 | 27B TG128 | Flash Next PP2048 | Flash Next TG128 | FN r5 PP / TG |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -21,9 +21,9 @@ Two gfx906, `-sm tensor`, `scripts/bench_stage.sh` (r2) and `scripts/fn_reps.sh`
 | C | 685.60 | 36.58 | 520.22 | 36.93 +- 2.78 | 516.4 +- 8.0 / 38.79 |
 | D | 685.34 | 36.67 | 527.63 | 39.09 | 520.1 +- 7.3 / 39.26 |
 
-Greedy output (`scripts/output_check.sh`, 96 tokens) is byte-identical across B, C and D for both models (`out/`).
+Greedy output (`vr/scripts/output_check.sh`, 96 tokens) is byte-identical across B, C and D for both models (`out/`).
 
-Speculative decoding on D, one `llama-cli` run each (`scripts/mtp_check.sh`, flake.nix prompt, 512 outputs): 27B plain 36.2, MTP2 60.7, MTP3 58.0 TG; Flash Next plain 37.2, MTP2 49.6, MTP3 44.5 TG (Q8_0 MTP sidecar). MTP text diverges from plain after about 1.6-2.0 KB of output. Details: [PERFORMANCE.md](../PERFORMANCE.md#speculative-decoding-on-d-one-run-each).
+Speculative decoding on D, one `llama-cli` run each (`vr/scripts/mtp_check.sh`, flake.nix prompt, 512 outputs): 27B plain 36.2, MTP2 60.7, MTP3 58.0 TG; Flash Next plain 37.2, MTP2 49.6, MTP3 44.5 TG (Q8_0 MTP sidecar). MTP text diverges from plain after about 1.6-2.0 KB of output. Details: [PERFORMANCE.md](../../../PERFORMANCE.md#speculative-decoding-on-d-one-run-each).
 
 ## What D drops
 

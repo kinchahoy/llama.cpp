@@ -1,6 +1,6 @@
 # gfx906 guide
 
-Local enhancements for two 32 GiB gfx906 GPUs (MI50/MI60), primarily tested with Qwen3.8-27B Q8_0. Built on [MX](https://github.com/mixa3607/mx-llama.cpp) and [iacopPBK's gfx906 work](https://github.com/iacopPBK/llama.cpp-gfx906); see [credits](IMPROVEMENTS.md#built-on). The active overlay targets official llama.cpp `36a0e2ffc0b352b774f8d71c43668b75b3061ef5` (upstream master on 2026-10-29). It is stage D of the [2026-10-29 rebuild](rebuild-2026-10-29/README.md): upstream plus cleanup and fixes, without pipeline stages, and with DeepSeek V4/V4.1, MiniMax-M2 and MiMo-2 back on upstream code. Source snapshots and benchmark identities are recorded in the performance reports.
+Local enhancements for two 32 GiB gfx906 GPUs (MI50/MI60), primarily tested with Qwen3.8-27B Q8_0. Built on [MX](https://github.com/mixa3607/mx-llama.cpp) and [iacopPBK's gfx906 work](https://github.com/iacopPBK/llama.cpp-gfx906); see [credits](IMPROVEMENTS.md#built-on). The active overlay targets official llama.cpp `36a0e2ffc0b352b774f8d71c43668b75b3061ef5` (upstream master on 2026-10-29). It is stage D of the [2026-10-29 rebuild](old-ignore/2026-10-29/rebuild/README.md): upstream plus cleanup and fixes, without pipeline stages, and with DeepSeek V4/V4.1, MiniMax-M2 and MiMo-2 back on upstream code. Source snapshots and benchmark identities are recorded in the performance reports.
 
 | Guide | Purpose |
 | --- | --- |
@@ -8,10 +8,10 @@ Local enhancements for two 32 GiB gfx906 GPUs (MI50/MI60), primarily tested with
 | [Performance](PERFORMANCE.md) | Representative measurements and their limits |
 | [Catch up](how-to-catchup.md) | Merge upstream, validate briefly, and refresh patches |
 | [Current patch kit](patches/llama-head-36a0e2ffc/README.md) | Replayable overlay for the `36a0e2ffc` base |
-| [Rebuild record, 2026-10-29](rebuild-2026-10-29/README.md) | Stages A-D, cumulative patches, results and what was dropped |
-| [Previous patch kit](patches/llama-head-418f905a4/README.md) | Historical overlay for the old `418f905a4` base |
+| [Rebuild record, 2026-10-29](old-ignore/2026-10-29/rebuild/README.md) | Stages A-D, cumulative patches, results, status log and what was dropped |
+| [Benchmark scripts](scripts/README.md) | Build flags, llama-bench, output and MTP checks used for the rebuild |
+| [Previous patch kit](old-ignore/2026-10-29/patches/llama-head-418f905a4/README.md) | Historical overlay for the old `418f905a4` base |
 | [Historical records](old-ignore/README.md) | Dated benchmarks, experiments, and superseded workflows |
-| [Rebuild status, 2026-10-29](2026-10-29-rebuild-status.md) | Crash-safe log for the clean-upstream rebuild |
 
 ## Priorities and separate work
 

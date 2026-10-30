@@ -31,7 +31,7 @@ The active code also accepts the narrow IQ2_S single-token expert path described
 
 ## 2026-10-29 rebuild: removed and changed
 
-The fork was rebuilt on upstream `36a0e2ffc` as stages B-D. Each stage matched the old master on 27B Q8_0 and Flash Next PP/TG, and greedy output was identical across B, C and D. Details and numbers are in the [rebuild record](rebuild-2026-10-29/README.md).
+The fork was rebuilt on upstream `36a0e2ffc` as stages B-D. Each stage matched the old master on 27B Q8_0 and Flash Next PP/TG, and greedy output was identical across B, C and D. Details and numbers are in the [rebuild record](old-ignore/2026-10-29/rebuild/README.md).
 
 Removed:
 - Multi-stage TP / pipeline stages (`-tps`, `--tensor-parallel-size`, `-tpsd`). They were unused on two GPUs. To restore, start from mx-llama commit `77ffa6093` ([mixa3607/mx-llama.cpp](https://github.com/mixa3607/mx-llama.cpp)).

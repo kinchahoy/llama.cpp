@@ -1,5 +1,7 @@
 # 2026-10-29 rebuild status log
 
+Note: section times after 19:45 were written as estimates and run ahead of the clock. Result file timestamps are authoritative: D llama-bench 20:01-20:02, D MTP runs 20:29-20:30.
+
 Goal: rebuild the fork as clean upstream (36a0e2ffc) + only valuable features, as patch files in vr/. Three passes, perf after each: A = current master, B = pass 1 (cleanup + fixes), C = pass 2 (pipeline stages removed), D = pass 3 (DSV4/MiniMax/MiMo extensions removed, HIP gating).
 
 - Worktree: /home/raistlin/infer/mx-rebuild, branch rebuild/gfx906 (uncommitted, staged overlay + edits). master untouched.

@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[2]
+REPO = HERE.parents[4]
 DEFAULT_BASE = "418f905a4efe910d2a75636bbe65d48eca38790a"
 DEFAULT_MID = "342d4ab70e1b6042f36beaba46ea924921b65ad0"
 DEFAULT_TARGET = "fb7da801711c102d7d6bebec3b35c2f5030d3769"

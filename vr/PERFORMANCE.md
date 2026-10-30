@@ -1,5 +1,28 @@
 # Performance evidence
 
+## Current numbers
+
+Measured source: runtime tree `3875d3850b45825cc12d5aecb22487b7377ad598` (official `36a0e2ffc` plus the [current kit](patches/llama-head-36a0e2ffc/README.md)), which is the runtime content of master commit `f5031e739`. Build: `scripts/configure_stage.sh` flags, TheRock ROCm on two gfx906 (MI60 + MI50).
+
+| Model | Mode | PP2048 | TG | Measured (PDT) | Source |
+| --- | --- | ---: | ---: | --- | --- |
+| Qwen3.8-27B Q8_0 | plain, llama-bench | 685.3 | 36.7 | 2026-10-29 20:01 | [rebuild table](#2026-10-29-rebuild-on-official-36a0e2ffc) |
+| Qwen3.8-27B Q8_0 | MTP2, llama-cli | - | 60.7 | 2026-10-29 20:29 | [speculative runs](#speculative-decoding-on-d-one-run-each) |
+| Qwen3.8 Flash Next IQ3_XXS | plain, llama-bench | 527.6 | 39.1 | 2026-10-29 20:01 | [rebuild table](#2026-10-29-rebuild-on-official-36a0e2ffc) |
+| Qwen3.8 Flash Next IQ3_XXS | MTP2, llama-cli | - | 49.6 | 2026-10-29 20:29 | [speculative runs](#speculative-decoding-on-d-one-run-each) |
+
+These numbers are out of date once the runtime source changes. Check with:
+
+```sh
+git diff --quiet 3875d3850b45825cc12d5aecb22487b7377ad598 HEAD -- . ':!vr' ':!AGENTS.md' ':!CLAUDE.md' ':!README.md' && echo current || echo stale
+```
+
+A new toolchain, driver or model revision also makes them stale, even if the check prints `current`. When re-measuring, update the tree id, commit, dates and rows here and add the full run as a new dated section below.
+
+Against official llama.cpp with the same build flags: +53% 27B PP, +12% 27B TG, +74% Flash Next PP, no Flash Next plain TG gain. Why Flash Next decodes no faster than dense 27B: [time breakdown](#2026-10-29-why-flash-next-is-not-faster-than-dense-27b). Open improvement ideas: the Flash Next priorities, A1-A7, N1-N3 and the [expert parallelism assessment](#2026-10-29-expert-parallelism-assessment-a5) below. The sections after this one are dated records, oldest first.
+
+## Historical records
+
 Recorded results on two gfx906 GPUs. PP is prompt processing and TG is token generation, in tokens/s. These are historical measurements, not current regression-test results. Compare only matched workloads and runtime builds.
 
 | Date and workload | Setting | PP / TG | Recorded source identity |
@@ -158,7 +181,7 @@ Separate upstream candidate: changing upstream's GCN Q8_0 MMQ rows from 256 to 5
 
 ## 2026-10-29 rebuild on official 36a0e2ffc
 
-Matched llama-bench on two gfx906, `-sm tensor`, 50/50 split, FA on. 27B: Qwen3.8-27B Q8_0, batch/ubatch 2048, PP2048/TG128, r2. Flash Next: UD-IQ3_XXS, Q8_0 KV, batch/ubatch 1024/512, PP2048/TG128, r2, plus a separate r5 run. A is the old master on 418f905a4; B-D are the rebuild stages on 36a0e2ffc. All builds use `-mllvm -amdgpu-sched-strategy=max-ilp` and CXX `-O3`; a build without these flags measured about 2-3% lower on 27B. Stage details, scripts and raw JSON: [rebuild record](rebuild-2026-10-29/README.md).
+Matched llama-bench on two gfx906, `-sm tensor`, 50/50 split, FA on. 27B: Qwen3.8-27B Q8_0, batch/ubatch 2048, PP2048/TG128, r2. Flash Next: UD-IQ3_XXS, Q8_0 KV, batch/ubatch 1024/512, PP2048/TG128, r2, plus a separate r5 run. A is the old master on 418f905a4; B-D are the rebuild stages on 36a0e2ffc. All builds use `-mllvm -amdgpu-sched-strategy=max-ilp` and CXX `-O3`; a build without these flags measured about 2-3% lower on 27B. Stage details, scripts and raw JSON: [rebuild record](old-ignore/2026-10-29/rebuild/README.md).
 
 | Stage | 27B PP2048 | 27B TG128 | Flash Next PP2048 | Flash Next TG128 | Flash Next r5 PP / TG |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -174,7 +197,7 @@ Against official 36a0e2ffc built with the same flags, D gains +53% 27B PP, +12% 
 
 ### Speculative decoding on D (one run each)
 
-`llama-cli` from the D build, greedy, `flake.nix` prompt (about 2K tokens), 512 output tokens, context 16384, `-sm tensor`, FA on. 27B: batch/ubatch 2048. Flash Next: batch/ubatch 1024/512, Q8_0 KV, self-contained `mtp-Qwen3.8-Flash-Next-Q8_0.gguf` sidecar via `-md`. MTP runs use `--spec-type draft-mtp --spec-draft-n-max N --spec-draft-backend-sampling`. Speeds are the CLI's own prompt/generation summary. Script: [mtp_check.sh](rebuild-2026-10-29/scripts/mtp_check.sh); outputs in `rebuild-2026-10-29/out/mtp/`.
+`llama-cli` from the D build, greedy, `flake.nix` prompt (about 2K tokens), 512 output tokens, context 16384, `-sm tensor`, FA on. 27B: batch/ubatch 2048. Flash Next: batch/ubatch 1024/512, Q8_0 KV, self-contained `mtp-Qwen3.8-Flash-Next-Q8_0.gguf` sidecar via `-md`. MTP runs use `--spec-type draft-mtp --spec-draft-n-max N --spec-draft-backend-sampling`. Speeds are the CLI's own prompt/generation summary. Script: [mtp_check.sh](scripts/mtp_check.sh); outputs in `old-ignore/2026-10-29/rebuild/out/mtp/`.
 
 | Model | Mode | Prompt t/s | Generation t/s | vs plain TG |
 | --- | --- | ---: | ---: | ---: |
