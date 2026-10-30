@@ -1,0 +1,43 @@
+0.00.031.519 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.033.058 W srv  server_setup: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.036.688 I srv    load_model: loading model '/home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-27B-GGUF/snapshots/4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-Q8_0.gguf'
+0.00.037.681 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+0.00.345.284 W model has unused tensor blk.64.attn_norm.weight (size = 20480 bytes) -- ignoring
+0.00.345.291 W model has unused tensor blk.64.post_attention_norm.weight (size = 20480 bytes) -- ignoring
+0.00.345.299 W model has unused tensor blk.64.attn_q.weight (size = 66846720 bytes) -- ignoring
+0.00.345.301 W model has unused tensor blk.64.attn_k.weight (size = 5570560 bytes) -- ignoring
+0.00.345.304 W model has unused tensor blk.64.attn_v.weight (size = 5570560 bytes) -- ignoring
+0.00.345.312 W model has unused tensor blk.64.attn_output.weight (size = 33423360 bytes) -- ignoring
+0.00.345.315 W model has unused tensor blk.64.attn_q_norm.weight (size = 1024 bytes) -- ignoring
+0.00.345.317 W model has unused tensor blk.64.attn_k_norm.weight (size = 1024 bytes) -- ignoring
+0.00.345.320 W model has unused tensor blk.64.ffn_gate.weight (size = 94699520 bytes) -- ignoring
+0.00.345.323 W model has unused tensor blk.64.ffn_down.weight (size = 94699520 bytes) -- ignoring
+0.00.345.325 W model has unused tensor blk.64.ffn_up.weight (size = 94699520 bytes) -- ignoring
+0.00.345.329 W model has unused tensor blk.64.nextn.eh_proj.weight (size = 55705600 bytes) -- ignoring
+0.00.345.332 W model has unused tensor blk.64.nextn.enorm.weight (size = 20480 bytes) -- ignoring
+0.00.345.334 W model has unused tensor blk.64.nextn.hnorm.weight (size = 20480 bytes) -- ignoring
+0.00.345.342 W model has unused tensor blk.64.nextn.shared_head_norm.weight (size = 20480 bytes) -- ignoring
+[shexp-split] splitting shared experts across the TP group (LLAMA_SHEXP_SPLIT=0 to disable)
+0.01.191.934 W q8_repack: repacking q8_0 tensors on device 0 (first: output.weight, 675430400 bytes)
+0.01.534.331 W q8_repack: repacking q8_0 tensors on device 1 (first: output.weight, 675430400 bytes)
+0.06.453.590 W TP custom AR: peer access not available between GPU 0 and 1
+0.06.453.593 W TP custom AR: peer access not available between GPU 1 and 0
+0.06.453.593 W TP custom AR: disabled because full peer access is not available
+0.06.926.414 I cmn          init: llama threadpool init, n_threads = 4
+0.07.222.596 W seq_rm: refusing rollback seq 0: pending=0 (rs_idx=0 target=-1) rollback=1 limit=0
+0.07.234.487 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 100096, kv_unified = 'false'
+0.07.237.500 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.07.237.529 I srv  server_run_i: model loaded
+0.07.237.531 I srv  server_on_li: listening on http://127.0.0.1:57283
+0.07.374.877 I slot get_availabl: id  0 | task -1 | selected slot by LRU, n_tokens = 0, t_last = -1
+0.07.374.921 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+0.10.785.867 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   2093, progress = 1.00, t =   3.41 s / 613.62 tokens per second
+0.13.961.035 I slot print_timing: id  0 | task 0 | n_gen =    107, tg =  35.32 t/s, tg_3s =  35.65 t/s
+0.16.966.808 I slot print_timing: id  0 | task 0 | n_gen =    214, tg =  35.46 t/s, tg_3s =  35.60 t/s
+0.18.130.577 I slot print_timing: id  0 | task 0 | prompt eval time =    3584.61 ms /  2097 tokens (    1.71 ms per token,   585.00 tokens per second)
+0.18.130.580 I slot print_timing: id  0 | task 0 |        eval time =    7171.03 ms /   256 tokens (   28.12 ms per token,    35.56 tokens per second)
+0.18.130.580 I slot print_timing: id  0 | task 0 |       total time =   10755.64 ms /  2353 tokens
+0.18.130.582 I slot print_timing: id  0 | task 0 |    graphs reused =        254
+0.18.130.582 I slot print_timing: id  0 | task 0 |   graph reallocs =          0    /     0        (same size) / (changed size)
+0.18.130.661 I slot      release: id  0 | task 0 | stop processing: n_tokens = 2352, truncated = 0
+0.18.131.822 I srv    operator(): operator(): cleaning up before exit...

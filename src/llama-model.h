@@ -237,6 +237,8 @@ struct llama_layer_nextn {
     struct ggml_tensor * shared_head_head_in_s = nullptr;
     struct ggml_tensor * shared_head_norm      = nullptr;
 
+    struct ggml_tensor * fc_hidden             = nullptr;
+
     // qwen4exp: the MTP block collapses its hyper-connection streams with its own mixer
     struct ggml_tensor * hc_head_norm          = nullptr;
     struct ggml_tensor * hc_head_down          = nullptr;
@@ -734,6 +736,9 @@ struct llama_model {
     llm_type type = LLM_TYPE_UNKNOWN;
     llm_arch arch = LLM_ARCH_UNKNOWN;
 
+    // path of the main GGUF file, empty when loaded from memory or a FILE handle
+    std::string path;
+
     std::string name = "n/a";
 
     llama_hparams hparams = {};
@@ -906,6 +911,7 @@ struct llama_model {
     size_t n_tensors() const;
     size_t n_devices() const;
     const float * tensor_split() const;
+    bool tensor_mirror_output() const;
 
     uint32_t n_gpu_layers() const;
     llama_split_mode split_mode() const;

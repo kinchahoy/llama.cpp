@@ -14,12 +14,15 @@
 #include "speculative.h"
 #include "unicode.h"
 
+#include "../src/llama-ext.h"
+
 #include <algorithm>
 #include <cinttypes>
 #include <climits>
 #include <cmath>
 #include <chrono>
 #include <cstdarg>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
@@ -1422,6 +1425,12 @@ common_init_result::common_init_result(common_params & params, bool model_only) 
 
     pimpl->context.reset(lctx);
 
+    if (mparams.load_mtp && cparams.ctx_type == LLAMA_CONTEXT_TYPE_DEFAULT) {
+        // Configure target extraction before warmup and the first prompt.
+        llama_set_embeddings_nextn(lctx, true, /*masked*/ false);
+        llama_sched_reserve(lctx);
+    }
+
     set_process_priority(params.cpuparams.priority);
 
     pimpl->threadpools.init(lctx, params);
@@ -1730,6 +1739,48 @@ struct llama_model_params common_model_params_to_llama(common_params & params) {
     mparams.check_tensors   = params.check_tensors;
     mparams.use_extra_bufts = !params.no_extra_bufts;
     mparams.no_host         = params.no_host;
+
+    // Carry the DSpark output-layout choice with this model load. A process-wide
+    // environment variable can be overwritten while another model is loading.
+    static constexpr const char * tensor_mirror_output_key = "mxxm.tensor_mirror_output";
+    const bool spec_dspark =
+        std::find(params.speculative.types.begin(), params.speculative.types.end(),
+                  COMMON_SPECULATIVE_TYPE_DRAFT_DSPARK) != params.speculative.types.end();
+    const bool tensor_mirror_output = spec_dspark;
+
+    // Target-side repacking changes the verification rounding enough to lower
+    // DSpark acceptance on gfx906. The draft already loads without extra buffer
+    // types, so keep the target unrepacked too unless explicitly requested.
+    const char * dspark_target_repack = std::getenv("LLAMA_DSPARK_TARGET_REPACK");
+    if (spec_dspark && (dspark_target_repack == nullptr || std::atoi(dspark_target_repack) == 0)) {
+        mparams.use_extra_bufts = false;
+    }
+
+    auto mirror_override = std::find_if(params.kv_overrides.begin(), params.kv_overrides.end(), [](const auto & entry) {
+        return std::strcmp(entry.key, tensor_mirror_output_key) == 0;
+    });
+    if (tensor_mirror_output) {
+        if (mirror_override == params.kv_overrides.end()) {
+            if (!params.kv_overrides.empty()) {
+                GGML_ASSERT(params.kv_overrides.back().key[0] == 0 && "KV overrides not terminated with empty key");
+                params.kv_overrides.pop_back();
+            }
+            llama_model_kv_override entry = {};
+            std::strcpy(entry.key, tensor_mirror_output_key);
+            params.kv_overrides.push_back(entry);
+            params.kv_overrides.emplace_back();
+            params.kv_overrides.back().key[0] = 0;
+            mirror_override = params.kv_overrides.end() - 2;
+        }
+        mirror_override->tag      = LLAMA_KV_OVERRIDE_TYPE_BOOL;
+        mirror_override->val_bool = true;
+    } else if (mirror_override != params.kv_overrides.end()) {
+        GGML_ASSERT(params.kv_overrides.back().key[0] == 0 && "KV overrides not terminated with empty key");
+        params.kv_overrides.erase(mirror_override);
+        if (params.kv_overrides.size() == 1) {
+            params.kv_overrides.clear();
+        }
+    }
 
     if (params.kv_overrides.empty()) {
         mparams.kv_overrides = NULL;

@@ -1,0 +1,116 @@
+-- llama.cpp version: 0.8.0-dev
+CMAKE_BUILD_TYPE=Release
+-- CMAKE_SYSTEM_PROCESSOR: x86_64
+-- GGML_SYSTEM_ARCH: x86
+-- Including CPU backend
+-- x86 detected
+-- Adding CPU backend variant ggml-cpu: -march=native 
+-- HIP: Using hipcc from relative path: /home/raistlin/amd-clean/therock-venv/.venv/lib/python3.14/site-packages/_rocm_sdk_devel/bin/hipcc
+-- HIP: Using hipcc from relative path: /home/raistlin/amd-clean/therock-venv/.venv/lib/python3.14/site-packages/_rocm_sdk_devel/bin/hipcc
+-- HIP and hipBLAS found
+-- FlashAttention K-V type combinations: f16-f16;q4_0-q4_0;q8_0-q8_0;bf16-bf16
+-- Including HIP backend
+-- ggml version: 0.28.0
+-- ggml commit:  418f905a4-dirty
+-- OpenSSL found: 3.5.5
+-- Generating embedded license file for target: llama-app
+-- Configuring done (0.9s)
+-- Generating done (0.5s)
+-- Build files have been written to: /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/build-catchup
+[  0%] Provisioning UI assets
+[  0%] Built target llama-common-base
+[  1%] Built target vendor-hash
+[  1%] Built target cpp-httplib
+-- UI: downloading from b12002: https://huggingface.co/buckets/ggml-org/llama-ui/resolve/b12002/dist.tar.gz
+[  4%] Built target ggml-base
+[  9%] Built target ggml-cpu
+[ 50%] Built target ggml-hip
+[ 50%] Built target ggml
+[ 50%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_10_cxx.cxx.o
+[ 51%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_9_cxx.cxx.o
+[ 51%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_8_cxx.cxx.o
+[ 51%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_7_cxx.cxx.o
+[ 51%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_6_cxx.cxx.o
+[ 51%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_5_cxx.cxx.o
+[ 51%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_4_cxx.cxx.o
+-- UI: download dist.tar.gz.sha256 from b12002 failed: "HTTP response code said error"
+-- UI: downloading from latest: https://huggingface.co/buckets/ggml-org/llama-ui/resolve/latest/dist.tar.gz
+-- UI: archive verified and extracted
+-- UI: HF download succeeded, stamp updated (ggml-org/llama-ui|b12002, resolved: latest)
+[ 51%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_3_cxx.cxx.o
+[ 51%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_2_cxx.cxx.o
+-- UI: gzip compression applied (/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/build-catchup/tools/ui/ui-gzip/_gzip)
+[ 53%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_1_cxx.cxx.o
+[ 53%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_0_cxx.cxx.o
+[ 53%] Building CXX object src/CMakeFiles/llama.dir/llama.cpp.o
+[ 53%] Building CXX object src/CMakeFiles/llama.dir/llama-adapter.cpp.o
+[ 53%] Building CXX object src/CMakeFiles/llama.dir/llama-arch.cpp.o
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/build-catchup/src/CMakeFiles/llama.dir/Unity/unity_1_cxx.cxx:43:
+/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/deepseek41.cpp:850:15: error: unknown type name 'hc_mixes'
+  850 |         const hc_mixes attn_mix = build_hc_mixes(inpL, layer.hc_attn_fn, layer.hc_attn_scale, layer.hc_attn_base, il);
+      |               ^
+/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/deepseek41.cpp:850:117: error: too few arguments to function call, expected 8, have 5
+  850 |         const hc_mixes attn_mix = build_hc_mixes(inpL, layer.hc_attn_fn, layer.hc_attn_scale, layer.hc_attn_base, il);
+      |                                   ~~~~~~~~~~~~~~                                                                    ^
+/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/deepseek4.cpp:371:45: note: 'build_hc_mixes' declared here
+  371 | ggml_tensor * llama_model_deepseek4::graph::build_hc_mixes(
+      |                                             ^
+  372 |         ggml_tensor * x,
+      |         ~~~~~~~~~~~~~~~~
+  373 |         ggml_tensor * hc_fn,
+      |         ~~~~~~~~~~~~~~~~~~~~
+  374 |         ggml_tensor * hc_scale,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~
+  375 |         ggml_tensor * hc_base,
+      |         ~~~~~~~~~~~~~~~~~~~~~~
+  376 |         ggml_tensor ** post,
+      |         ~~~~~~~~~~~~~~~~~~~~
+  377 |         ggml_tensor ** comb,
+      |         ~~~~~~~~~~~~~~~~~~~~
+  378 |         bool f32_src,
+      |         ~~~~~~~~~~~~~
+  379 |         int il) const {
+      |         ~~~~~~
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/build-catchup/src/CMakeFiles/llama.dir/Unity/unity_1_cxx.cxx:43:
+/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/deepseek41.cpp:865:15: error: unknown type name 'hc_mixes'
+  865 |         const hc_mixes ffn_mix = build_hc_mixes(inpL, layer.hc_ffn_fn, layer.hc_ffn_scale, layer.hc_ffn_base, il);
+      |               ^
+/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/deepseek41.cpp:865:113: error: too few arguments to function call, expected 8, have 5
+  865 |         const hc_mixes ffn_mix = build_hc_mixes(inpL, layer.hc_ffn_fn, layer.hc_ffn_scale, layer.hc_ffn_base, il);
+      |                                  ~~~~~~~~~~~~~~                                                                 ^
+/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/deepseek4.cpp:371:45: note: 'build_hc_mixes' declared here
+  371 | ggml_tensor * llama_model_deepseek4::graph::build_hc_mixes(
+      |                                             ^
+  372 |         ggml_tensor * x,
+      |         ~~~~~~~~~~~~~~~~
+  373 |         ggml_tensor * hc_fn,
+      |         ~~~~~~~~~~~~~~~~~~~~
+  374 |         ggml_tensor * hc_scale,
+      |         ~~~~~~~~~~~~~~~~~~~~~~~
+  375 |         ggml_tensor * hc_base,
+      |         ~~~~~~~~~~~~~~~~~~~~~~
+  376 |         ggml_tensor ** post,
+      |         ~~~~~~~~~~~~~~~~~~~~
+  377 |         ggml_tensor ** comb,
+      |         ~~~~~~~~~~~~~~~~~~~~
+  378 |         bool f32_src,
+      |         ~~~~~~~~~~~~~
+  379 |         int il) const {
+      |         ~~~~~~
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/build-catchup/src/CMakeFiles/llama.dir/Unity/unity_1_cxx.cxx:46:
+/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/delta-net-base.cpp:459:19: warning: unused variable 'n_seq_tokens' [-Wunused-variable]
+  459 |     const int64_t n_seq_tokens = ubatch.n_seq_tokens;
+      |                   ^~~~~~~~~~~~
+[ 53%] Building CXX object src/CMakeFiles/llama.dir/llama-batch.cpp.o
+1 warning and 4 errors generated.
+gmake[3]: *** [src/CMakeFiles/llama.dir/build.make:205: src/CMakeFiles/llama.dir/Unity/unity_1_cxx.cxx.o] Error 1
+gmake[3]: *** Waiting for unfinished jobs....
+-- UI: embedded 70 assets
+[ 53%] Built target llama-ui-assets
+gmake[2]: *** [CMakeFiles/Makefile2:2664: src/CMakeFiles/llama.dir/all] Error 2
+gmake[2]: *** Waiting for unfinished jobs....
+[ 53%] Building CXX object tools/ui/CMakeFiles/llama-ui.dir/ui.cpp.o
+[ 54%] Linking CXX static library libllama-ui.a
+[ 54%] Built target llama-ui
+gmake[1]: *** [CMakeFiles/Makefile2:6476: tools/cli/CMakeFiles/llama-cli.dir/rule] Error 2
+gmake: *** [Makefile:1921: llama-cli] Error 2

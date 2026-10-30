@@ -1,0 +1,35 @@
+0.00.023.749 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.025.345 W srv  server_setup: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.028.817 I srv    load_model: loading model '/home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-27B-GGUF/snapshots/4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-Q8_0.gguf'
+0.00.029.837 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+[shexp-split] splitting shared experts across the TP group (LLAMA_SHEXP_SPLIT=0 to disable)
+0.00.916.124 W q8_repack: repacking q8_0 tensors on device 0 (first: output.weight, 675430400 bytes)
+0.01.163.152 W q8_repack: repacking q8_0 tensors on device 1 (first: output.weight, 675430400 bytes)
+0.05.532.715 W TP custom AR: peer access not available between GPU 0 and 1
+0.05.532.718 W TP custom AR: peer access not available between GPU 1 and 0
+0.05.532.719 W TP custom AR: disabled because full peer access is not available
+0.06.513.769 I cmn          init: llama threadpool init, n_threads = 4
+0.06.781.935 I common_speculative_init_result: creating MTP draft context against the target model '/home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-27B-GGUF/snapshots/4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-Q8_0.gguf'
+0.06.785.165 W TP custom AR: peer access not available between GPU 0 and 1
+0.06.785.167 W TP custom AR: peer access not available between GPU 1 and 0
+0.06.785.167 W TP custom AR: disabled because full peer access is not available
+0.06.912.844 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 100096, kv_unified = 'false'
+0.06.912.887 W set_sampler: backend sampling not supported with SPLIT_MODE_TENSOR; using CPU
+0.06.912.889 W spec common_specu: backend offload failed for seq_id=0; using CPU sampler
+0.07.482.945 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.07.482.973 I srv  server_run_i: model loaded
+0.07.482.974 I srv  server_on_li: listening on http://127.0.0.1:50795
+0.07.535.265 I slot get_availabl: id  0 | task -1 | selected slot by LRU, n_tokens = 0, t_last = -1
+0.07.535.334 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+0.08.040.892 W launch_gated_delta_net: gdn-chunk-snapshots: keep_rs chunked path TAKEN (default)
+0.10.988.167 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   2093, progress = 1.00, t =   3.45 s / 606.22 tokens per second
+0.14.175.927 I slot print_timing: id  0 | task 0 | n_gen =    153, tg =  50.50 t/s, tg_3s =  50.83 t/s
+0.15.950.952 I slot print_timing: id  0 | task 0 | prompt eval time =    3630.44 ms /  2097 tokens (    1.73 ms per token,   577.62 tokens per second)
+0.15.950.954 I slot print_timing: id  0 | task 0 |        eval time =    4785.15 ms /   256 tokens (   18.77 ms per token,    53.29 tokens per second)
+0.15.950.955 I slot print_timing: id  0 | task 0 |       total time =    8415.59 ms /  2353 tokens
+0.15.950.957 I slot print_timing: id  0 | task 0 |    graphs reused =        104
+0.15.950.957 I slot print_timing: id  0 | task 0 |   graph reallocs =          4    /     0        (same size) / (changed size)
+0.15.950.960 I slot print_timing: id  0 | task 0 | draft acceptance = 0.69811 (  148 accepted /   212 generated), mean len =  2.40
+0.15.950.978 I statistics        draft-mtp: #calls(b,p,g,a) =    1    111    106    106, #gen drafts =    106, #acc drafts =    86, #gen tokens =    212, #acc tokens =   148, #mean acc len = 2.40, #acc rate/pos = (0.811, 0.585), dur(b,p,g,a) = 0.008, 75.990, 809.498, 0.099 ms
+0.15.951.061 I slot      release: id  0 | task 0 | stop processing: n_tokens = 2352, truncated = 0
+0.15.951.779 I srv    operator(): operator(): cleaning up before exit...

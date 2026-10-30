@@ -486,6 +486,7 @@ static void print_usage(int /* argc */, char ** argv) {
     printf("  -nopo, --no-op-offload <0|1>                      (default: 0)\n");
     printf("  --no-host <0|1>                                   (default: %s)\n", join(cmd_params_defaults.no_host, ",").c_str());
     printf("  --repack <0|1>                                    (default: %s)\n", join(cmd_params_defaults.repack, ",").c_str());
+    printf("  -nr, --no-repack <0|1>                            (inverse of --repack)\n");
     printf("\n");
     printf(
         "Multiple values can be given for each parameter by separating them with ','\n"
@@ -916,6 +917,14 @@ static cmd_params parse_cmd_params(int argc, char ** argv) {
                 }
                 auto p = string_split<bool>(argv[i], split_delim);
                 params.repack.insert(params.repack.end(), p.begin(), p.end());
+            } else if (arg == "-nr" || arg == "--no-repack") {
+                if (++i >= argc) {
+                    invalid_param = true;
+                    break;
+                }
+                for (bool no_repack : string_split<bool>(argv[i], split_delim)) {
+                    params.repack.push_back(!no_repack);
+                }
             } else if (arg == "-ts" || arg == "--tensor-split") {
                 if (++i >= argc) {
                     invalid_param = true;

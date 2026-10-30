@@ -7140,6 +7140,33 @@ struct test_conv_3d : public test_case {
     }
 };
 
+// GGML_OP_CONCAT along dim 0 with a transposed second source, as in the GDN conv input
+struct test_concat_transposed : public test_case {
+    const int64_t ne_a0;
+    const int64_t n_ch;
+    const int64_t n_tok;
+    const int64_t n_seq;
+
+    std::string vars() override {
+        return VARS_TO_STR4(ne_a0, n_ch, n_tok, n_seq);
+    }
+
+    test_concat_transposed(int64_t ne_a0 = 3, int64_t n_ch = 96, int64_t n_tok = 70, int64_t n_seq = 1)
+        : ne_a0(ne_a0), n_ch(n_ch), n_tok(n_tok), n_seq(n_seq) {}
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        ggml_tensor * a = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, ne_a0, n_ch, n_seq);
+        ggml_set_name(a, "a");
+        ggml_tensor * b = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, n_ch, n_tok, n_seq);
+        ggml_set_name(b, "b");
+        ggml_tensor * bt = ggml_permute(ctx, b, 1, 0, 2, 3);
+        ggml_set_name(bt, "b_t");
+        ggml_tensor * out = ggml_concat(ctx, a, bt, 0);
+        ggml_set_name(out, "out");
+        return out;
+    }
+};
+
 // GGML_OP_CONCAT
 struct test_concat : public test_case {
     const ggml_type type;
@@ -11604,6 +11631,16 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
         }
     }
 
+    // Flash Next verification: broadcast gate/up and per-expert down inputs.
+    for (ggml_type type : {GGML_TYPE_IQ2_S, GGML_TYPE_IQ4_NL}) {
+        for (int n : {2, 3, 4}) {
+            const int k = type == GGML_TYPE_IQ2_S ? 2560 : 640;
+            test_cases.emplace_back(new test_mul_mat_id(type, GGML_TYPE_F32, 16, 10, true, 17, n, k, 20, true));
+            test_cases.emplace_back(new test_mul_mat_id(type, GGML_TYPE_F32, 16, 10, false, 17, n, k, 20, true));
+            test_cases.emplace_back(new test_mul_mat_id_dup(type, GGML_TYPE_F32, 16, 10, false, 17, n, k));
+        }
+    }
+
     // skipped slots (negative ids)
     for (ggml_type type_a : {GGML_TYPE_F32, GGML_TYPE_F16, GGML_TYPE_BF16, GGML_TYPE_Q4_0, GGML_TYPE_Q4_K, GGML_TYPE_Q8_0, GGML_TYPE_MXFP4}) {
         for (int n_used : {1, 2, 4}) {
@@ -11905,6 +11942,10 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
         }
     }
 
+    test_cases.emplace_back(new test_concat_transposed(3, 96, 70, 1));
+    test_cases.emplace_back(new test_concat_transposed(3, 5120, 257, 1));
+    test_cases.emplace_back(new test_concat_transposed(3, 33, 31, 2));
+
     // few long rows, which backends may split across workgroups
     for (int dim : { 0, 1 }) {
         test_cases.emplace_back(new test_concat(GGML_TYPE_F32, {98304, 8, 1, 1}, dim == 0 ? 288 : 2, dim, 0));
@@ -11941,7 +11982,7 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     }
 
     for (int i = 0; i < 20; ++i) {
-        for (int k : {1, 2, 3, 7, 15, 100, 500, 1023, 9999}) {
+        for (int k : {1, 2, 3, 7, 15, 32, 40, 64, 100, 500, 1023, 9999}) {
             if (k <= 1<<i) {
                 test_cases.emplace_back(new test_top_k(GGML_TYPE_F32, {(1<<i), 1, 1, 1}, k));
                 test_cases.emplace_back(new test_top_k(GGML_TYPE_F32, {(1<<i) + 11, 1, 2, 1}, k));
@@ -12575,12 +12616,18 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 4, 64,   4, 2, 1, false, true,  /*K=*/4));
     test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 8, 32,   4, 2, 2, false, true,  /*K=*/4));
 
+    // Chunked prefill snapshots, including a partial chunk and multiple sequences.
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 4, 64, 128, 1, 1, false, false, /*K=*/3));
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 4, 128, 129, 2, 1, false, false, /*K=*/3));
+    test_cases.emplace_back(new test_gated_delta_net(GGML_TYPE_F32, 4, 32, 35, 2, 1, false, true, /*K=*/3));
+
     // gdn + cache cpy fusion (K > 1)
     test_cases.emplace_back(new test_gated_delta_net_cache_fusion(GGML_TYPE_F32, 4, 32,   2, 1, 2));
     test_cases.emplace_back(new test_gated_delta_net_cache_fusion(GGML_TYPE_F32, 4, 64,   4, 1, 2));
     test_cases.emplace_back(new test_gated_delta_net_cache_fusion(GGML_TYPE_F32, 4, 32,   4, 1, 4));
     test_cases.emplace_back(new test_gated_delta_net_cache_fusion(GGML_TYPE_F32, 8, 32,   4, 2, 4));
     test_cases.emplace_back(new test_gated_delta_net_cache_fusion(GGML_TYPE_F32, 4, 32,   8, 1, 4));
+    test_cases.emplace_back(new test_gated_delta_net_cache_fusion(GGML_TYPE_F32, 4, 64, 128, 1, 3));
 
 #if 0
     // these tests are disabled to save execution time, sbut they can be handy for debugging
@@ -13048,7 +13095,7 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_perf() {
             test_cases.emplace_back(new test_top_k(GGML_TYPE_F32, {cols, nrows, 1, 1}, 16));
         }
     }
-    for (auto k : {1, 4, 8, 10, 16, 32, 40, 400}) {
+    for (auto k : {1, 4, 8, 10, 16, 32, 40, 64, 400}) {
         for (auto nrows : {1, 16}) {
             for (auto cols : {k, 1000, 65000, 200000}) {
                 test_cases.emplace_back(new test_top_k(GGML_TYPE_F32, {cols, nrows, 1, 1}, k));

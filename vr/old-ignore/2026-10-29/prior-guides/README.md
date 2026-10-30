@@ -1,0 +1,26 @@
+> Historical record. Commands and recommendations may be obsolete; see [the current guide](../../../README.md).
+
+# gfx906: current guide
+
+For the two 32 GiB gfx906 MI60 GPUs and Qwen3.8 models. Updated 2026-10-25.
+
+| Document | Purpose |
+| --- | --- |
+| [Quickstart](QUICKSTART.md) | Build, CLI commands, environment switches |
+| [Three-slot validation](../../2026-10-12/2026-10-12-three-slots.md) | Server capacity, concurrency fixes, measured limits |
+| [Performance](PERFORMANCE.md) | Latest results, workload differences and measurement method |
+| [Flash Next report](../../2026-10-25/2026-10-25-qwen3.8-flash-next-gfx906.md) | IQ3_XXS performance, 100K+ context and IQ4_XS fit limit |
+| [Research](RESEARCH.md) | Remaining experiments and unresolved correctness work |
+| [Merge guide](MERGE-GFX906.md) | Preserve the runtime overlay when updating upstream |
+| [Active patch kit](../../2026-10-25/patches/llama-head-344be0a60/README.md) | Apply, regenerate and verify the five runtime patches |
+| [Historical records](../../2026-10-12/notes/archive-index-before-cleanup.md) | Earlier measurements, designs and handoffs; recent edits preserved |
+
+Use a fixed 50/50 tensor split for comparisons and capacity checks. Tune the split only after choosing the other settings. Keep `GGML_CUDA_TP_OVERLAP` unset; the normal HIP path uses host-staged AllReduce without P2P.
+
+The active C++ harness is `CMakeLists.txt` plus `test-gfx906-tp.cpp`, enabled with `-DLLAMA_BUILD_VR_EXPERIMENTS=ON`. Raw measurements remain under [results](../..).
+
+## Benchmark workflow
+
+Compare identical prompt bytes, model revision, context capacity, batch sizes, sampling, generation limit, environment and warmup policy. The quick CLI check is the [quickstart command](QUICKSTART.md) with `-f flake.nix -st -n 256 --simple-io`; use longer generation only when authorized. `llama-bench` is useful for screening and merge regression checks; confirm performance claims with representative CLI or concurrent server requests.
+
+Record source and binary identity, prompt hash, exact command, actual prompt/output counts, PP, TG, first-token latency and draft acceptance. Alternate baseline/candidate order and repeat small differences. Context allocation does not establish performance at a fully populated context. Greedy text equality alone does not validate rollback or numerical correctness.

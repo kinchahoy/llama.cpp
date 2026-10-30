@@ -1,0 +1,5 @@
+Working directory: /home/raistlin/infer/mx-llama.cpp
+source /home/raistlin/amd-clean/env/therock.sh
+env -u GGML_CUDA_TP_OVERLAP GGML_CUDA_FLASHNEXT_MOE=1 LLAMA_QWEN4_MTP_DEVICE=0 taskset -c 0-7 /usr/bin/time -v -o run.time timeout --kill-after=2s 55s .worktrees/experiment/catchup-418f905a4/build-catchup/bin/llama-cli -m /home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/c8b5954a88c2775c546b92593eda40ea041d3176/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00003.gguf --offline -lm dio -ngl 999 -dev ROCm0,ROCm1 -sm layer -ts 1,1 -fa on -b 1024 -ub 512 -c 100096 -ctk q8_0 -ctv q8_0 --temp 0 --top-k 1 --seed 42 -f /home/raistlin/infer/mx-llama.cpp/flake.nix -n 128 -st --no-display-prompt --simple-io --log-verbosity 4 -t 8 -tb 8
+
+Matched IQ3_XXS tensor-split control: ../iq3-xxs.*; only `-sm layer` replaces `-sm tensor` (other flags and 50/50 -ts are unchanged). No MTP/speculative flags or sidecar.

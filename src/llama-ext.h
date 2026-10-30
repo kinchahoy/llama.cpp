@@ -133,6 +133,19 @@ LLAMA_API void llama_set_embeddings_nextn(struct llama_context * ctx, bool value
 // chain multiple trained NextN heads. Default 0 (first head).
 LLAMA_API void llama_set_nextn_layer_offset(struct llama_context * ctx, int32_t offset);
 
+// Phase 2b: when enabled, the MTP head graph builds and stores ONLY its K/V (skips the
+// discarded attention/FFN/output). Enable around the deferred-prefill replay (a pure prompt
+// KV-build whose head output is unused), disable for generation drafting (which needs logits).
+LLAMA_API void llama_set_mtp_prefill_kv_only(struct llama_context * ctx, bool value);
+
+// Enable (n_tokens_cap > 0) or disable (0) a pinned, position-indexed accumulation buffer
+// into which the unmasked pre-norm extraction also copies each ubatch's hidden rows. Lets
+// the MTP hook stage the whole prompt hidden across decode calls and skip its
+// per-prefill-chunk synchronize. The context owns/allocates the buffer (pinned for fast
+// async D2H); returns its base. The companion getter synchronizes and returns the base.
+LLAMA_API float * llama_set_embeddings_pre_norm_accum(struct llama_context * ctx, int32_t n_tokens_cap);
+LLAMA_API float * llama_get_embeddings_pre_norm_accum(struct llama_context * ctx);
+
 // Marks the entries that a decision head (clef, vllm-decision2) reads, the default is 0
 // See https://github.com/ggml-org/llama.cpp/pull/29831 for details
 // A run of entries with the same value is one span, spans must be separated by entries with value 0
@@ -160,9 +173,33 @@ LLAMA_API float * llama_get_embeddings_nextn_ith(struct llama_context * ctx, int
 // Set whether the context outputs the input embeddings of a specific layer
 LLAMA_API void llama_set_embeddings_layer_inp(struct llama_context * ctx, uint32_t lid, bool value);
 
+// Run any pending scheduler re-reserve now instead of inside the next decode.
+// Setters that change the graph topology (layer-input taps, samplers, loras)
+// only flag the reserve, and the next llama_decode then pays a full scheduler
+// rebuild plus worst-case graph reservation across all devices inside its
+// measured wall time. A no-op when nothing is pending.
+LLAMA_API void llama_sched_reserve(struct llama_context * ctx);
+
 // mirrors:
 // LLAMA_API float * llama_get_embeddings(struct llama_context * ctx);
 LLAMA_API float * llama_get_embeddings_layer_inp(struct llama_context * ctx, uint32_t lid);
+
+// Enable (n_tokens_cap > 0) or disable (0) a pinned position-indexed accum buffer
+// for the layer-input taps. Returns the buffer base (or nullptr).
+LLAMA_API float * llama_set_embeddings_layer_inp_accum(struct llama_context * ctx, int32_t n_tokens_cap);
+// Returns the base of lid's accum region for seq_id (or nullptr). Does NOT synchronize.
+LLAMA_API const float * llama_get_embeddings_layer_inp_accum_seq(
+        struct llama_context * ctx, uint32_t lid, llama_seq_id seq_id);
+LLAMA_API uint64_t llama_layer_inp_accum_span_epoch(
+        struct llama_context * ctx, llama_seq_id seq_id, llama_pos p0, int32_t n_tokens);
+LLAMA_API bool llama_layer_inp_accum_wait_epoch(struct llama_context * ctx, uint64_t epoch);
+LLAMA_API bool llama_layer_inp_accum_ready_epoch(struct llama_context * ctx, uint64_t epoch);
+
+// Fork-local declaration of a ggml symbol rather than an edit to the public
+// ggml-backend.h. Defined in ggml-backend.cpp, dispatched through the device
+// interface. Backends without a query report true so a poller still advances.
+struct ggml_backend_event;
+GGML_API bool ggml_backend_event_query(struct ggml_backend_event * event);
 
 LLAMA_API llama_context * llama_get_ctx_other(struct llama_context * ctx);
 

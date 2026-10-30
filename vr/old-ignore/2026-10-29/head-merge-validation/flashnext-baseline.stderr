@@ -1,0 +1,29 @@
+0.00.037.191 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.039.144 W srv  server_setup: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.042.769 I srv    load_model: loading model '/home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/c8b5954a88c2775c546b92593eda40ea041d3176/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00003.gguf'
+0.00.043.770 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+[shexp-split] splitting shared experts across the TP group (LLAMA_SHEXP_SPLIT=0 to disable)
+0.14.205.572 W q8_repack: repacking q8_0 tensors on device 0 (first: output_hc_down.weight, 3481600 bytes)
+0.14.211.287 W q8_repack: repacking q8_0 tensors on device 1 (first: output_hc_down.weight, 3481600 bytes)
+0.14.219.026 W q8_repack: repacking q6_K tensors on device 0 (first: output.weight, 260736000 bytes)
+0.14.702.559 W q8_repack: repacking q6_K tensors on device 1 (first: output.weight, 260736000 bytes)
+0.15.249.712 W q8_repack: repacking iq4_nl tensors on device 0 (first: blk.0.ffn_down_exps.weight, 188743680 bytes)
+0.15.417.722 W q8_repack: repacking iq4_nl tensors on device 1 (first: blk.0.ffn_down_exps.weight, 283115520 bytes)
+0.29.369.160 W TP custom AR: peer access not available between GPU 0 and 1
+0.29.369.164 W TP custom AR: peer access not available between GPU 1 and 0
+0.29.369.164 W TP custom AR: disabled because full peer access is not available
+0.29.661.085 I cmn          init: llama threadpool init, n_threads = 4
+0.30.127.692 I common_speculative_init_result: loading draft model '/home/raistlin/.cache/models/qwen38-flash-next-mtp/MTP/mtp-Qwen3.8-Flash-Next-Q8_0.gguf'
+0.32.358.193 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 100096, kv_unified = 'false'
+0.33.690.351 W [repack-moe-fusion] type=q8_0 cols=2 fused up/gate mat-vec engaged
+0.33.698.804 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.33.698.844 I srv  server_run_i: model loaded
+0.33.698.846 I srv  server_on_li: listening on http://127.0.0.1:55393
+0.33.813.155 I slot get_availabl: id  0 | task -1 | selected slot by LRU, n_tokens = 0, t_last = -1
+0.33.813.319 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+0.35.038.421 W launch_gated_delta_net: gdn-chunk-snapshots: keep_rs chunked path TAKEN (default)
+0.37.186.017 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   1066, progress = 0.51, t =   3.37 s / 316.10 tokens per second
+0.38.379.331 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   1581, progress = 0.75, t =   4.57 s / 346.26 tokens per second
+0.39.613.202 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   2093, progress = 1.00, t =   5.80 s / 360.88 tokens per second
+0.40.587.059 I srv    operator(): operator(): cleaning up before exit...
+0.40.587.314 W srv          stop: cancel task, id_task = 0

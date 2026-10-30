@@ -1,0 +1,37 @@
+0.00.023.429 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.024.982 W srv  server_setup: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.028.506 I srv    load_model: loading model '/home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/c8b5954a88c2775c546b92593eda40ea041d3176/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00003.gguf'
+0.00.029.524 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+[shexp-split] splitting shared experts across the TP group (LLAMA_SHEXP_SPLIT=0 to disable)
+0.07.834.042 W q8_repack: repacking q8_0 tensors on device 0 (first: output_hc_down.weight, 3481600 bytes)
+0.07.838.269 W q8_repack: repacking q8_0 tensors on device 1 (first: output_hc_down.weight, 3481600 bytes)
+0.07.845.553 W q8_repack: repacking q6_K tensors on device 0 (first: output.weight, 260736000 bytes)
+0.08.147.440 W q8_repack: repacking q6_K tensors on device 1 (first: output.weight, 260736000 bytes)
+0.08.520.333 W q8_repack: repacking iq4_nl tensors on device 0 (first: blk.0.ffn_down_exps.weight, 188743680 bytes)
+0.08.720.052 W q8_repack: repacking iq4_nl tensors on device 1 (first: blk.0.ffn_down_exps.weight, 283115520 bytes)
+0.18.827.979 W TP custom AR: peer access not available between GPU 0 and 1
+0.18.827.991 W TP custom AR: peer access not available between GPU 1 and 0
+0.18.827.993 W TP custom AR: disabled because full peer access is not available
+0.18.983.826 I cmn          init: llama threadpool init, n_threads = 4
+0.19.366.667 I common_speculative_init_result: loading draft model '/home/raistlin/.cache/models/qwen38-flash-next-mtp/MTP/mtp-Qwen3.8-Flash-Next-Q8_0.gguf'
+0.20.936.793 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 100096, kv_unified = 'false'
+0.21.769.217 W [repack-moe-fusion] type=q8_0 cols=2 fused up/gate mat-vec engaged
+0.21.775.101 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.21.775.128 I srv  server_run_i: model loaded
+0.21.775.129 I srv  server_on_li: listening on http://127.0.0.1:43545
+0.21.874.671 I slot get_availabl: id  0 | task -1 | selected slot by LRU, n_tokens = 0, t_last = -1
+0.21.874.725 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+0.22.758.543 W launch_gated_delta_net: gdn-chunk-snapshots: keep_rs chunked path TAKEN (default)
+0.24.895.005 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   1066, progress = 0.51, t =   3.02 s / 352.95 tokens per second
+0.26.052.911 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   1581, progress = 0.75, t =   4.18 s / 378.40 tokens per second
+0.27.415.732 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   2093, progress = 1.00, t =   5.54 s / 377.73 tokens per second
+0.30.617.968 I slot print_timing: id  0 | task 0 | n_gen =    126, tg =  41.36 t/s, tg_3s =  41.69 t/s
+0.32.789.695 I slot print_timing: id  0 | task 0 | prompt eval time =    5720.56 ms /  2097 tokens (    2.73 ms per token,   366.57 tokens per second)
+0.32.789.699 I slot print_timing: id  0 | task 0 |        eval time =    5194.38 ms /   256 tokens (   20.37 ms per token,    49.09 tokens per second)
+0.32.789.699 I slot print_timing: id  0 | task 0 |       total time =   10914.95 ms /  2353 tokens
+0.32.789.701 I slot print_timing: id  0 | task 0 |    graphs reused =         95
+0.32.789.701 I slot print_timing: id  0 | task 0 |   graph reallocs =          0    /     0        (same size) / (changed size)
+0.32.789.705 I slot print_timing: id  0 | task 0 | draft acceptance = 0.80928 (  157 accepted /   194 generated), mean len =  2.62
+0.32.789.728 I statistics        draft-mtp: #calls(b,p,g,a) =    1    103     97     97, #gen drafts =     97, #acc drafts =    85, #gen tokens =    194, #acc tokens =   157, #mean acc len = 2.62, #acc rate/pos = (0.876, 0.742), dur(b,p,g,a) = 0.012, 59.445, 1001.529, 0.179 ms
+0.32.789.894 I slot      release: id  0 | task 0 | stop processing: n_tokens = 2352, truncated = 0
+0.32.791.007 I srv    operator(): operator(): cleaning up before exit...

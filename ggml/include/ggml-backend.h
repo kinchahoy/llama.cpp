@@ -431,7 +431,8 @@ extern "C" {
     // TODO: this looks a bit strange - a backend API creates a device. I think we should try
     //       express this as a backend registry functionality instead
     GGML_API ggml_backend_dev_t ggml_backend_meta_device(
-        ggml_backend_dev_t * devs, size_t n_devs, ggml_backend_meta_get_split_state_t get_split_state, void * get_split_state_ud);
+        ggml_backend_dev_t * devs, size_t n_devs,
+        ggml_backend_meta_get_split_state_t get_split_state, void * get_split_state_ud);
 
     //
     // Utils

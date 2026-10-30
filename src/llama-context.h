@@ -14,6 +14,7 @@
 
 #include <array>
 #include <map>
+#include <utility>
 #include <vector>
 
 struct llama_model;
@@ -121,6 +122,25 @@ struct llama_context {
     void set_embeddings_nextn(bool value, bool masked);
     void set_embeddings_layer_inp(uint32_t lid, bool enable);
     void set_nextn_layer_offset(int32_t offset);
+    void set_mtp_prefill_kv_only(bool value) { cparams.mtp_prefill_kv_only = value; }
+    // Enable (n_tokens_cap > 0) or disable (0) a pinned position-indexed pre-norm accum
+    // buffer for MTP deferred prefill. Returns the buffer base (or nullptr).
+    float * set_embeddings_pre_norm_accum(int32_t n_tokens_cap);
+    float * get_embeddings_pre_norm_accum(); // synchronizes, then returns the accum base
+
+    // Enable (n_tokens_cap > 0) or disable (0) a pinned accum buffer for the layer-input taps.
+    // Returns the buffer base (or nullptr).
+    float * set_embeddings_layer_inp_accum(int32_t n_tokens_cap);
+    // Region base for lid and seq_id (or nullptr). Does NOT synchronize.
+    const float * get_embeddings_layer_inp_accum_seq(uint32_t lid, llama_seq_id seq_id);
+    // Readiness epoch covering rows [p0, p0 + n_tokens) for seq_id, or zero if any row is missing.
+    uint64_t layer_inp_accum_span_epoch(llama_seq_id seq_id, llama_pos p0, int32_t n_tokens) const;
+    bool layer_inp_accum_wait_epoch(uint64_t epoch);
+    bool layer_inp_accum_ready_epoch(uint64_t epoch);
+
+    // Set after tap readbacks are enqueued, consumed by the next graph_compute so
+    // every tap writer waits on its device for the corresponding reader to retire.
+    std::vector<std::pair<ggml_backend_t, ggml_backend_event_t>> tap_readback_waits;
     void set_causal_attn(bool value);
     void set_warmup(bool value);
 
@@ -241,7 +261,7 @@ private:
 
     // async-copy enabled layer-input tensors (per cparams.output_layer_inp)
     // from backend into host-side embd_layer_inp buffers
-    bool extract_layer_inputs(const llm_graph_result * res, size_t token_offset, size_t n_tokens);
+    bool extract_layer_inputs(const llm_graph_result * res, size_t token_offset, const llama_ubatch & ubatch);
 
     //
     // graph
@@ -264,6 +284,7 @@ public:
 
 private:
     llm_graph_result * get_gf_res_prev();
+    void load_private_head(const llama_model & target);
 
     llm_graph_params graph_params(
                         llm_graph_result * res,
@@ -325,6 +346,60 @@ private:
     // populated when cparams.output_layer_inp[il] is true
     std::vector<buffer_view<float>> embd_layer_inp;
     std::vector<int32_t> embd_batch_idxs; // extracted index -> original batch index
+
+    // Optional position-indexed host accumulation buffer for MTP deferred prefill.
+    // When set (caller-owned host memory), the unmasked pre-norm extraction also
+    // async-copies each ubatch's hidden rows here at their sequence-position offset,
+    // so the whole prompt hidden survives across decode calls without a per-chunk
+    // synchronize. This lets the MTP hook skip its per-prefill-chunk target sync and
+    // build the draft KV in one pass after prefill. nullptr by default (no change).
+    float * embd_pre_norm_accum      = nullptr; // base of buf_pre_norm_accum (pinned), or null
+    size_t  embd_pre_norm_accum_size = 0;        // capacity in floats
+    int64_t embd_pre_norm_accum_ub   = 0;        // ubatch counter for the ring-wrap drain
+
+    // Position-indexed pinned accum for the layer-input taps, same mechanism as the
+    // pre-norm accum above: extract_layer_inputs also async-copies each single-seq
+    // ubatch's tap rows here at their sequence-position offset, so the whole prompt's
+    // taps survive across decode calls without a per-chunk target synchronize. The
+    // DFlash/DSpark hook then defers its gather+encode+inject to the first draft and
+    // the target's prefill keeps its cross-ubatch pipeline overlap.
+    ggml_backend_buffer_ptr buf_layer_inp_accum;
+    float * layer_inp_accum     = nullptr;  // base of buf_layer_inp_accum (pinned), or null
+    int32_t layer_inp_accum_cap = 0;        // capacity in tokens per sequence and region
+    int32_t layer_inp_accum_n_seq = 0;
+    int64_t layer_inp_accum_ub  = 0;        // ubatch counter for the ring-wrap drain
+    std::vector<int32_t> layer_inp_accum_idx; // lid -> region index, or -1
+    std::vector<uint64_t> layer_inp_accum_row_epoch; // [seq][position]
+    uint64_t layer_inp_accum_epoch = 0;
+
+    // Per-ubatch readiness events for the accum: recorded on the tap's backend right
+    // after the ubatch's copies are enqueued, so event N firing guarantees every row
+    // written up to and including ubatch N. Small ring, re-recorded round robin.
+    struct layer_inp_accum_backend_ev {
+        ggml_backend_t       backend = nullptr;
+        ggml_backend_event_t event   = nullptr;
+    };
+    struct layer_inp_accum_ev {
+        std::vector<layer_inp_accum_backend_ev> events;
+        llama_pos pos_end = -1;
+        uint64_t  epoch   = 0;
+    };
+    std::vector<layer_inp_accum_ev> layer_inp_accum_events;
+    size_t layer_inp_accum_ev_next = 0;
+    void layer_inp_accum_events_free();
+
+    // Persistent device tensors for the layer-input taps, indexed by lid. Used in all split
+    // modes unless LLAMA_TAP_STATIC=0. Kept out of the galloc arena. Rebuilt by sched_reserve.
+    ggml_context_ptr        ctx_layer_inp_dev;
+    ggml_backend_buffer_ptr buf_layer_inp_dev;
+
+    // Private copies of the target's token embedding and output head for a draft that runs on
+    // devices which cannot read the target's buffers (e.g. a single-GPU DFlash draft for a TP target).
+    ggml_context_ptr        ctx_private_head;
+    ggml_backend_buffer_ptr buf_private_head;
+    ggml_context_ptr        ctx_private_out;
+    ggml_backend_buffer_ptr buf_private_out;
+    std::vector<ggml_tensor *> layer_inp_dev;
 
     struct sampling_info {
         // !samplers.empty() to check if any samplers are active
@@ -415,10 +490,15 @@ private:
     std::array<llm_graph_result_ptr, 2> gf_res_prev;
     llm_graph_result_ptr gf_res_reserve;
 
+    // Unique sequence layout submitted by the previous asynchronous graph.
+    std::vector<llama_seq_id> graph_seq_ids;
     llm_graph_result * gf_res_prev_active = nullptr;
 
     // host buffer for the model output (logits and embeddings)
     ggml_backend_buffer_ptr buf_output;
+
+    // pinned host buffer backing embd_pre_norm_accum (MTP deferred prefill)
+    ggml_backend_buffer_ptr buf_pre_norm_accum;
 
     // keep copies of the per-sequence memory on the device
     std::map<llama_seq_id, llama_memory_buffers> mem_storage;

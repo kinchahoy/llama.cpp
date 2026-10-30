@@ -1050,8 +1050,13 @@ static __global__ void mul_mat_q(
         const uint2 tmp2 = fast_div_modulo(blockIdx.z, nchannels_y);
         const int wt = tmp2.x;
         const int zt = tmp2.y;
+#if defined(GGML_USE_HIP) && defined(__gfx906__)
+        const int jt = blockIdx.y;
+        const int it = blockIdx.x;
+#else
         const int jt = blockIdx.x;
         const int it = blockIdx.y;
+#endif
 
         // Defaults for regular matrix multiplication:
         int col_low    = 0;
@@ -1438,6 +1443,7 @@ struct mmq_args {
     int64_t nchannels_x; int64_t nchannels_y; int64_t stride_channel_x; int64_t stride_channel_y; int64_t stride_channel_dst;
     int64_t nsamples_x; int64_t nsamples_y; int64_t stride_sample_x; int64_t stride_sample_y; int64_t stride_sample_dst;
     int64_t ncols_max;
+    int64_t ncols_opt; // Number of src1 columns used to select the tile width.
     int J_best; // Tile width in ne11(dense)/ne12(MoE) direction to use for optimal performance.
     ggml_cuda_mm_fusion_args_device fusion = {}; // gate != nullptr selects the fused gate/up/GLU path
 };
@@ -1472,8 +1478,8 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
     const int nty  = (args.nrows_x   + I_dst - 1) / I_dst;
     const int ntx  = (args.ncols_max + config.J - 1) / config.J;
     const int ntzw = args.nchannels_y * args.nsamples_y;
-    // Column tiles innermost so that the concurrently running blocks share the same tile of x and read it from L2.
-    const dim3 block_nums_xy_tiling(ntx, nty, ntzw);
+    const bool row_tiles_first = cc == GGML_CUDA_CC_VEGA20;
+    const dim3 block_nums_xy_tiling(row_tiles_first ? nty : ntx, row_tiles_first ? ntx : nty, ntzw);
 
     GGML_ASSERT(args.nchannels_y % args.nchannels_x == 0);
     GGML_ASSERT(args.nsamples_y  % args.nsamples_x  == 0);
@@ -1488,7 +1494,7 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
     const uint3 sample_ratio_fd    = init_fastdiv_values(sample_ratio);
 
     if (has_fusion || !config.stream_k) {
-        GGML_ASSERT(nty <= 65535); // gridDim.y limit
+        GGML_ASSERT((row_tiles_first ? ntx : nty) <= 65535); // gridDim.y limit
         mul_mat_q<type, J, fallback, prec_src1, has_fusion><<<block_nums_xy_tiling, block_dims, nbytes_shared, stream>>>
             (args.x, (const char *) args.fusion.gate, args.y, args.ids_dst, args.expert_bounds, args.dst, nullptr, args.y_scale, args.fusion.glu_op, args.fusion.glu_limit,
              blocks_per_ne00_fd, args.nrows_x, args.ncols_dst, args.stride_row_x, args.ncols_y, args.nrows_dst,
@@ -1540,7 +1546,45 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
 
 template <ggml_type type, bool fallback, ggml_prec prec_src1, bool has_fusion>
 void mul_mat_q_switch_J(ggml_backend_cuda_context & ctx, const mmq_args & args, cudaStream_t stream) {
-    switch (args.J_best) {
+    const int    id    = ggml_cuda_get_device();
+    const int    cc    = ggml_cuda_info().devices[id].cc;
+    const size_t smpbo = ggml_cuda_info().devices[id].smpbo;
+    const int    nsm   = ggml_cuda_info().devices[id].nsm;
+
+    int J_best        = 0;
+    int ntiles_J_best = INT_MAX;
+
+    for (int J = 8; J <= 128 && ntiles_J_best > 1; J += 8) {
+        const ggml_cuda_mmq_config config = ggml_cuda_mmq_get_config(type, J, fallback, cc, prec_src1);
+        if (config.type == GGML_TYPE_COUNT) {
+            continue;
+        }
+
+        if (mmq_get_nbytes_shared(config, cc) > smpbo) {
+            continue;
+        }
+
+        const int ntiles_x = (args.ncols_opt + config.J - 1) / config.J;
+
+        // gfx906: do not widen J past 64 if the tile grid can no longer fill the
+        // CUs - this is what regresses -sm tensor (rows sharded) and MoE (tiny
+        // per-expert shapes). Keep total tiles >= nsm.
+        if (cc == GGML_CUDA_CC_VEGA20 && config.J > 64) {
+            // MoE (ids): tiny per-expert shape never benefits from wide tiles, and
+            // the total-tiles heuristic overcounts it - always cap MoE at J=64.
+            if (args.ids_dst != nullptr) { continue; }
+            const int nty = (args.nrows_x + config.I - 1) / config.I;
+            const long total_tiles = (long) nty * ntiles_x * args.nchannels_y * args.nsamples_y;
+            if (total_tiles < nsm) { continue; }
+        }
+
+        if (ntiles_x < ntiles_J_best) {
+            J_best = J;
+            ntiles_J_best = ntiles_x;
+        }
+    }
+
+    switch (J_best) {
         case   8:
             launch_mul_mat_q<type,   8, fallback, prec_src1, has_fusion>(ctx, args, stream);
             break;
@@ -1590,7 +1634,7 @@ void mul_mat_q_switch_J(ggml_backend_cuda_context & ctx, const mmq_args & args, 
             launch_mul_mat_q<type, 128, fallback, prec_src1, has_fusion>(ctx, args, stream);
             break;
         default:
-            fprintf(stderr, "J_best=%d\n", args.J_best);
+            fprintf(stderr, "J_best=%d\n", J_best);
             GGML_ABORT("fatal error");
     }
 }

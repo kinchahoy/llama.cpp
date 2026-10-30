@@ -155,7 +155,30 @@ int64_t llama_time_us(void) {
 }
 
 // returns true on success
-static bool llama_prepare_model_devices(const llama_model_params & params, llama_model * model) {
+static bool llama_prepare_model_devices(const llama_model_params & params, llama_model * model, uint32_t tp_group_divisor) {
+    // A DSV4-backbone drafter prefers a single group over a SUBSET of the devices: the draft
+    // chain is serial, so every cross-device hop costs it per drafted token, while the subset
+    // keeps the whole drafter one hop-free group and leaves the remaining devices to the target.
+    // Returns the device count the draft should use (n_devs when no subset applies).
+    auto draft_subset_devs = [&](size_t n_devs) -> size_t {
+        if (tp_group_divisor == 0) {
+            return n_devs;
+        }
+        size_t width = 0;
+        for (size_t c = std::min((size_t) tp_group_divisor, n_devs); c >= 1; c--) {
+            if (tp_group_divisor % c == 0) {
+                width = c;
+                break;
+            }
+        }
+        if (width > 0 && width < n_devs) {
+            LLAMA_LOG_WARN("%s: draft uses a single TP group over the first %zu of %zu devices, "
+                    "keeping the serial draft chain in one hop-free group\n",
+                    __func__, width, n_devs);
+            return width;
+        }
+        return n_devs;
+    };
     // create list of devices to use with this model
     if (params.devices) {
         if (params.split_mode == LLAMA_SPLIT_MODE_TENSOR) {
@@ -167,6 +190,7 @@ static bool llama_prepare_model_devices(const llama_model_params & params, llama
                 LLAMA_LOG_ERROR("%s: LLAMA_SPLIT_MODE_TENSOR needs >= 1 devices\n", __func__);
                 return false;
             }
+            n_devs = draft_subset_devs(n_devs);
             LLAMA_LOG_INFO("%s: creating a Meta device with %zu devices\n", __func__, n_devs);
             for (size_t i = 0; i < n_devs; ++i) {
                 LLAMA_LOG_INFO("%s: - device %zu: %s\n", __func__, i, ggml_backend_dev_name(params.devices[i]));
@@ -206,6 +230,7 @@ static bool llama_prepare_model_devices(const llama_model_params & params, llama
                 return false;
             }
 
+            devs.resize(draft_subset_devs(devs.size()));
             LLAMA_LOG_INFO("%s: creating a Meta device for tensor parallelism from %zu devices:\n", __func__, devs.size());
             for (size_t i = 0; i < devs.size(); ++i) {
                 LLAMA_LOG_INFO("%s: - device %zu: %s (%s)\n", __func__, i, ggml_backend_dev_name(devs[i]), ggml_backend_dev_description(devs[i]));
@@ -213,7 +238,7 @@ static bool llama_prepare_model_devices(const llama_model_params & params, llama
 
             GGML_ASSERT(!devs.empty());
             model->get_split_state_ud.n_devices = devs.size();
-            model->get_split_state_ud.model     = model;
+            model->get_split_state_ud.model = model;
             gpus.push_back({
                 true, ggml_backend_meta_device(
                 devs.data(), devs.size(), llama_meta_device_get_split_state, &model->get_split_state_ud)
@@ -324,7 +349,19 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * meta
         ml.print_info();
         std::unique_ptr<llama_model> model_ptr(llama_model_create(ml, params));
 
-        bool ok = llama_prepare_model_devices(params, model_ptr.get());
+        // A DFlash drafter with a DSV4 backbone constrains which TP group widths can
+        // split it (see the head-split rules in llama-model.cpp). Read the constraint
+        // before the Meta device is created so the group width can honor it.
+        uint32_t tp_group_divisor = 0;
+        if (params.split_mode == LLAMA_SPLIT_MODE_TENSOR && model_ptr->arch == LLM_ARCH_DFLASH) {
+            uint32_t hc_mult = 0;
+            ml.get_key(LLM_KV_HYPER_CONNECTION_COUNT, hc_mult, false);
+            if (hc_mult > 0) {
+                ml.get_key(LLM_KV_ATTENTION_OUTPUT_GROUP_COUNT, tp_group_divisor, false);
+            }
+        }
+
+        bool ok = llama_prepare_model_devices(params, model_ptr.get(), tp_group_divisor);
         if (!ok) {
             return {-1, nullptr};
         }
@@ -440,6 +477,9 @@ static struct llama_model * llama_model_load_from_file_impl(
         return nullptr;
     }
 
+    if (file == nullptr && metadata == nullptr) {
+        model->path = path_model;
+    }
     return model;
 }
 
