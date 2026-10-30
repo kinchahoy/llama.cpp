@@ -1,0 +1,87 @@
+> Historical record. Commands and recommendations may be obsolete; see [the current guide](../../../../README.md).
+
+# gfx906 runtime port: llama.cpp e358d591 to resolved MX tree
+
+This kit contains the resolved MI50/MI60 runtime overlay for upstream `e358d59178377be4c58ba567925e05faadbccb57`, merged with MX pre-merge head `8535054eb819d4a4a3faf267a238df792ebc2f4f`, plus the MTP planning and GDN snapshot fixes in source commit `8a6351ddf`. The original merge tree was `6f1050df17a6d4442c0067df642efc003a9dbc4e`; this refreshed export pins the corrected source commit instead.
+
+The five file-disjoint patches export 114 runtime files against the new upstream head. Apply all of them in filename order. The original [0bc845-to-38b4 kit](../llama-head-0bc845-to-mx-38b4/README.md) remains unchanged as a runtime export. [MERGE-GFX906.md](../../../2026-10-29/prior-guides/MERGE-GFX906.md) explains typical conflict decisions, quant priorities, and the AllReduce preprocessor trap. See also the implementation details in [q8_repack/README.md](../../../../../ggml/src/ggml-cuda/q8_repack/README.md).
+
+The MTP fixes are incorporated directly into `0002-gpu-backends.patch` and `0004-common-tools.patch`. Apply only the five main patches; no corrective follow-up series is required. See [MTP planning and snapshot correctness](#mtp-planning-and-snapshot-correctness) before porting these paths to a future head.
+
+| Patch | Contents |
+| --- | --- |
+| `0001-core-ggml.patch` | Core ggml and meta backend, lane dispatch and split buffers |
+| `0002-gpu-backends.patch` | gfx906 kernels, Q8 repack, AllReduce, HIP/CUDA integration |
+| `0003-model-runtime.patch` | Loading, placement, graphs, conversion, GGUF compatibility |
+| `0004-common-tools.patch` | Common options, applications, benchmark and existing test infrastructure |
+| `0005-build-harness.patch` | Build integration and existing gfx906 harness |
+
+`MANIFEST.tsv` lists exported source paths. `EXCLUDED.txt` lists differences outside runtime scope: documentation, private CI, historical results, and archived experiments/build files. Four focused cases extend the existing backend test; no new test executable was added. The replay verifier applies the five patches to a clean upstream archive and compares all 114 files byte for byte with the corrected snapshot. Any retained whitespace warnings are reported separately from runtime validation.
+
+## Apply to the pinned head
+
+Use a clean checkout at the exact upstream commit. Set `KIT` to this directory before running:
+
+```sh
+KIT=/home/raistlin/infer/mx-llama.cpp/ports/llama-head-e358d-to-mx-20261001
+(
+    set -e
+    cd /path/to/clean/llama.cpp
+    test "$(git rev-parse HEAD)" = e358d59178377be4c58ba567925e05faadbccb57
+    test -z "$(git status --porcelain)"
+    (cd "$KIT" && sha256sum -c SHA256SUMS)
+    for patch in "$KIT"/patches/*.patch; do
+        git apply --check "$patch"
+        git apply "$patch"
+    done
+)
+```
+
+For future versions, follow the [injection workflow](../../../2026-10-29/prior-guides/MERGE-GFX906.md#inject-into-a-future-upstream-head): fetch the official head, create an isolated worktree, ensure the base blobs exist, apply with `git apply --3way`, and resume after each resolved conflict. Full blob IDs support three-way application when the base objects are present. Apply all five groups. Keep the repack buffer and its consumers together; preserve Q4_0/Q4_K canonical gfx906 paths. The guide also provides [next-kit export commands](../../../2026-10-29/prior-guides/MERGE-GFX906.md#create-the-next-reusable-kit) and a [copyable agent handoff](../../../2026-10-29/prior-guides/MERGE-GFX906.md#copyable-agent-handoff).
+
+## Single standard PP/TG check
+
+Source reconciliation must finish before these commands. Build only the benchmark target for the requested simple check:
+
+```sh
+cmake -S . -B build -DAMDGPU_TARGETS=gfx906 -DGGML_HIP=ON -DGGML_HIP_RCCL=OFF -DGGML_CCACHE=OFF -DGGML_NATIVE=ON -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_VR_EXPERIMENTS=ON
+cmake --build build -j 16 --target llama-bench
+MODEL=/home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-27B-GGUF/snapshots/fe1e2a23d973adb629709749dc4f6756df66ef10/Qwen3.8-27B-Q8_0.gguf
+HIP_VISIBLE_DEVICES=0,1 ./build/bin/llama-bench -m "$MODEL" -ngl 999 -fa on -sm tensor -dev ROCm0/ROCm1 -b 4096 -ub 4096 -p 0 -n 0 -pg 2048,0 -pg 0,256 -d 16384 -r 1 -o jsonl --progress --no-warmup
+```
+
+Use the normal environment: no repack, lane-dispatch, shared-expert, or AllReduce opt-outs; no TP overlap flag. The documented target is 400+ PP and approximately 30 TG tokens/s. The recorded default pre-merge run was 431.13 PP / 27.81 TG. A separate custom-AR-disabled run averaged 435.14 PP / 28.43 TG. The single new sample is compared with the default historical run; no fresh baseline or Q4 sweep is requested.
+
+The gfx906 Release build passed. The single run measured **424.57 PP2048 / 28.86 TG256 tokens/s** at depth 16384. PP exceeds 400; TG remains **1.42 tokens/s (4.7%) below** the older September 10 reference of 414.24 PP / 30.28 TG. Against the recorded default checkpoint immediately before this merge, PP is -1.52% and TG is +3.77%. These are historical comparisons, not fresh paired measurements; the remaining TG deficit predates this merge and its cause is unproven. Retain both references in future port reports.
+
+[benchmark.jsonl](benchmark.jsonl) records the two results and all benchmark settings; [benchmark.log](benchmark.log) records both gfx906 devices and progress. Repack is enabled. No custom-AR, lane-dispatch, shared-expert, or overlap environment overrides were set. The build's `build_commit` field remains `8535054eb` because the benchmark ran before the merge was committed; the measured source is the original merge tree identified above. These historical results predate the MTP corrections incorporated into this export refresh.
+
+Q4_0/Q4_K performance and optional Qwen4Exp/MTP execution are not measured by the Q8 workload.
+
+## MTP planning and snapshot correctness
+
+The common model initializer now enables target hidden-state extraction and completes its scheduler reservation before warmup, including when `--no-warmup` is used. MTP driver initialization also completes any pending target and draft reservations before prompt processing or deferred draft replay. This avoids discarding the warmed target scheduler and paying a full reservation inside the first prompt. It moves setup cost into initialization rather than removing that cost.
+
+The user measured 397.18 PP / 34.1 TG after the planning fix, versus 243.23 PP / 37.3 TG before it, on a 2097-token prompt with two gfx906 devices. These are individual runs, not a statistical comparison. This measurement predates the snapshot fix and does not establish its performance.
+
+The old custom chunked GDN kernel ignored `keep_rs_t` and wrote only the final recurrent state. With MTP draft length 2, the graph requests and copies three states; two output slots were unwritten. A rollback reaching those slots could restore invalid state. This risk was established from the code; an end-to-end output failure was not demonstrated. The old kernel also multiplied the input sequence stride by `K`, although the input holds only one state per sequence, which could read outside the input with multiple sequences.
+
+The corrected kernel saves slot `n_tokens - 1 - t` after each of the last `min(n_tokens, K)` updates. Slot 0 is the final state. It uses the supplied output slot stride for both ordinary output and direct cache fusion, and the input sequence stride no longer depends on `K`. The final-state-only specialization retains its existing store behavior. Arithmetic and draft acceptance logic are unchanged.
+
+This particular snapshot defect was in the MX custom chunked GPU path. Upstream `master` inspected on 2026-10-01 used the serial snapshot-writing kernel. Future ports must keep the dispatcher, launcher declaration, template instantiations, snapshot stores, input/output strides, and tests together. A log claiming snapshot support is insufficient, and a fast PP benchmark does not validate rollback correctness.
+
+The HIP Release build passed. Four new cases in `test-backend-ops` passed against the CPU reference on ROCm0/gfx906 with both the default chunked path and the serial fallback. They cover GDN, KDA, a partial final chunk, multiple sequences, and direct cache fusion. Existing snapshot cases did not reach the chunked dispatch threshold. The remaining GPU and CPU devices were skipped by the backend filter; these runs do not establish CUDA portability or post-snapshot-fix PP/TG performance.
+
+```sh
+cmake --build build -j 8 --target test-backend-ops
+./build/bin/test-backend-ops test -b ROCm0 -o 'GATED_DELTA_NET.*' -p 'n_seq_tokens=(128|129|35),.*K=3'
+LLAMA_GDN_NO_CHUNK_SNAPSHOTS=1 ./build/bin/test-backend-ops test -b ROCm0 -o 'GATED_DELTA_NET.*' -p 'n_seq_tokens=(128|129|35),.*K=3'
+```
+
+Both runs should select four cases and pass. For the planning fix, run the CLI with `--log-verbosity 4` and confirm that scheduler reservations finish before the first prompt starts. Repeat with `--no-warmup` to check reservation timing; cold graph execution costs can remain in that mode.
+
+## Reproduce or refresh the export
+
+`python3 regenerate.py` regenerates the five patches and manifests. `python3 verify.py` replays them on a clean archive. These scripts accept commit or tree refs through `--base` and `--target`; defaults pin the upstream head and corrected source commit above. The target must be available in the local Git object database to run the byte comparison; applying the patches does not require it. The source commit remains an ancestor of the export refresh in normal full-history clones of the fork.
+
+The source commit predates this export refresh. Port-kit artifacts and documentation are excluded from runtime groups, so runtime patches contain no self-reference. Re-export after any runtime correction; documentation-only result updates do not change its runtime content.

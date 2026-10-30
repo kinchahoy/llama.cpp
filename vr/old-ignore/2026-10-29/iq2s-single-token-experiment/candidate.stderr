@@ -1,0 +1,36 @@
+0.00.026.528 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.028.320 W srv  server_setup: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.032.070 I srv    load_model: loading model '/home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/c8b5954a88c2775c546b92593eda40ea041d3176/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00003.gguf'
+0.00.033.093 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+[shexp-split] splitting shared experts across the TP group (LLAMA_SHEXP_SPLIT=0 to disable)
+0.07.507.648 W q8_repack: repacking q6_K tensors on device 0 (first: output.weight, 260736000 bytes)
+0.08.099.485 W q8_repack: repacking q6_K tensors on device 1 (first: output.weight, 260736000 bytes)
+0.08.583.529 W q8_repack: repacking iq4_nl tensors on device 0 (first: blk.0.ffn_down_exps.weight, 188743680 bytes)
+0.08.758.537 W q8_repack: repacking iq4_nl tensors on device 1 (first: blk.0.ffn_down_exps.weight, 283115520 bytes)
+0.19.315.272 W q8_repack: repacking q8_0 tensors on device 0 (first: blk.1.ple_key.weight, 27852800 bytes)
+0.19.349.671 W q8_repack: repacking q8_0 tensors on device 1 (first: blk.1.ple_key.weight, 27852800 bytes)
+0.22.523.440 W TP custom AR: peer access not available between GPU 0 and 1
+0.22.523.445 W TP custom AR: peer access not available between GPU 1 and 0
+0.22.523.446 W TP custom AR: disabled because full peer access is not available
+0.22.678.644 I cmn          init: llama threadpool init, n_threads = 20
+0.23.182.391 W seq_rm: refusing rollback seq 0: pending=0 (rs_idx=0 target=-1) rollback=1 limit=0
+0.23.186.226 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 100096, kv_unified = 'false'
+0.23.193.204 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.23.193.246 I srv  server_run_i: model loaded
+0.23.193.247 I srv  server_on_li: listening on http://127.0.0.1:38559
+0.23.413.745 I slot get_availabl: id  0 | task -1 | selected slot by LRU, n_tokens = 0, t_last = -1
+0.23.413.917 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+0.26.709.342 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   1066, progress = 0.26, t =   3.30 s / 323.48 tokens per second
+0.28.898.950 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   2090, progress = 0.50, t =   5.48 s / 381.04 tokens per second
+0.31.163.463 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   3114, progress = 0.75, t =   7.75 s / 401.83 tokens per second
+0.32.359.225 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   3627, progress = 0.88, t =   8.95 s / 405.47 tokens per second
+0.33.604.455 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   4139, progress = 1.00, t =  10.19 s / 406.16 tokens per second
+0.36.826.212 I slot print_timing: id  0 | task 0 | n_gen =    117, tg =  38.37 t/s, tg_3s =  38.70 t/s
+0.39.844.123 I slot print_timing: id  0 | task 0 | n_gen =    230, tg =  37.91 t/s, tg_3s =  37.44 t/s
+0.40.499.849 I slot print_timing: id  0 | task 0 | prompt eval time =   10388.78 ms /  4143 tokens (    2.51 ms per token,   398.80 tokens per second)
+0.40.499.852 I slot print_timing: id  0 | task 0 |        eval time =    6697.10 ms /   256 tokens (   26.26 ms per token,    38.08 tokens per second)
+0.40.499.853 I slot print_timing: id  0 | task 0 |       total time =   17085.89 ms /  4399 tokens
+0.40.499.865 I slot print_timing: id  0 | task 0 |    graphs reused =        253
+0.40.499.865 I slot print_timing: id  0 | task 0 |   graph reallocs =          0    /     0        (same size) / (changed size)
+0.40.500.025 I slot      release: id  0 | task 0 | stop processing: n_tokens = 4398, truncated = 0
+0.40.501.129 I srv    operator(): operator(): cleaning up before exit...

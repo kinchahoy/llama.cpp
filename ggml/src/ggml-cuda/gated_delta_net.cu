@@ -1,4 +1,5 @@
 #include "gated_delta_net.cuh"
+#include "gated_delta_net_chunk.cuh"
 #include "gated-delta-net-mma.cuh"
 #include "ggml-cuda/common.cuh"
 
@@ -178,7 +179,7 @@ gated_delta_net_cuda(const float * q,
     }
 }
 
-template <bool KDA, bool keep_rs_t>
+template <bool KDA, bool keep_rs_t, int cols_per_warp = gdn_cols_per_warp>
 static void launch_gated_delta_net(
         const float * q_d, const float * k_d, const float * v_d,
         const float * g_d, const float * b_d, const float * s_d,
@@ -189,17 +190,56 @@ static void launch_gated_delta_net(
         int64_t sb1,   int64_t sb2, int64_t sb3,
         int64_t neqk1, int64_t rq3,
         float scale, int64_t state_slot_stride, int K, cudaStream_t stream) {
-    //TODO: Add chunked kernel for even faster pre-fill
-    const int warp_size = ggml_cuda_info().devices[ggml_cuda_get_device()].warp_size;
-    // four columns per warp (see the kernel); shrink the CTA when the wider CTA would leave
-    // SMs without a CTA, so small head counts keep the device filled
-    const int nsm = ggml_cuda_info().devices[ggml_cuda_get_device()].nsm;
-    const int cols_per_warp = gdn_cols_per_warp;
-    int num_warps = 4;
-    while (num_warps > 1 && H*n_seqs*(S_v / (cols_per_warp * num_warps)) < nsm) {
-        num_warps /= 2;
+    const int CS = KDA ? 16 : 64;
+
+    // The chunked kernel emits per-token snapshots, so retained-state prefill no longer needs serial arithmetic.
+    // The opt-out is for diagnosis and does not change ring-off calls.
+    static const bool chunk_snap_off = [] {
+        const char * value = getenv("LLAMA_GDN_NO_CHUNK_SNAPSHOTS");
+        return value != nullptr && atoi(value) != 0;
+    }();
+    const bool chunk_eligible = n_tokens >= 2 * CS && S_v <= 128;
+
+    static bool chunk_snap_announced = false;
+    if constexpr (keep_rs_t) {
+        if (chunk_eligible && !chunk_snap_announced) {
+            chunk_snap_announced = true;
+            GGML_LOG_WARN("%s: gdn-chunk-snapshots: keep_rs chunked path %s\n",
+                    __func__, chunk_snap_off ? "SUPPRESSED by LLAMA_GDN_NO_CHUNK_SNAPSHOTS" :
+                                              "TAKEN (default)");
+        }
     }
-    // one CTA covers cols_per_warp*num_warps columns (see the kernel)
+
+    if (chunk_eligible && (!keep_rs_t || !chunk_snap_off)) {
+        launch_gated_delta_net_chunk<KDA, keep_rs_t>(
+            q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d,
+            S_v, H, n_tokens, n_seqs, sq1, sq2, sq3,
+            sv1, sv2, sv3, sb1, sb2, sb3,
+            neqk1, rq3, scale, state_slot_stride, K, stream);
+        return;
+    }
+
+    const int device = ggml_cuda_get_device();
+    const int cc = ggml_cuda_info().devices[device].cc;
+    if constexpr (cols_per_warp != 1) {
+        if (cc == GGML_CUDA_CC_VEGA20) {
+            launch_gated_delta_net<KDA, keep_rs_t, 1>(
+                q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d,
+                S_v, H, n_tokens, n_seqs, sq1, sq2, sq3,
+                sv1, sv2, sv3, sb1, sb2, sb3,
+                neqk1, rq3, scale, state_slot_stride, K, stream);
+            return;
+        }
+    }
+
+    const int warp_size = ggml_cuda_info().devices[device].warp_size;
+    const int nsm = ggml_cuda_info().devices[device].nsm;
+    int num_warps = cc == GGML_CUDA_CC_VEGA20 && n_tokens == 1 ? 2 : 4;
+    if constexpr (cols_per_warp != 1) {
+        while (num_warps > 1 && H*n_seqs*(S_v / (cols_per_warp * num_warps)) < nsm) {
+            num_warps /= 2;
+        }
+    }
     dim3      grid_dims(H, n_seqs, (S_v + cols_per_warp * num_warps - 1) / (cols_per_warp * num_warps));
     dim3      block_dims(warp_size <= S_v ? warp_size : S_v, num_warps, 1);
 
@@ -209,26 +249,26 @@ static void launch_gated_delta_net(
     const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params(grid_dims, block_dims, 0, stream);
     switch (S_v) {
         case 16:
-            ggml_cuda_kernel_launch(gated_delta_net_cuda<16, KDA, keep_rs_t>, launch_params,
+            ggml_cuda_kernel_launch(gated_delta_net_cuda<16, KDA, keep_rs_t, cols_per_warp>, launch_params,
                 q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d, H,
                 n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
                 sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K);
             break;
         case 32:
-            ggml_cuda_kernel_launch(gated_delta_net_cuda<32, KDA, keep_rs_t>, launch_params,
+            ggml_cuda_kernel_launch(gated_delta_net_cuda<32, KDA, keep_rs_t, cols_per_warp>, launch_params,
                 q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d, H,
                 n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
                 sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K);
             break;
         case 64: {
-            ggml_cuda_kernel_launch(gated_delta_net_cuda<64, KDA, keep_rs_t>, launch_params,
+            ggml_cuda_kernel_launch(gated_delta_net_cuda<64, KDA, keep_rs_t, cols_per_warp>, launch_params,
                 q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d, H,
                 n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
                 sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K);
             break;
         }
         case 128: {
-            ggml_cuda_kernel_launch(gated_delta_net_cuda<128, KDA, keep_rs_t>, launch_params,
+            ggml_cuda_kernel_launch(gated_delta_net_cuda<128, KDA, keep_rs_t, cols_per_warp>, launch_params,
                 q_d, k_d, v_d, g_d, b_d, s_d, dst_d, state_d, H,
                 n_tokens, n_seqs, sq1, sq2, sq3, sv1, sv2, sv3,
                 sb1, sb2, sb3, neqk1_magic, rq3_magic, scale, state_slot_stride, K);
@@ -353,7 +393,7 @@ static void ggml_cuda_op_gated_delta_net_impl(
         state_slot_stride = cache->slot_stride;
     }
 
-    {
+    if (!keep_rs) {
         ggml_cuda_gdn_mma_args args = ggml_cuda_gdn_mma_args_from_tensor(dst);
         args.state_out = state_d;
         if (ggml_cuda_gdn_mma_launch(ctx.device, args, stream)) {

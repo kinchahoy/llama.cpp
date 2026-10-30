@@ -23,6 +23,9 @@
 #include "mtmd-helper.h"
 #include "base64.hpp"
 
+#include "../../src/llama-memory.h"
+#include "../../src/llama-ext.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cinttypes>
@@ -65,6 +68,11 @@ static common_speculative_output_limits server_output_limits(const common_params
     result.total   = std::max<int32_t>(1, result.total);
     result.per_seq = std::max<int32_t>(1, result.per_seq);
     return result;
+}
+
+static bool server_memory_can_checkpoint(llama_context * ctx) {
+    llama_memory_t mem = llama_get_memory(ctx);
+    return mem && mem->get_can_checkpoint();
 }
 
 // a checkpoint restore dropped tokens the target had accepted - re-accept them rather than verify again
@@ -298,6 +306,7 @@ struct server_slot {
     std::vector<std::vector<llama_token_data>> spec_draft_q;
     llama_tokens spec_prompt;
     std::vector<int32_t> spec_i_batch;
+    std::vector<int32_t> spec_i_batch_last; // verify rows of the last sampled draft
     common_prompt_checkpoint spec_ckpt;
     bool spec_is_replay = false;
     std::mt19937 spec_synth_rng;
@@ -391,7 +400,10 @@ struct server_slot {
 
     common_sampler_ptr smpl;
 
-    llama_token sampled; // in speculative mode, this is the last accepted token
+    // in speculative mode, this is the last accepted token. LLAMA_TOKEN_NULL until
+    // the first token of the task is sampled - drafting must not start before then
+    // (a null anchor reaches the draft graph as get_rows index -1)
+    llama_token sampled = LLAMA_TOKEN_NULL;
 
     // for TTS models, this is the embd generated from prev step, decode this to generate next hidden state
     // corresponding to one token position (size = n_embd)
@@ -662,6 +674,9 @@ struct server_slot {
             t_last_used = ggml_time_us();
 
             state = SLOT_STATE_IDLE;
+
+            // Discard deferred draft state and any target-only prompt cache.
+            const bool speculative_prompt_invalid = common_speculative_reset(spec, id);
 
             // do not keep context of the child slots - the parent's context is enough
             // nor of the stateless slots - no task ever reuses it
@@ -1100,6 +1115,11 @@ private:
     // if swa_full is enabled, this is set to 0 to simulate a non-SWA model
     int32_t n_swa;
 
+    // Keep checkpoint-driven prompt batch boundaries even when partial state
+    // cannot be stored losslessly. DSpark depends on the near-end boundaries,
+    // while create_checkpoint() can independently suppress unsafe snapshots.
+    bool prompt_checkpoint_storage_lossless = true;
+
     // slots / clients
     std::vector<server_slot> slots;
 
@@ -1426,6 +1446,13 @@ private:
             }
         }
 
+        const bool tgt_can_checkpoint = server_memory_can_checkpoint(ctx_tgt);
+        const bool dft_can_checkpoint = !ctx_dft || server_memory_can_checkpoint(ctx_dft);
+        prompt_checkpoint_storage_lossless = tgt_can_checkpoint && dft_can_checkpoint;
+        if (params_base.n_ctx_checkpoints > 0 && !prompt_checkpoint_storage_lossless) {
+            SRV_WRN("%s\n", "prompt checkpoint storage is not lossless for this context; snapshots will not be saved");
+        }
+
         if (llama_model_n_swa(model_tgt) == 0) {
             if (params_base.swa_full) {
                 params_base.swa_full = false;
@@ -1605,9 +1632,11 @@ private:
         }
         SRV_TRC("%s", "for more info see https://github.com/ggml-org/llama.cpp/pull/16391\n");
 
-        if (params_base.n_ctx_checkpoints > 0) {
+        if (params_base.n_ctx_checkpoints > 0 && prompt_checkpoint_storage_lossless) {
             SRV_TRC("context checkpoints enabled, max = %d, min spacing = %d\n",
                     params_base.n_ctx_checkpoints, params_base.checkpoint_min_step);
+        } else if (params_base.n_ctx_checkpoints > 0) {
+            SRV_TRC("%s", "context checkpoint boundaries enabled, snapshot storage disabled\n");
         } else {
             SRV_TRC("%s", "context checkpoints disabled\n");
         }
@@ -2722,6 +2751,10 @@ private:
 
     // n_tokens_cur: the number of tokens added to the batch for the current slot
     void create_checkpoint(server_slot & slot, const int64_t n_tokens_cur, llama_pos pos_min, llama_pos pos_max) {
+        if (!prompt_checkpoint_storage_lossless) {
+            return;
+        }
+
         const int id_task = slot.task->id;
 
         // evict checkpoints within min-step of a previous checkpoint, unless they were
@@ -3863,7 +3896,10 @@ private:
 
                 const int n_draft_max = slot.get_n_draft_max();
 
-                if (n_draft_max > 0) {
+                // with the deferred sampling of chunked prefill, a slot can reach
+                // pre_decode before its first token was sampled - no anchor to
+                // draft from yet, skip this iteration
+                if (n_draft_max > 0 && slot.sampled != LLAMA_TOKEN_NULL) {
                     GGML_ASSERT(slot.can_speculate());
 
                     // stale candidates: a replay never reads them, a new draft refills them
@@ -4560,6 +4596,22 @@ private:
                         if (!is_user_start && !near_prompt_end) {
                             do_checkpoint = false;
                         }
+
+                        // LLAMA_NO_MIDPROMPT_CKPT=1: skip ALL mid-prompt checkpoints.
+                        // llama_state_seq_get_data_ext drains the whole scheduler
+                        // pipeline, so every mid-prompt checkpoint serializes the
+                        // prefill rounds (measured 0.7-2.1 s per checkpoint on 8-GPU
+                        // -sm tensor, the drain tagged via LLAMA_SYNC_TRACE). The
+                        // near-prompt-end checkpoint is preserved - it is the one
+                        // that enables decode-time rollback. Mid-prompt checkpoints
+                        // only speed up partial prompt-cache reuse across requests.
+                        static const bool no_mid_ckpt = []() {
+                            const char * env = getenv("LLAMA_NO_MIDPROMPT_CKPT");
+                            return env && atoi(env) != 0;
+                        }();
+                        if (no_mid_ckpt && !near_prompt_end) {
+                            do_checkpoint = false;
+                        }
                     }
 
                     const auto pos_min = llama_memory_seq_pos_min(llama_get_memory(ctx_tgt), slot.id);
@@ -4593,6 +4645,40 @@ private:
                 }
             });
         }
+    }
+
+    bool reserve_prompt_graph(const common_batch & batch_view) {
+        static const bool enabled = []() {
+            const char * value = getenv("LLAMA_DSPARK_PROMPT_RESERVE");
+            return value == nullptr || atoi(value) != 0;
+        }();
+        if (!enabled || !spec || slots.size() != 1 || llama_n_seq_max(ctx_tgt) != 1 ||
+                params_base.split_mode != LLAMA_SPLIT_MODE_LAYER || llama_model_n_devices(model_tgt) < 2 ||
+                batch.has_embd() || batch_view.tokens.empty() || batch_view.tokens[0].pos[0] != 0 ||
+                batch_view.size() <= (int32_t) llama_n_ubatch(ctx_tgt) || !batch.tokens.front().is_prompt) {
+            return true;
+        }
+        const auto & types = params_base.speculative.types;
+        if (std::find(types.begin(), types.end(), COMMON_SPECULATIVE_TYPE_DRAFT_DSPARK) == types.end() ||
+                std::any_of(types.begin(), types.end(), [](common_speculative_type type) { return type != COMMON_SPECULATIVE_TYPE_NONE && type != COMMON_SPECULATIVE_TYPE_DRAFT_DSPARK; })) {
+            return true;
+        }
+        const auto & slot = slots.front();
+        if (!slot.task || slot.task->type != SERVER_TASK_TYPE_COMPLETION || slot.need_embd() ||
+                slot.task->tokens.has_mtmd || !slot.lora.empty() || !llama_get_memory(ctx_tgt)) {
+            return true;
+        }
+
+        const int64_t start_us = ggml_time_us();
+        const uint32_t n_tokens = std::min(llama_n_ctx(ctx_tgt), llama_n_ubatch(ctx_tgt));
+        const uint32_t n_outputs = std::min(n_tokens, (uint32_t) params_base.n_outputs_max);
+        SLT_INF(slot, "DSpark prompt reserve begin: tokens=%u, outputs=%u, explicit synchronize\n", n_tokens, n_outputs);
+        llama_synchronize(ctx_tgt);
+        llama_sched_reserve(ctx_tgt);
+        const bool ok = llama_graph_reserve(ctx_tgt, n_tokens, 1, n_outputs) != nullptr;
+        SLT_INF(slot, "DSpark prompt reserve end: ok=%d, %.3f ms including synchronization\n", ok,
+                (ggml_time_us() - start_us) / 1000.0);
+        return ok;
     }
 
     // see https://github.com/ggml-org/llama.cpp/pull/29969
@@ -4690,7 +4776,7 @@ private:
         // note: the sync is done here too, so that the wait is also covered by the yield
         int ret = 0;
         queue_tasks.yield_to_queue([&]() {
-            ret = llama_process(ctx_tgt, LLAMA_PROCESS_TYPE_DECODE, batch.view.get());
+            ret = reserve_prompt_graph(batch.view) ? llama_process(ctx_tgt, LLAMA_PROCESS_TYPE_DECODE, batch.view.get()) : -2;
             if (ret == 0 && has_output) {
                 llama_synchronize(ctx_tgt);
             }
@@ -5003,6 +5089,7 @@ private:
             }
 
             const auto ids = std::move(slot.spec_draft);
+            const auto i_batch = std::move(slot.spec_i_batch_last);
 
             size_t n_accepted = ids.size() - 1;
             if (slot.spec_is_replay && n_accepted > 0) {
@@ -5038,7 +5125,7 @@ private:
 
                 result.tok          = ids[i];
                 result.text_to_send = common_token_to_piece(slot.ctx_tgt, result.tok, accept_special_token(slot, result.tok));
-                result.prob         = 1.0f; // set later
+                result.prob         = 1.0f;
 
                 // post_sampling_probs is not supported with speculative decoding
                 if (slot.task->params.sampling.n_probs > 0 && !slot.task->params.post_sampling_probs) {

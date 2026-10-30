@@ -1,0 +1,231 @@
+0.00.025.062 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.026.859 W srv  server_setup: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.030.495 I srv    load_model: loading model '/home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/c8b5954a88c2775c546b92593eda40ea041d3176/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00003.gguf'
+0.00.031.493 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+[shexp-split] splitting shared experts across the TP group (LLAMA_SHEXP_SPLIT=0 to disable)
+0.08.325.074 W q8_repack: repacking q8_0 tensors on device 0 (first: output_hc_down.weight, 3481600 bytes)
+0.08.329.325 W q8_repack: repacking q8_0 tensors on device 1 (first: output_hc_down.weight, 3481600 bytes)
+0.08.335.034 W q8_repack: repacking q6_K tensors on device 0 (first: output.weight, 260736000 bytes)
+0.08.643.336 W q8_repack: repacking q6_K tensors on device 1 (first: output.weight, 260736000 bytes)
+0.08.983.051 W q8_repack: repacking iq4_nl tensors on device 0 (first: blk.0.ffn_down_exps.weight, 188743680 bytes)
+0.09.092.077 W q8_repack: repacking iq4_nl tensors on device 1 (first: blk.0.ffn_down_exps.weight, 283115520 bytes)
+0.18.869.901 W TP custom AR: peer access not available between GPU 0 and 1
+0.18.869.904 W TP custom AR: peer access not available between GPU 1 and 0
+0.18.869.904 W TP custom AR: disabled because full peer access is not available
+0.19.049.036 I cmn          init: llama threadpool init, n_threads = 4
+0.19.435.778 I common_speculative_init_result: loading draft model '/home/raistlin/.cache/models/qwen38-flash-next-mtp/MTP/mtp-Qwen3.8-Flash-Next-Q8_0.gguf'
+0.21.009.006 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 100096, kv_unified = 'false'
+0.21.930.091 W [repack-moe-fusion] type=q8_0 cols=2 fused up/gate mat-vec engaged
+0.21.935.506 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.21.935.532 I srv  server_run_i: model loaded
+0.21.935.533 I srv  server_on_li: listening on http://127.0.0.1:55797
+0.22.065.387 I slot get_availabl: id  0 | task -1 | selected slot by LRU, n_tokens = 0, t_last = -1
+0.22.065.439 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+0.22.937.806 W launch_gated_delta_net: gdn-chunk-snapshots: keep_rs chunked path TAKEN (default)
+0.26.213.850 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   1581, progress = 0.75, t =   4.15 s / 381.11 tokens per second
+0.27.399.023 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   2093, progress = 1.00, t =   5.33 s / 392.44 tokens per second
+MTP feedback step=0 token=1144 hidden_diff=0
+MTP feedback step=1 token=4087 hidden_diff=0
+0.28.031.125 I spec        draft: device MTP chain active
+MTP feedback step=0 token=310 hidden_diff=0
+MTP feedback step=1 token=1156 hidden_diff=0
+MTP feedback step=0 token=2570 hidden_diff=0
+MTP feedback step=1 token=3162 hidden_diff=0
+MTP feedback step=0 token=264 hidden_diff=0
+MTP feedback step=1 token=443 hidden_diff=0
+MTP feedback step=0 token=1274 hidden_diff=0
+MTP feedback step=1 token=706 hidden_diff=0
+MTP feedback step=0 token=2144 hidden_diff=0
+MTP feedback step=1 token=13 hidden_diff=0
+MTP feedback step=0 token=4222 hidden_diff=0
+MTP feedback step=1 token=874 hidden_diff=0
+MTP feedback step=0 token=11135 hidden_diff=0
+MTP feedback step=1 token=3296 hidden_diff=0
+MTP feedback step=0 token=14235 hidden_diff=0
+MTP feedback step=1 token=4222 hidden_diff=0
+MTP feedback step=0 token=4222 hidden_diff=0
+MTP feedback step=1 token=781 hidden_diff=0
+MTP feedback step=0 token=1438 hidden_diff=0
+MTP feedback step=1 token=30 hidden_diff=0
+MTP feedback step=0 token=30 hidden_diff=0
+MTP feedback step=1 token=2302 hidden_diff=0
+MTP feedback step=0 token=781 hidden_diff=0
+MTP feedback step=1 token=1318 hidden_diff=0
+MTP feedback step=0 token=3286 hidden_diff=0
+MTP feedback step=1 token=30 hidden_diff=0
+MTP feedback step=0 token=30 hidden_diff=0
+MTP feedback step=1 token=1165 hidden_diff=0
+MTP feedback step=0 token=7936 hidden_diff=0
+MTP feedback step=1 token=10631 hidden_diff=0
+MTP feedback step=0 token=13 hidden_diff=0
+MTP feedback step=1 token=14235 hidden_diff=0
+MTP feedback step=0 token=2466 hidden_diff=0
+MTP feedback step=1 token=1092 hidden_diff=0
+MTP feedback step=0 token=4562 hidden_diff=0
+MTP feedback step=1 token=30 hidden_diff=0
+MTP feedback step=0 token=579 hidden_diff=0
+MTP feedback step=1 token=23331 hidden_diff=0
+MTP feedback step=0 token=13 hidden_diff=0
+MTP feedback step=1 token=271 hidden_diff=0
+MTP feedback step=0 token=579 hidden_diff=0
+MTP feedback step=1 token=264 hidden_diff=0
+MTP feedback step=0 token=6982 hidden_diff=0
+MTP feedback step=1 token=1274 hidden_diff=0
+MTP feedback step=0 token=1210 hidden_diff=0
+MTP feedback step=1 token=911 hidden_diff=0
+MTP feedback step=0 token=2570 hidden_diff=0
+MTP feedback step=1 token=3162 hidden_diff=0
+MTP feedback step=0 token=381 hidden_diff=0
+MTP feedback step=1 token=9859 hidden_diff=0
+MTP feedback step=0 token=3286 hidden_diff=0
+MTP feedback step=1 token=30 hidden_diff=0
+MTP feedback step=0 token=9640 hidden_diff=0
+MTP feedback step=1 token=1066 hidden_diff=0
+MTP feedback step=0 token=5435 hidden_diff=0
+MTP feedback step=1 token=999 hidden_diff=0
+MTP feedback step=0 token=1165 hidden_diff=0
+MTP feedback step=1 token=1144 hidden_diff=0
+MTP feedback step=0 token=6970 hidden_diff=0
+MTP feedback step=1 token=2466 hidden_diff=0
+MTP feedback step=0 token=27367 hidden_diff=0
+MTP feedback step=1 token=4694 hidden_diff=0
+MTP feedback step=0 token=11782 hidden_diff=0
+MTP feedback step=1 token=11 hidden_diff=0
+MTP feedback step=0 token=11 hidden_diff=0
+MTP feedback step=1 token=1970 hidden_diff=0
+MTP feedback step=0 token=11 hidden_diff=0
+MTP feedback step=1 token=4499 hidden_diff=0
+MTP feedback step=0 token=13 hidden_diff=0
+MTP feedback step=1 token=14235 hidden_diff=0
+MTP feedback step=0 token=16097 hidden_diff=0
+MTP feedback step=1 token=13 hidden_diff=0
+MTP feedback step=0 token=22916 hidden_diff=0
+MTP feedback step=1 token=22903 hidden_diff=0
+MTP feedback step=0 token=579 hidden_diff=0
+MTP feedback step=1 token=22903 hidden_diff=0
+MTP feedback step=0 token=25522 hidden_diff=0
+MTP feedback step=1 token=13 hidden_diff=0
+MTP feedback step=0 token=13 hidden_diff=0
+MTP feedback step=1 token=271 hidden_diff=0
+MTP feedback step=0 token=706 hidden_diff=0
+MTP feedback step=1 token=25 hidden_diff=0
+MTP feedback step=0 token=90 hidden_diff=0
+MTP feedback step=1 token=198 hidden_diff=0
+MTP feedback step=0 token=283 hidden_diff=0
+MTP feedback step=1 token=2423 hidden_diff=0
+MTP feedback step=0 token=198 hidden_diff=0
+MTP feedback step=1 token=10804 hidden_diff=0
+MTP feedback step=0 token=313 hidden_diff=0
+MTP feedback step=1 token=307 hidden_diff=0
+MTP feedback step=0 token=20185 hidden_diff=0
+MTP feedback step=1 token=5676 hidden_diff=0
+MTP feedback step=0 token=283 hidden_diff=0
+MTP feedback step=1 token=328 hidden_diff=0
+MTP feedback step=0 token=36446 hidden_diff=0
+MTP feedback step=1 token=911 hidden_diff=0
+MTP feedback step=0 token=9325 hidden_diff=0
+MTP feedback step=1 token=911 hidden_diff=0
+MTP feedback step=0 token=5676 hidden_diff=0
+MTP feedback step=1 token=9325 hidden_diff=0
+MTP feedback step=0 token=428 hidden_diff=0
+MTP feedback step=1 token=19287 hidden_diff=0
+MTP feedback step=0 token=26 hidden_diff=0
+MTP feedback step=1 token=1274 hidden_diff=0
+MTP feedback step=0 token=89286 hidden_diff=0
+MTP feedback step=1 token=7088 hidden_diff=0
+MTP feedback step=0 token=29986 hidden_diff=0
+MTP feedback step=1 token=25 hidden_diff=0
+MTP feedback step=0 token=226970 hidden_diff=0
+MTP feedback step=1 token=60282 hidden_diff=0
+MTP feedback step=0 token=706 hidden_diff=0
+MTP feedback step=1 token=89286 hidden_diff=0
+0.30.603.478 I slot print_timing: id  0 | task 0 | n_gen =    138, tg =  45.09 t/s, tg_3s =  45.42 t/s
+MTP feedback step=0 token=19455 hidden_diff=0
+MTP feedback step=1 token=198 hidden_diff=0
+MTP feedback step=0 token=283 hidden_diff=0
+MTP feedback step=1 token=313 hidden_diff=0
+MTP feedback step=0 token=11 hidden_diff=0
+MTP feedback step=1 token=1274 hidden_diff=0
+MTP feedback step=0 token=89286 hidden_diff=0
+MTP feedback step=1 token=11 hidden_diff=0
+MTP feedback step=0 token=333 hidden_diff=0
+MTP feedback step=1 token=31 hidden_diff=0
+MTP feedback step=0 token=25 hidden_diff=0
+MTP feedback step=1 token=1042 hidden_diff=0
+MTP feedback step=0 token=5460 hidden_diff=0
+MTP feedback step=1 token=283 hidden_diff=0
+MTP feedback step=0 token=15 hidden_diff=0
+MTP feedback step=1 token=13 hidden_diff=0
+MTP feedback step=0 token=13 hidden_diff=0
+MTP feedback step=1 token=15 hidden_diff=0
+MTP feedback step=0 token=303 hidden_diff=0
+MTP feedback step=1 token=1274 hidden_diff=0
+MTP feedback step=0 token=89286 hidden_diff=0
+MTP feedback step=1 token=14515 hidden_diff=0
+MTP feedback step=0 token=3751 hidden_diff=0
+MTP feedback step=1 token=706 hidden_diff=0
+MTP feedback step=0 token=23007 hidden_diff=0
+MTP feedback step=1 token=10804 hidden_diff=0
+MTP feedback step=0 token=333 hidden_diff=0
+MTP feedback step=1 token=313 hidden_diff=0
+MTP feedback step=0 token=283 hidden_diff=0
+MTP feedback step=1 token=498 hidden_diff=0
+MTP feedback step=0 token=5098 hidden_diff=0
+MTP feedback step=1 token=5757 hidden_diff=0
+MTP feedback step=0 token=706 hidden_diff=0
+MTP feedback step=1 token=40612 hidden_diff=0
+MTP feedback step=0 token=8499 hidden_diff=0
+MTP feedback step=1 token=283 hidden_diff=0
+MTP feedback step=0 token=26 hidden_diff=0
+MTP feedback step=1 token=5757 hidden_diff=0
+MTP feedback step=0 token=15824 hidden_diff=0
+MTP feedback step=1 token=5098 hidden_diff=0
+MTP feedback step=0 token=2244 hidden_diff=0
+MTP feedback step=1 token=283 hidden_diff=0
+MTP feedback step=0 token=2124 hidden_diff=0
+MTP feedback step=1 token=11 hidden_diff=0
+MTP feedback step=0 token=11 hidden_diff=0
+MTP feedback step=1 token=21759 hidden_diff=0
+MTP feedback step=0 token=11 hidden_diff=0
+MTP feedback step=1 token=21759 hidden_diff=0
+MTP feedback step=0 token=11 hidden_diff=0
+MTP feedback step=1 token=21759 hidden_diff=0
+MTP feedback step=0 token=34 hidden_diff=0
+MTP feedback step=1 token=7800 hidden_diff=0
+MTP feedback step=0 token=21759 hidden_diff=0
+MTP feedback step=1 token=5676 hidden_diff=0
+MTP feedback step=0 token=499 hidden_diff=0
+MTP feedback step=1 token=76 hidden_diff=0
+MTP feedback step=0 token=2423 hidden_diff=0
+MTP feedback step=1 token=34203 hidden_diff=0
+MTP feedback step=0 token=24030 hidden_diff=0
+MTP feedback step=1 token=283 hidden_diff=0
+MTP feedback step=0 token=5676 hidden_diff=0
+MTP feedback step=1 token=1210 hidden_diff=0
+MTP feedback step=0 token=12143 hidden_diff=0
+MTP feedback step=1 token=26 hidden_diff=0
+MTP feedback step=0 token=67159 hidden_diff=0
+MTP feedback step=1 token=283 hidden_diff=0
+MTP feedback step=0 token=90448 hidden_diff=0
+MTP feedback step=1 token=67159 hidden_diff=0
+MTP feedback step=0 token=21759 hidden_diff=0
+MTP feedback step=1 token=5676 hidden_diff=0
+MTP feedback step=0 token=12722 hidden_diff=0
+MTP feedback step=1 token=641 hidden_diff=0
+MTP feedback step=0 token=3595 hidden_diff=0
+MTP feedback step=1 token=9325 hidden_diff=0
+MTP feedback step=0 token=2600 hidden_diff=0
+MTP feedback step=1 token=2338 hidden_diff=0
+MTP feedback step=0 token=911 hidden_diff=0
+MTP feedback step=1 token=313 hidden_diff=0
+MTP feedback step=0 token=90448 hidden_diff=0
+MTP feedback step=1 token=5460 hidden_diff=0
+0.32.636.962 I slot print_timing: id  0 | task 0 | prompt eval time =    5499.44 ms /  2097 tokens (    2.62 ms per token,   381.31 tokens per second)
+0.32.636.966 I slot print_timing: id  0 | task 0 |        eval time =    5072.06 ms /   256 tokens (   19.89 ms per token,    50.28 tokens per second)
+0.32.636.967 I slot print_timing: id  0 | task 0 |       total time =   10571.49 ms /  2353 tokens
+0.32.636.969 I slot print_timing: id  0 | task 0 |    graphs reused =         95
+0.32.636.970 I slot print_timing: id  0 | task 0 |   graph reallocs =          0    /     0        (same size) / (changed size)
+0.32.636.974 I slot print_timing: id  0 | task 0 | draft acceptance = 0.80928 (  157 accepted /   194 generated), mean len =  2.62
+0.32.636.997 I statistics        draft-mtp: #calls(b,p,g,a) =    1    103     97     97, #gen drafts =     97, #acc drafts =    85, #gen tokens =    194, #acc tokens =   157, #mean acc len = 2.62, #acc rate/pos = (0.876, 0.742), dur(b,p,g,a) = 0.008, 70.724, 899.265, 0.246 ms
+0.32.637.104 I slot      release: id  0 | task 0 | stop processing: n_tokens = 2352, truncated = 0
+0.32.638.394 I srv    operator(): operator(): cleaning up before exit...

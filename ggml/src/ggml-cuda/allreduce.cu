@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <type_traits>
 
 // ---------------------------------------------------------------------------
 // AllReduce for tensor-parallel inference across two GPUs (CUDA or
@@ -76,6 +77,10 @@ static constexpr size_t GGML_CUDA_AR_ARRIVAL_STRIDE = 64;
 // slot so multiple SMs can pump PCIe stores in parallel.
 static constexpr int GGML_CUDA_AR_KERNEL_BLOCKS = 8;
 
+// Number of slots in the staging / arrival ring.  Two slots are enough: AR N+1 is a
+// barrier, so when a rank starts AR N+2 its peer has finished reading slot[N%2].
+static constexpr int GGML_CUDA_AR_POOL_SIZE = 2;
+
 // ---------------------------------------------------------------------------
 // Chunked kernel AllReduce -- 2 GPUs, supports float, half, and bfloat16.
 //
@@ -110,12 +115,13 @@ template <typename T_dst, typename T_wire>
 static __global__ void ggml_cuda_ar_kernel(
         const T_dst  *              sendbuf,
         T_dst        *              recvbuf,
-        T_wire       * __restrict__ host_mine,
-        const T_wire * __restrict__ host_other,
+        T_wire       * __restrict__ host_mine_base,
+        const T_wire * __restrict__ host_other_base,
+        size_t                      slot_elems,
         int                         count,
-        int *                       arrival_mine,
-        int *                       arrival_other,
-        int                         token) {
+        int *                       arrival,
+        int                         rank,
+        int *                       counter) {
 
     // Vector unit for the wire type, sized to the arch's widest single-instruction
     // copy (16 B on Volta+).  Each phase-1 iter writes one vector to host memory;
@@ -130,6 +136,21 @@ static __global__ void ggml_cuda_ar_kernel(
     const int gnt       = gridDim.x * nt;
     const int count_vec = count / ELEMS_PER_VEC;
     const int tail      = count_vec * ELEMS_PER_VEC;
+
+    // Token and slot come from a per-block device counter, not from the host.
+    // Both ranks run the same AR sequence, so their counters stay equal. This keeps the kernel valid in a replayed graph.
+    __shared__ int s_token;
+    if (tid == 0) {
+        s_token = counter[bid] + 1;
+    }
+    __syncthreads();
+    const int token = s_token;
+    const int slot  = token % GGML_CUDA_AR_POOL_SIZE;
+
+    T_wire       * host_mine  = host_mine_base  + slot * slot_elems;
+    const T_wire * host_other = host_other_base + slot * slot_elems;
+    int       * arrival_mine  = arrival + (slot * 2 + rank)     * GGML_CUDA_AR_KERNEL_BLOCKS * ARRIVAL_INTS;
+    const int * arrival_other = arrival + (slot * 2 + 1 - rank) * GGML_CUDA_AR_KERNEL_BLOCKS * ARRIVAL_INTS;
 
     // Phase 1: cast sendbuf (T_dst) -> host_mine (T_wire) and store as vectors.
     {
@@ -171,6 +192,7 @@ static __global__ void ggml_cuda_ar_kernel(
             NO_DEVICE_CODE;
 #endif // GGML_USE_HIP
         }
+        counter[bid] = token;
     }
 
     __syncthreads();
@@ -225,13 +247,7 @@ static __global__ void ggml_cuda_ar_add_kernel(
 // Pipeline structure
 // ---------------------------------------------------------------------------
 
-// Number of slots in the event / arrival ring.  Two slots is sufficient:
-// lockstep guarantees the two GPUs are at most one AR (or chunk) apart, so
-// slot[N%2] is always safe to reuse -- peer has already consumed slot[N%2]
-// from AR N-2 by the time we get to AR N.  acquire_slot's
-// cudaEventSynchronize on ev.ker for both devices makes that consumption
-// explicit before we overwrite host_buf[slot] for the new AR.
-static constexpr int GGML_CUDA_AR_POOL_SIZE = 2;
+// The copy-engine path also uses GGML_CUDA_AR_POOL_SIZE event slots; acquire_slot host-syncs on them before reuse.
 
 // Maximum chunk size (bytes per GPU) handled by one chunked kernel launch.
 // Larger tensors are reduced by issuing multiple chunked launches.
@@ -314,7 +330,13 @@ struct ggml_cuda_ar_pipeline {
     ggml_cuda_ar_host_mapping host_buf[GGML_CUDA_MAX_DEVICES];   // pinned staging (chunked kernel)
     ggml_cuda_ar_host_mapping host_large[GGML_CUDA_MAX_DEVICES]; // pinned staging (copy-engine)
     char *                    dev_tmp[GGML_CUDA_MAX_DEVICES];    // device scratch for copy-engine path
+    // Slab path: BF16 copy of the local input, written on streams[i]; src_read_done[i] marks the last read of the F32 input.
+    char *                    dev_src[GGML_CUDA_MAX_DEVICES];
+    cudaEvent_t               src_read_done[GGML_CUDA_MAX_DEVICES];
     cudaStream_t             streams[GGML_CUDA_MAX_DEVICES];   // non-blocking
+    // Copy-engine stage 2 (H2D) stream. Separate from streams[] so the H2Ds overlap the D2Hs (full-duplex link).
+    // Equals streams[i] when GGML_CUDA_AR_DUPLEX=0.
+    cudaStream_t             h2d_streams[GGML_CUDA_MAX_DEVICES];
     ggml_cuda_ar_event_slot  ev_pool[GGML_CUDA_MAX_DEVICES][GGML_CUDA_AR_POOL_SIZE];
 
     // Copy-engine: per-device "I finished reading my peer's host_large"
@@ -333,17 +355,22 @@ struct ggml_cuda_ar_pipeline {
 
     // Arrival ring: ARRIVAL_STRIDE bytes between adjacent ints.  Mapped pinned
     // memory; CPU never reads/writes -- only the kernel and cudaMemset.
-    // Use ggml_cuda_ar_arrival_ptr() to index.
+    // Indexed as [slot][rank][block] inside ggml_cuda_ar_kernel.
     ggml_cuda_ar_host_mapping arrival;
-};
 
-// Base pointer for the (slot, rank) per-block token block.  The kernel adds
-// blockIdx.x * (ARRIVAL_STRIDE/sizeof(int)) internally to land on its own slot.
-static int * ggml_cuda_ar_arrival_ptr(const ggml_cuda_ar_pipeline * p, int slot, int rank) {
-    const size_t offset = ((size_t)slot * p->n_devices + rank) *
-                          GGML_CUDA_AR_KERNEL_BLOCKS * GGML_CUDA_AR_ARRIVAL_STRIDE;
-    return reinterpret_cast<int *>(p->arrival.dev + offset);
-}
+    // Chunked kernel: per-device, per-block AR counter in device memory.
+    int *                    counter[GGML_CUDA_MAX_DEVICES];
+
+    // Split-launch plan, filled by ggml_cuda_ar_prepare for ggml_cuda_ar_launch_rank.
+    struct {
+        ggml_backend_t backends[GGML_CUDA_MAX_DEVICES];
+        void *         data[GGML_CUDA_MAX_DEVICES];
+        bool           compute[GGML_CUDA_MAX_DEVICES];
+        ggml_type      type;
+        bool           use_bf16;
+        int64_t        ne;
+    } plan;
+};
 
 static uint64_t ggml_cuda_ar_env_u64(const char * name, uint64_t default_value) {
     const char * value = getenv(name);
@@ -450,6 +477,15 @@ ggml_cuda_ar_pipeline * ggml_cuda_ar_pipeline_init(const int * devices, size_t n
         }
         p->streams[i] = stream;
 
+        p->h2d_streams[i] = stream;
+        if (ggml_cuda_ar_env_u64("GGML_CUDA_AR_DUPLEX", 1) != 0 &&
+                cudaStreamCreateWithFlags(&p->h2d_streams[i], cudaStreamNonBlocking) != cudaSuccess) {
+            GGML_LOG_ERROR("%s: cudaStreamCreateWithFlags (h2d) failed for device %d\n", __func__, p->devices[i]);
+            p->h2d_streams[i] = nullptr;
+            ggml_cuda_ar_pipeline_free(p);
+            return nullptr;
+        }
+
         for (int s = 0; s < GGML_CUDA_AR_POOL_SIZE; ++s) {
             bool ok =
                 cudaEventCreateWithFlags(&p->ev_pool[i][s].app, cudaEventDisableTiming) == cudaSuccess &&
@@ -498,6 +534,17 @@ ggml_cuda_ar_pipeline * ggml_cuda_ar_pipeline_init(const int * devices, size_t n
         return nullptr;
     }
 
+    for (size_t i = 0; i < n_devices; ++i) {
+        ggml_cuda_set_device(p->devices[i]);
+        const size_t counter_bytes = GGML_CUDA_AR_KERNEL_BLOCKS * sizeof(int);
+        if (cudaMalloc(reinterpret_cast<void **>(&p->counter[i]), counter_bytes) != cudaSuccess ||
+                cudaMemset(p->counter[i], 0, counter_bytes) != cudaSuccess) {
+            GGML_LOG_ERROR("%s: alloc for AR counter failed on device %d\n", __func__, p->devices[i]);
+            ggml_cuda_ar_pipeline_free(p);
+            return nullptr;
+        }
+    }
+
     // Per-device pinned staging buffers -- POOL_SIZE-deep ring so the chunked-
     // kernel can write the next slot's data while the peer is still reading
     // the previous slot's. Indexed by (slot * buf_bytes) at the call site.
@@ -530,6 +577,12 @@ ggml_cuda_ar_pipeline * ggml_cuda_ar_pipeline_init(const int * devices, size_t n
             ggml_cuda_ar_pipeline_free(p);
             return nullptr;
         }
+        if (cudaMalloc(reinterpret_cast<void **>(&p->dev_src[i]), p->copy_bytes) != cudaSuccess ||
+                cudaEventCreateWithFlags(&p->src_read_done[i], cudaEventDisableTiming) != cudaSuccess) {
+            GGML_LOG_ERROR("%s: alloc for slab staging failed on device %d\n", __func__, p->devices[i]);
+            ggml_cuda_ar_pipeline_free(p);
+            return nullptr;
+        }
     }
 
     GGML_LOG_INFO("%s: initialized AllReduce pipeline: %zu GPUs, "
@@ -550,6 +603,10 @@ void ggml_cuda_ar_pipeline_free(ggml_cuda_ar_pipeline * p) {
             ggml_cuda_set_device(p->devices[i]);
             CUDA_CHECK(cudaStreamSynchronize(p->streams[i]));
         }
+        if (p->h2d_streams[i] && p->h2d_streams[i] != p->streams[i]) {
+            ggml_cuda_set_device(p->devices[i]);
+            CUDA_CHECK(cudaStreamSynchronize(p->h2d_streams[i]));
+        }
     }
 
     for (int i = 0; i < p->n_devices; ++i) {
@@ -558,6 +615,14 @@ void ggml_cuda_ar_pipeline_free(ggml_cuda_ar_pipeline * p) {
         if (p->dev_tmp[i]) {
             ggml_cuda_set_device(p->devices[i]);
             CUDA_CHECK(cudaFree(p->dev_tmp[i]));
+        }
+        if (p->dev_src[i]) {
+            ggml_cuda_set_device(p->devices[i]);
+            CUDA_CHECK(cudaFree(p->dev_src[i]));
+        }
+        if (p->src_read_done[i]) {
+            ggml_cuda_set_device(p->devices[i]);
+            CUDA_CHECK(cudaEventDestroy(p->src_read_done[i]));
         }
         ggml_cuda_set_device(p->devices[i]);
         for (int s = 0; s < GGML_CUDA_AR_POOL_SIZE; ++s) {
@@ -576,12 +641,22 @@ void ggml_cuda_ar_pipeline_free(ggml_cuda_ar_pipeline * p) {
             ggml_cuda_set_device(p->devices[i]);
             CUDA_CHECK(cudaEventDestroy(p->dev_tmp_kernel_done[i]));
         }
+        if (p->h2d_streams[i] && p->h2d_streams[i] != p->streams[i]) {
+            ggml_cuda_set_device(p->devices[i]);
+            CUDA_CHECK(cudaStreamDestroy(p->h2d_streams[i]));
+        }
         if (p->streams[i]) {
             ggml_cuda_set_device(p->devices[i]);
             CUDA_CHECK(cudaStreamDestroy(p->streams[i]));
         }
     }
     p->arrival.free();
+    for (int i = 0; i < p->n_devices; ++i) {
+        if (p->counter[i]) {
+            ggml_cuda_set_device(p->devices[i]);
+            CUDA_CHECK(cudaFree(p->counter[i]));
+        }
+    }
     delete p;
 }
 
@@ -648,6 +723,8 @@ static bool ggml_cuda_ar_allreduce_copy_impl(
                 cudaMemcpyDeviceToHost, p->streams[i]));
             CUDA_CHECK(cudaEventRecord(p->ev_pool[i][slot].cpy[c], p->streams[i]));
         }
+        // src_buf may be a pool buffer the caller frees after return; the compute stream must not reuse it before these D2Hs end
+        CUDA_CHECK(cudaEventRecord(p->src_read_done[i], p->streams[i]));
     }
 
     // Stage 2: each GPU waits for each peer D2H chunk, pulls that chunk back to
@@ -664,8 +741,9 @@ static bool ggml_cuda_ar_allreduce_copy_impl(
         // Wait for the previous AR's add_kernel (on the compute stream) to
         // finish reading dev_tmp before our H2D overwrites it.  No-op on the
         // first copy_impl call.
+        cudaStream_t h2d_stream = p->h2d_streams[i];
         if (p->dev_tmp_kernel_done_valid) {
-            CUDA_CHECK(cudaStreamWaitEvent(p->streams[i], p->dev_tmp_kernel_done[i]));
+            CUDA_CHECK(cudaStreamWaitEvent(h2d_stream, p->dev_tmp_kernel_done[i]));
         }
 
         for (size_t c = 0; c < copy_chunks; ++c) {
@@ -673,20 +751,21 @@ static bool ggml_cuda_ar_allreduce_copy_impl(
             const size_t this_bytes = (nbytes - offset) < chunk_bytes ?
                 (nbytes - offset) : chunk_bytes;
 
-            CUDA_CHECK(cudaStreamWaitEvent(p->streams[i], p->ev_pool[peer][slot].cpy[c]));
+            CUDA_CHECK(cudaStreamWaitEvent(h2d_stream, p->ev_pool[peer][slot].cpy[c]));
             CUDA_CHECK(cudaMemcpyAsync(
                 p->dev_tmp[i] + offset, p->host_large[peer].host + offset, this_bytes,
-                cudaMemcpyHostToDevice, p->streams[i]));
+                cudaMemcpyHostToDevice, h2d_stream));
         }
 
         // Mark our reads of host_large[peer] complete so peer's next AR can
         // safely overwrite it.
-        CUDA_CHECK(cudaEventRecord(p->host_large_read_done[i], p->streams[i]));
+        CUDA_CHECK(cudaEventRecord(p->host_large_read_done[i], h2d_stream));
 
         // Hand off from AR stream (copy engine) to compute stream: compute
         // stream waits for all H2Ds to finish, then runs the add_kernel.
-        CUDA_CHECK(cudaEventRecord(p->ev_pool[i][slot].h2d, p->streams[i]));
+        CUDA_CHECK(cudaEventRecord(p->ev_pool[i][slot].h2d, h2d_stream));
         CUDA_CHECK(cudaStreamWaitEvent(cuda_ctx[i]->stream(), p->ev_pool[i][slot].h2d));
+        CUDA_CHECK(cudaStreamWaitEvent(cuda_ctx[i]->stream(), p->src_read_done[i]));
 
         const int block_size = 256;
         int n_blocks = (int) ((ne + block_size - 1) / block_size);
@@ -745,6 +824,142 @@ static bool ggml_cuda_ar_allreduce_copy_outer(
     return ok;
 }
 
+// Copy-engine AllReduce of an F32 tensor that mul_mat computed in token slabs (ggml_cuda_ar_slab_state).
+// Each slab is converted to BF16 and copied to the host as soon as its slab event fires, so the transfer
+// overlaps the GEMM of the following slabs. The arithmetic matches the BF16 copy-engine path.
+// Returns false without issuing any work when the shape does not fit; the caller then takes the normal path.
+static bool ggml_cuda_ar_allreduce_slabs(
+        ggml_cuda_ar_pipeline * p, ggml_backend_t * backends, ggml_tensor ** tensors) {
+    GGML_ASSERT(p->n_devices == 2);
+    ggml_backend_cuda_context * cuda_ctx[2];
+    for (int i = 0; i < 2; ++i) {
+        cuda_ctx[i] = static_cast<ggml_backend_cuda_context *>(backends[i]->context);
+    }
+    const ggml_cuda_ar_slab_state & st = cuda_ctx[0]->ar_slab;
+
+    const int64_t ne         = ggml_nelements(tensors[0]);
+    const int64_t slab_elems = st.slab_rows * tensors[0]->ne[0];
+    const size_t  nbytes     = (size_t) ne * sizeof(nv_bfloat16);
+    if (nbytes > p->copy_bytes || ne > std::numeric_limits<int>::max()) {
+        return false;
+    }
+
+    // Chunks never cross a slab boundary, so each one depends on a single slab event.
+    const size_t chunk_bytes = ggml_cuda_ar_chunk_bytes(p, nbytes);
+    size_t chunk_off[GGML_CUDA_AR_COPY_MAX_CHUNKS];
+    size_t chunk_len[GGML_CUDA_AR_COPY_MAX_CHUNKS];
+    int    chunk_end[ggml_cuda_ar_slab_state::MAX_SLABS]; // one past the last chunk of each slab
+    int    n_chunks = 0;
+    for (int k = 0; k < st.n_slabs; ++k) {
+        const size_t s_off = (size_t) (k * slab_elems) * sizeof(nv_bfloat16);
+        const size_t s_len = (size_t) std::min(slab_elems, ne - k * slab_elems) * sizeof(nv_bfloat16);
+        for (size_t o = 0; o < s_len; o += chunk_bytes) {
+            if (n_chunks == GGML_CUDA_AR_COPY_MAX_CHUNKS) {
+                return false;
+            }
+            chunk_off[n_chunks] = s_off + o;
+            chunk_len[n_chunks] = std::min(chunk_bytes, s_len - o);
+            n_chunks++;
+        }
+        chunk_end[k] = n_chunks;
+    }
+
+    const int slot = ggml_cuda_ar_acquire_slot(p).slot;
+    const to_bf16_cuda_t to_bf16 = ggml_get_to_bf16_cuda(GGML_TYPE_F32);
+
+    // Stage 1: per slab, wait for its GEMM, convert to BF16 and copy it to pinned host memory.
+    for (int i = 0; i < 2; ++i) {
+        const int peer = 1 - i;
+        ggml_cuda_set_device(p->devices[i]);
+        cudaStream_t stream = p->streams[i];
+        if (p->host_large_read_done_valid) {
+            CUDA_CHECK(cudaStreamWaitEvent(stream, p->host_large_read_done[peer]));
+        }
+        const float * src = static_cast<const float *>(tensors[i]->data);
+        nv_bfloat16 * src_bf16 = reinterpret_cast<nv_bfloat16 *>(p->dev_src[i]);
+        int c = 0;
+        for (int k = 0; k < st.n_slabs; ++k) {
+            const int64_t e0 = k * slab_elems;
+            CUDA_CHECK(cudaStreamWaitEvent(stream, cuda_ctx[i]->ar_slab.ready[k]));
+            to_bf16(src + e0, src_bf16 + e0, std::min(slab_elems, ne - e0), stream);
+            CUDA_CHECK(cudaGetLastError());
+            for (; c < chunk_end[k]; ++c) {
+                CUDA_CHECK(cudaMemcpyAsync(p->host_large[i].host + chunk_off[c], p->dev_src[i] + chunk_off[c],
+                    chunk_len[c], cudaMemcpyDeviceToHost, stream));
+                CUDA_CHECK(cudaEventRecord(p->ev_pool[i][slot].cpy[c], stream));
+            }
+        }
+        CUDA_CHECK(cudaEventRecord(p->src_read_done[i], stream));
+    }
+
+    // Stage 2: pull the peer's chunks as they land, then add in place on the compute stream.
+    for (int i = 0; i < 2; ++i) {
+        const int peer = 1 - i;
+        ggml_cuda_set_device(p->devices[i]);
+        cudaStream_t h2d_stream = p->h2d_streams[i];
+        if (p->dev_tmp_kernel_done_valid) {
+            CUDA_CHECK(cudaStreamWaitEvent(h2d_stream, p->dev_tmp_kernel_done[i]));
+        }
+        for (int c = 0; c < n_chunks; ++c) {
+            CUDA_CHECK(cudaStreamWaitEvent(h2d_stream, p->ev_pool[peer][slot].cpy[c]));
+            CUDA_CHECK(cudaMemcpyAsync(p->dev_tmp[i] + chunk_off[c], p->host_large[peer].host + chunk_off[c],
+                chunk_len[c], cudaMemcpyHostToDevice, h2d_stream));
+        }
+        CUDA_CHECK(cudaEventRecord(p->host_large_read_done[i], h2d_stream));
+        CUDA_CHECK(cudaEventRecord(p->ev_pool[i][slot].h2d, h2d_stream));
+
+        cudaStream_t stream = cuda_ctx[i]->stream();
+        CUDA_CHECK(cudaStreamWaitEvent(stream, p->ev_pool[i][slot].h2d));
+        CUDA_CHECK(cudaStreamWaitEvent(stream, p->src_read_done[i]));
+
+        const int block_size = 256;
+        const int n_blocks   = (int) std::min<int64_t>((ne + block_size - 1) / block_size, 1024);
+        ggml_cuda_ar_add_kernel<float, nv_bfloat16><<<n_blocks, block_size, 0, stream>>>(
+            static_cast<float *>(tensors[i]->data), reinterpret_cast<const nv_bfloat16 *>(p->dev_tmp[i]), (int) ne);
+        CUDA_CHECK(cudaGetLastError());
+
+        CUDA_CHECK(cudaEventRecord(p->dev_tmp_kernel_done[i], stream));
+        CUDA_CHECK(cudaEventRecord(p->ev_pool[i][slot].ker, stream));
+    }
+    p->host_large_read_done_valid = true;
+    p->dev_tmp_kernel_done_valid  = true;
+    return true;
+}
+
+// Launch the chunked kernel for one rank.  data points at the chunk start.
+static void ggml_cuda_ar_launch_chunk(
+        ggml_cuda_ar_pipeline * p, int i, cudaStream_t stream, void * data,
+        size_t chunk_elems, ggml_type input_type, bool use_bf16) {
+    const int peer = 1 - i;  // valid for n == 2 only
+
+#define LAUNCH_AR_KERNEL(T_dst, T_wire) \
+    ggml_cuda_ar_kernel<T_dst, T_wire><<<dim3(GGML_CUDA_AR_KERNEL_BLOCKS), dim3(256), 0, stream>>>( \
+        reinterpret_cast<const T_dst *>(data), \
+        reinterpret_cast<T_dst *>(data), \
+        reinterpret_cast<T_wire *>(p->host_buf[i].dev), \
+        reinterpret_cast<const T_wire *>(p->host_buf[peer].dev), \
+        p->buf_bytes / sizeof(T_wire), \
+        static_cast<int>(chunk_elems), \
+        reinterpret_cast<int *>(p->arrival.dev), \
+        i, \
+        p->counter[i])
+
+    if (use_bf16) {
+        GGML_ASSERT(input_type == GGML_TYPE_F32);
+        LAUNCH_AR_KERNEL(float, nv_bfloat16);
+    } else {
+        switch (input_type) {
+            case GGML_TYPE_F32:  LAUNCH_AR_KERNEL(float,       float);       break;
+            case GGML_TYPE_F16:  LAUNCH_AR_KERNEL(half,        half);        break;
+            case GGML_TYPE_BF16: LAUNCH_AR_KERNEL(nv_bfloat16, nv_bfloat16); break;
+            default: GGML_ASSERT(false);
+        }
+    }
+
+#undef LAUNCH_AR_KERNEL
+    CUDA_CHECK(cudaGetLastError());
+}
+
 bool ggml_cuda_ar_allreduce(
         ggml_cuda_ar_pipeline * p,
         ggml_backend_t        * backends,
@@ -787,6 +1002,26 @@ bool ggml_cuda_ar_allreduce(
     const bool use_copy_engine =
         p->copy_threshold > 0 &&
         nbytes >= p->copy_threshold;
+
+    // Slab overlap: consume the slab state of both ranks; use it only when both computed this tensor in the same slabs.
+    {
+        bool slabs = use_copy_engine && use_bf16 && input_type == GGML_TYPE_F32;
+        for (int i = 0; i < n; ++i) {
+            const auto & st0 = static_cast<ggml_backend_cuda_context *>(backends[0]->context)->ar_slab;
+            const auto & st  = static_cast<ggml_backend_cuda_context *>(backends[i]->context)->ar_slab;
+            slabs = slabs && compute_flag[i] && st.done && st.target == tensors[i] &&
+                st.n_slabs == st0.n_slabs && st.slab_rows == st0.slab_rows && ggml_is_contiguous(tensors[i]);
+        }
+        const bool ok = slabs && ggml_cuda_ar_allreduce_slabs(p, backends, tensors);
+        for (int i = 0; i < n; ++i) {
+            auto & st = static_cast<ggml_backend_cuda_context *>(backends[i]->context)->ar_slab;
+            st.done   = false;
+            st.target = nullptr;
+        }
+        if (ok) {
+            return true;
+        }
+    }
 
     // BF16 inactive-shard zeroing: when use_bf16 is on, the combined kernel
     // (chunked kernel path) and the combined add kernel (copy_engine path)
@@ -893,20 +1128,14 @@ bool ggml_cuda_ar_allreduce(
 
         // Chunked kernel path runs entirely on the caller's compute stream:
         // since AR is a barrier here, same-stream ordering subsumes any
-        // cross-stream event handshake that the copy-engine path needs, and
-        // skips the cross-stream scheduling overhead that was hurting the
-        // small-tensor (tg) latency on the AR-stream variant.  Only ev.ker is
-        // still recorded at end-of-AR for acquire_slot's pool-wraparound check.
+        // cross-stream event handshake that the copy-engine path needs.
+        // Tokens and slots live on the device, so no host sync is needed.
         for (int64_t chunk_start = 0; chunk_start < ne; chunk_start += (int64_t) max_chunk_elems) {
             const size_t remaining_elems = (size_t) (ne - chunk_start);
             const size_t chunk_elems = remaining_elems < max_chunk_elems ? remaining_elems : max_chunk_elems;
             const size_t chunk_dst_bytes  = chunk_elems * input_type_size;
 
-            const auto [slot, token] = ggml_cuda_ar_acquire_slot(p);
-            const bool last_chunk = chunk_start + (int64_t) chunk_elems == ne;
-
             for (int i = 0; i < n; ++i) {
-                const int peer = 1 - i;  // valid for n == 2 only
                 ggml_cuda_set_device(p->devices[i]);
                 auto * cuda_ctx = static_cast<ggml_backend_cuda_context *>(backends[i]->context);
                 GGML_ASSERT(cuda_ctx->device == p->devices[i]);
@@ -921,35 +1150,7 @@ bool ggml_cuda_ar_allreduce(
                     CUDA_CHECK(cudaMemsetAsync(data, 0, chunk_dst_bytes, stream));
                 }
 
-#define LAUNCH_AR_KERNEL(T_dst, T_wire) \
-                ggml_cuda_ar_kernel<T_dst, T_wire><<<dim3(GGML_CUDA_AR_KERNEL_BLOCKS), dim3(256), 0, stream>>>( \
-                    reinterpret_cast<const T_dst *>(data), \
-                    reinterpret_cast<T_dst *>(data), \
-                    reinterpret_cast<T_wire *>(p->host_buf[i].dev + (size_t) slot * p->buf_bytes), \
-                    reinterpret_cast<const T_wire *>(p->host_buf[peer].dev + (size_t) slot * p->buf_bytes), \
-                    static_cast<int>(chunk_elems), \
-                    ggml_cuda_ar_arrival_ptr(p, slot, i), \
-                    ggml_cuda_ar_arrival_ptr(p, slot, peer), \
-                    token)
-
-                if (use_bf16) {
-                    GGML_ASSERT(input_type == GGML_TYPE_F32);
-                    LAUNCH_AR_KERNEL(float, nv_bfloat16);
-                } else {
-                    switch (input_type) {
-                        case GGML_TYPE_F32:  LAUNCH_AR_KERNEL(float,       float);       break;
-                        case GGML_TYPE_F16:  LAUNCH_AR_KERNEL(half,        half);        break;
-                        case GGML_TYPE_BF16: LAUNCH_AR_KERNEL(nv_bfloat16, nv_bfloat16); break;
-                        default: GGML_ASSERT(false);
-                    }
-                }
-
-#undef LAUNCH_AR_KERNEL
-                CUDA_CHECK(cudaGetLastError());
-
-                if (last_chunk) {
-                    CUDA_CHECK(cudaEventRecord(p->ev_pool[i][slot].ker, stream));
-                }
+                ggml_cuda_ar_launch_chunk(p, i, stream, data, chunk_elems, input_type, use_bf16);
             }
         }
     }
@@ -957,14 +1158,51 @@ bool ggml_cuda_ar_allreduce(
     return ok;
 }
 
+int ggml_cuda_ar_prepare(
+        ggml_cuda_ar_pipeline * p,
+        ggml_backend_t        * backends,
+        ggml_tensor           ** tensors) {
+    GGML_ASSERT(p != nullptr && p->n_devices == 2);
+
+    const ggml_type input_type = tensors[0]->type;
+    if (input_type != GGML_TYPE_F32 && input_type != GGML_TYPE_F16 && input_type != GGML_TYPE_BF16) {
+        return -1;
+    }
+    const int64_t ne = ggml_nelements(tensors[0]);
+    const bool use_bf16 = input_type == GGML_TYPE_F32 && p->bf16_threshold > 0 && ggml_nbytes(tensors[0]) >= p->bf16_threshold;
+    const size_t type_size = ggml_type_size(use_bf16 ? GGML_TYPE_BF16 : input_type);
+
+    // Only a single chunked launch per rank; the copy-engine path needs host-side event handshakes.
+    const size_t nbytes = (size_t) ne * type_size;
+    if (ne <= 0 || (p->copy_threshold > 0 && nbytes >= p->copy_threshold) || nbytes > p->buf_bytes) {
+        return -1;
+    }
+
+    for (int i = 0; i < p->n_devices; ++i) {
+        p->plan.backends[i] = backends[i];
+        p->plan.data[i]     = tensors[i]->data;
+        p->plan.compute[i]  = (tensors[i]->flags & GGML_TENSOR_FLAG_COMPUTE) != 0;
+    }
+    p->plan.type     = input_type;
+    p->plan.use_bf16 = use_bf16;
+    p->plan.ne       = ne;
+    return p->n_devices;
+}
+
+void ggml_cuda_ar_launch_rank(ggml_cuda_ar_pipeline * p, int rank) {
+    auto * cuda_ctx = static_cast<ggml_backend_cuda_context *>(p->plan.backends[rank]->context);
+    GGML_ASSERT(cuda_ctx->device == p->devices[rank]);
+    ggml_cuda_set_device(p->devices[rank]);
+    cudaStream_t stream = cuda_ctx->stream();
+
+    if (!p->plan.compute[rank]) {
+        CUDA_CHECK(cudaMemsetAsync(p->plan.data[rank], 0, (size_t) p->plan.ne * ggml_type_size(p->plan.type), stream));
+    }
+    ggml_cuda_ar_launch_chunk(p, rank, stream, p->plan.data[rank], (size_t) p->plan.ne, p->plan.type, p->plan.use_bf16);
+}
+
 #else // defined(GGML_USE_MUSA)
 
-// MUSA lacks the host-mapped pinned-memory APIs (cudaHostAllocPortable
-// / cudaHostAllocMapped / cudaHostGetDevicePointer) and a device-side
-// sleep intrinsic that this implementation relies on, so the internal
-// AllReduce is unavailable there. The dispatcher in ggml-cuda.cu treats
-// a nullptr pipeline as "init failed" and silently falls back to the meta
-// backend's generic AllReduce.
 ggml_cuda_ar_pipeline * ggml_cuda_ar_pipeline_init(const int *, size_t) {
     return nullptr;
 }
@@ -972,6 +1210,11 @@ void ggml_cuda_ar_pipeline_free(ggml_cuda_ar_pipeline *) {
 }
 bool ggml_cuda_ar_allreduce(ggml_cuda_ar_pipeline *, ggml_backend_t *, ggml_tensor **) {
     return false;
+}
+int ggml_cuda_ar_prepare(ggml_cuda_ar_pipeline *, ggml_backend_t *, ggml_tensor **) {
+    return -1;
+}
+void ggml_cuda_ar_launch_rank(ggml_cuda_ar_pipeline *, int) {
 }
 
 #endif // !defined(GGML_USE_MUSA)

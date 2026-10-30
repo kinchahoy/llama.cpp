@@ -18,20 +18,28 @@ struct topk_moe_config {
 // Warp-local softmax used for both the pre-top-k logits and the post-top-k delayed path.
 template <int experts_per_thread, bool use_limit>
 __device__ void softmax_warp_inplace(float (&vals)[experts_per_thread], const int limit, const int lane) {
-    float max_val = -INFINITY;
+    // Match the standalone softmax reduction order: reduce contiguous groups of
+    // WARP_SIZE values first, then reduce the group results. Keeping the fused and
+    // unfused paths bitwise-equivalent prevents graph-layout-dependent routing.
+    float group_reductions[experts_per_thread];
 
 #pragma unroll
     for (int i = 0; i < experts_per_thread; i++) {
         const int  idx    = lane + i * WARP_SIZE;
         const bool active = !use_limit || (idx < limit);
-        if (active) {
-            max_val = max(max_val, vals[i]);
+        group_reductions[i] = warp_reduce_max(active ? vals[i] : -INFINITY);
+    }
+
+    float max_val = -INFINITY;
+
+#pragma unroll
+    for (int i = 0; i < experts_per_thread; i++) {
+        if (lane == i) {
+            max_val = group_reductions[i];
         }
     }
 
     max_val = warp_reduce_max(max_val);
-
-    float sum = 0.f;
 
 #pragma unroll
     for (int i = 0; i < experts_per_thread; i++) {
@@ -40,9 +48,18 @@ __device__ void softmax_warp_inplace(float (&vals)[experts_per_thread], const in
         if (active) {
             const float val = expf(vals[i] - max_val);
             vals[i]         = val;
-            sum += val;
         } else {
             vals[i] = 0.f;
+        }
+        group_reductions[i] = warp_reduce_sum(vals[i]);
+    }
+
+    float sum = 0.f;
+
+#pragma unroll
+    for (int i = 0; i < experts_per_thread; i++) {
+        if (lane == i) {
+            sum = group_reductions[i];
         }
     }
 
@@ -235,8 +252,6 @@ __global__ void topk_moe_cuda(const float *         logits,
     //or the raw logits. We do the argmax reduce over n_expert_used, each time marking
     //the expert weight as -inf to exclude from the next iteration
 
-    float wt_sum = 0.f;
-
     float output_weights[experts_per_thread];
 
 #pragma unroll
@@ -308,19 +323,33 @@ __global__ void topk_moe_cuda(const float *         logits,
 
         if ((max_expert & (WARP_SIZE - 1)) == threadIdx.x) {
             ids[k] = max_expert;
-            if (config.with_norm) {
-                wt_sum += max_val;
-            }
         }
     }
 
     if (config.with_norm) {
-        wt_sum              = warp_reduce_sum(wt_sum);
-        wt_sum              = max(wt_sum, clamp_val);
-        const float inv_sum = 1.0f / wt_sum;
+        // The standalone path reduces the selected weights in contiguous
+        // WARP_SIZE groups, clamps that sum, then applies GGML_OP_DIV.
+        float group_sums[experts_per_thread];
+
+#pragma unroll
+        for (int i = 0; i < experts_per_thread; i++) {
+            group_sums[i] = warp_reduce_sum(output_weights[i]);
+        }
+
+        float wt_sum = 0.f;
+
+#pragma unroll
+        for (int i = 0; i < experts_per_thread; i++) {
+            if (threadIdx.x == i) {
+                wt_sum = group_sums[i];
+            }
+        }
+
+        wt_sum = warp_reduce_sum(wt_sum);
+        wt_sum = fmaxf(wt_sum, clamp_val);
 
         for (int i = 0; i < experts_per_thread; i++) {
-            output_weights[i] *= inv_sum;
+            output_weights[i] /= wt_sum;
         }
     }
 
@@ -351,7 +380,8 @@ static void launch_topk_moe_cuda(ggml_backend_cuda_context & ctx,
                                  const topk_moe_config       config) {
     GGML_ASSERT(!(config.with_norm && config.delayed_softmax) &&
                 "delayed softmax is not supported with weight normalization");
-    const int    rows_per_block = TOPK_MOE_ROWS_PER_BLOCK;
+    const int    cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
+    const int    rows_per_block = cc == GGML_CUDA_CC_VEGA20 && n_rows == 1 ? 1 : TOPK_MOE_ROWS_PER_BLOCK;
     dim3         grid_dims((n_rows + rows_per_block - 1) / rows_per_block, 1, 1);
     dim3         block_dims(WARP_SIZE, rows_per_block, 1);
     cudaStream_t stream = ctx.stream();

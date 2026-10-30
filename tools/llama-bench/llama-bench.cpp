@@ -354,6 +354,7 @@ struct cmd_params {
     std::vector<int>                 n_cpu_moe;
     std::vector<llama_split_mode>    split_mode;
     std::vector<llama_load_mode>     load_mode;
+    std::vector<int>                 tensor_parallel_size;
     std::vector<llama_lazy_mode>     lazy_mode;
     std::vector<int>                 main_gpu;
     std::vector<bool>                no_kv_offload;
@@ -400,6 +401,7 @@ static const cmd_params cmd_params_defaults = {
     /* n_cpu_moe            */ { 0 },
     /* split_mode           */ { LLAMA_SPLIT_MODE_LAYER },
     /* load_mode            */ { LLAMA_LOAD_MODE_AUTO },
+    /* tensor_parallel_size */ { 0 },
     /* lazy_mode            */ { LLAMA_LAZY_MODE_AUTO },
     /* main_gpu             */ { 0 },
     /* no_kv_offload        */ { false },
@@ -473,6 +475,7 @@ static void print_usage(int /* argc */, char ** argv) {
     printf("  -ngl, --n-gpu-layers <n>                          (default: %s)\n", join(cmd_params_defaults.n_gpu_layers, ",").c_str());
     printf("  -ncmoe, --n-cpu-moe <n>                           (default: %s)\n", join(cmd_params_defaults.n_cpu_moe, ",").c_str());
     printf("  -sm, --split-mode <none|layer|row|tensor>         (default: %s)\n", join(transform_to_str(cmd_params_defaults.split_mode, split_mode_str), ",").c_str());
+    printf("  -tps, --tensor-parallel-size <T>                  (default: %s)\n", join(cmd_params_defaults.tensor_parallel_size, ",").c_str());
     printf("  -mg, --main-gpu <i>                               (default: %s)\n", join(cmd_params_defaults.main_gpu, ",").c_str());
     printf("  -nkvo, --no-kv-offload <0|1>                      (default: %s)\n", join(cmd_params_defaults.no_kv_offload, ",").c_str());
     printf("  -fa, --flash-attn <on|off|auto>                   (default: %s)\n", join(transform_to_str(cmd_params_defaults.flash_attn, llama_flash_attn_type_name), ",").c_str());
@@ -486,6 +489,7 @@ static void print_usage(int /* argc */, char ** argv) {
     printf("  -nopo, --no-op-offload <0|1>                      (default: 0)\n");
     printf("  --no-host <0|1>                                   (default: %s)\n", join(cmd_params_defaults.no_host, ",").c_str());
     printf("  --repack <0|1>                                    (default: %s)\n", join(cmd_params_defaults.repack, ",").c_str());
+    printf("  -nr, --no-repack <0|1>                            (inverse of --repack)\n");
     printf("\n");
     printf(
         "Multiple values can be given for each parameter by separating them with ','\n"
@@ -775,6 +779,22 @@ static cmd_params parse_cmd_params(int argc, char ** argv) {
                     break;
                 }
                 params.split_mode.insert(params.split_mode.end(), modes.begin(), modes.end());
+            } else if (arg == "-tps" || arg == "--tensor-parallel-size") {
+                if (++i >= argc) {
+                    invalid_param = true;
+                    break;
+                }
+                auto p = parse_int_range(argv[i]);
+                for (int v : p) {
+                    if (v < 0) {
+                        invalid_param = true;
+                        break;
+                    }
+                }
+                if (invalid_param) {
+                    break;
+                }
+                params.tensor_parallel_size.insert(params.tensor_parallel_size.end(), p.begin(), p.end());
             } else if (arg == "-lm" || arg == "--load-mode") {
                 if (++i >= argc) {
                     invalid_param = true;
@@ -916,6 +936,14 @@ static cmd_params parse_cmd_params(int argc, char ** argv) {
                 }
                 auto p = string_split<bool>(argv[i], split_delim);
                 params.repack.insert(params.repack.end(), p.begin(), p.end());
+            } else if (arg == "-nr" || arg == "--no-repack") {
+                if (++i >= argc) {
+                    invalid_param = true;
+                    break;
+                }
+                for (bool no_repack : string_split<bool>(argv[i], split_delim)) {
+                    params.repack.push_back(!no_repack);
+                }
             } else if (arg == "-ts" || arg == "--tensor-split") {
                 if (++i >= argc) {
                     invalid_param = true;
@@ -1153,6 +1181,9 @@ static cmd_params parse_cmd_params(int argc, char ** argv) {
     if (params.load_mode.empty()) {
         params.load_mode = cmd_params_defaults.load_mode;
     }
+    if (params.tensor_parallel_size.empty()) {
+        params.tensor_parallel_size = cmd_params_defaults.tensor_parallel_size;
+    }
     if (params.lazy_mode.empty()) {
         params.lazy_mode = cmd_params_defaults.lazy_mode;
     }
@@ -1225,6 +1256,7 @@ struct cmd_params_instance {
     int                n_cpu_moe;
     llama_split_mode   split_mode;
     llama_load_mode    load_mode;
+    int                tensor_parallel_size;
     llama_lazy_mode    lazy_mode;
     int                main_gpu;
     bool               no_kv_offload;
@@ -1248,6 +1280,7 @@ struct cmd_params_instance {
         }
         mparams.split_mode    = split_mode;
         mparams.load_mode     = load_mode;
+        mparams.tensor_parallel_size = tensor_parallel_size;
         mparams.lazy_mode     = lazy_mode;
         mparams.main_gpu      = main_gpu;
         mparams.tensor_split  = tensor_split.data();
@@ -1295,7 +1328,7 @@ struct cmd_params_instance {
 
     bool equal_mparams(const cmd_params_instance & other) const {
         return model == other.model && n_gpu_layers == other.n_gpu_layers && n_cpu_moe == other.n_cpu_moe &&
-               split_mode == other.split_mode &&
+               split_mode == other.split_mode && tensor_parallel_size == other.tensor_parallel_size &&
                main_gpu == other.main_gpu && tensor_split == other.tensor_split &&
                load_mode == other.load_mode && lazy_mode == other.lazy_mode &&
                devices == other.devices && no_host == other.no_host && repack == other.repack &&
@@ -1332,6 +1365,7 @@ static std::vector<cmd_params_instance> get_cmd_params_instances(const cmd_param
     for (const auto & ncmoe : params.n_cpu_moe)
     for (const auto & sm : params.split_mode)
     for (const auto & lm : params.load_mode)
+    for (const auto & tps : params.tensor_parallel_size)
     for (const auto & lzm : params.lazy_mode)
     for (const auto & mg : params.main_gpu)
     for (const auto & devs : params.devices)
@@ -1373,6 +1407,7 @@ static std::vector<cmd_params_instance> get_cmd_params_instances(const cmd_param
                 /* .n_cpu_moe             = */ ncmoe,
                 /* .split_mode            = */ sm,
                 /* .load_mode             = */ lm,
+                /* .tensor_parallel_size  = */ tps,
                 /* .lazy_mode             = */ lzm,
                 /* .main_gpu              = */ mg,
                 /* .no_kv_offload         = */ nkvo,
@@ -1411,6 +1446,7 @@ static std::vector<cmd_params_instance> get_cmd_params_instances(const cmd_param
                 /* .n_cpu_moe             = */ ncmoe,
                 /* .split_mode            = */ sm,
                 /* .load_mode             = */ lm,
+                /* .tensor_parallel_size  = */ tps,
                 /* .lazy_mode             = */ lzm,
                 /* .main_gpu              = */ mg,
                 /* .no_kv_offload         = */ nkvo,
@@ -1449,6 +1485,7 @@ static std::vector<cmd_params_instance> get_cmd_params_instances(const cmd_param
                 /* .n_cpu_moe             = */ ncmoe,
                 /* .split_mode            = */ sm,
                 /* .load_mode             = */ lm,
+                /* .tensor_parallel_size  = */ tps,
                 /* .lazy_mode             = */ lzm,
                 /* .main_gpu              = */ mg,
                 /* .no_kv_offload         = */ nkvo,
@@ -1492,6 +1529,7 @@ struct test {
     int                      n_cpu_moe;
     llama_split_mode         split_mode;
     llama_load_mode          load_mode;
+    int                      tensor_parallel_size;
     llama_lazy_mode          lazy_mode;
     int                      main_gpu;
     bool                     no_kv_offload;
@@ -1533,6 +1571,7 @@ struct test {
         n_cpu_moe      = inst.n_cpu_moe;
         split_mode     = inst.split_mode;
         load_mode      = inst.load_mode;
+        tensor_parallel_size = inst.tensor_parallel_size;
         lazy_mode      = inst.lazy_mode;
         main_gpu       = inst.main_gpu;
         no_kv_offload  = inst.no_kv_offload;
@@ -1601,6 +1640,7 @@ struct test {
             "model_filename", "model_type",     "model_size",    "model_n_params", "n_batch",
             "n_ubatch",       "n_threads",      "cpu_mask",      "cpu_strict",     "poll",
             "type_k",         "type_v",         "n_gpu_layers",  "n_cpu_moe",      "split_mode",
+            "tensor_parallel_size",
             "main_gpu",       "no_kv_offload",  "flash_attn",    "devices",        "tensor_split",
             "tensor_buft_overrides",            "load_mode",     "lazy_mode",
             "embeddings",
@@ -1618,7 +1658,8 @@ struct test {
             field == "poll" || field == "model_size" || field == "model_n_params" || field == "n_gpu_layers" ||
             field == "main_gpu" || field == "n_prompt" || field == "n_gen" || field == "n_depth" || field == "avg_ns" ||
             field == "stddev_ns" || field == "no_op_offload" || field == "n_cpu_moe" ||
-            field == "fit_target" || field == "fit_min_ctx" || field == "flash_attn") {
+            field == "fit_target" || field == "fit_min_ctx" || field == "flash_attn" ||
+            field == "tensor_parallel_size") {
             return INT;
         }
         if (field == "f16_kv" || field == "no_kv_offload" || field == "cpu_strict" ||
@@ -1691,6 +1732,7 @@ struct test {
                                             std::to_string(n_gpu_layers),
                                             std::to_string(n_cpu_moe),
                                             split_mode_str(split_mode),
+                                            std::to_string(tensor_parallel_size),
                                             std::to_string(main_gpu),
                                             std::to_string(no_kv_offload),
                                             std::to_string((int) flash_attn),
@@ -1878,6 +1920,9 @@ struct markdown_printer : public printer {
         if (field == "split_mode") {
             return 6;
         }
+        if (field == "tensor_parallel_size") {
+            return 3;
+        }
         if (field == "load_mode") {
             return 10;
         }
@@ -1914,6 +1959,9 @@ struct markdown_printer : public printer {
         }
         if (field == "split_mode") {
             return "sm";
+        }
+        if (field == "tensor_parallel_size") {
+            return "tps";
         }
         if (field == "n_threads") {
             return "threads";
@@ -2001,6 +2049,9 @@ struct markdown_printer : public printer {
         }
         if (params.split_mode.size() > 1 || params.split_mode != cmd_params_defaults.split_mode) {
             fields.emplace_back("split_mode");
+        }
+        if (params.tensor_parallel_size.size() > 1 || params.tensor_parallel_size != cmd_params_defaults.tensor_parallel_size) {
+            fields.emplace_back("tensor_parallel_size");
         }
         if (params.no_kv_offload.size() > 1 || params.no_kv_offload != cmd_params_defaults.no_kv_offload) {
             fields.emplace_back("no_kv_offload");

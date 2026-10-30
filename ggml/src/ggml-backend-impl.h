@@ -111,6 +111,8 @@ extern "C" {
     GGML_API bool ggml_backend_buft_is_meta  (ggml_backend_buffer_type_t buft);
 
     GGML_API size_t         ggml_backend_meta_n_backends    (ggml_backend_t meta_backend);
+    GGML_API size_t         ggml_backend_meta_n_stages      (ggml_backend_t meta_backend);
+    GGML_API void           ggml_backend_meta_graph_begin   (ggml_backend_t meta_backend);
     GGML_API ggml_backend_t ggml_backend_meta_simple_backend(ggml_backend_t meta_backend, size_t index);
 
     //
@@ -224,6 +226,8 @@ extern "C" {
         ggml_backend_event_t (*event_new)         (ggml_backend_dev_t dev);
         void                 (*event_free)        (ggml_backend_dev_t dev, ggml_backend_event_t event);
         void                 (*event_synchronize) (ggml_backend_dev_t dev, ggml_backend_event_t event);
+        // (optional) true if the event has already fired, without blocking
+        bool                 (*event_query)       (ggml_backend_dev_t dev, ggml_backend_event_t event);
     };
 
     struct ggml_backend_device {

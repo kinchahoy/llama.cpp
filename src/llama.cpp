@@ -155,7 +155,59 @@ int64_t llama_time_us(void) {
 }
 
 // returns true on success
-static bool llama_prepare_model_devices(const llama_model_params & params, llama_model * model) {
+static bool llama_prepare_model_devices(const llama_model_params & params, llama_model * model, uint32_t tps_auto_divisor) {
+    // A DSV4-backbone drafter prefers a single group over a SUBSET of the devices to a
+    // multi-stage split over all of them: the draft chain is serial, so every pipeline
+    // stage costs it a cross-device hop per drafted token, while the subset keeps the
+    // whole drafter one hop-free group and leaves the remaining devices to the target.
+    // Returns the device count the draft should use (n_devs when no subset applies).
+    auto draft_subset_devs = [&](size_t n_devs) -> size_t {
+        if (tps_auto_divisor == 0) {
+            return n_devs;
+        }
+        const int32_t tps_param = params.tensor_parallel_size;
+        if (tps_param > 0) {
+            // an explicit -tpsd that does not divide the device count is a subset request
+            return (size_t) tps_param <= n_devs && n_devs % (size_t) tps_param != 0 ?
+                   (size_t) tps_param : n_devs;
+        }
+        size_t width = 0;
+        for (size_t c = std::min((size_t) tps_auto_divisor, n_devs); c >= 1; c--) {
+            if (tps_auto_divisor % c == 0) {
+                width = c;
+                break;
+            }
+        }
+        if (width > 0 && width < n_devs) {
+            LLAMA_LOG_WARN("%s: draft uses a single TP group over the first %zu of %zu devices, "
+                    "keeping the serial draft chain in one hop-free group\n",
+                    __func__, width, n_devs);
+            return width;
+        }
+        return n_devs;
+    };
+    // Validate -tps / tensor_parallel_size against the device count. Returns the resolved tps
+    // (0 / equal-to-n_devs both mean "single TP group covering all devs"); negative on error.
+    auto resolve_tps = [&](size_t n_devs) -> int64_t {
+        const int32_t tps_param = params.tensor_parallel_size;
+        if (tps_param <= 0) {
+            return (int64_t) n_devs;
+        }
+        if ((size_t) tps_param > n_devs || n_devs % (size_t) tps_param != 0) {
+            std::string divisors;
+            for (size_t d = 1; d <= n_devs; d++) {
+                if (n_devs % d == 0) {
+                    if (!divisors.empty()) divisors += ",";
+                    divisors += std::to_string(d);
+                }
+            }
+            LLAMA_LOG_ERROR("%s: --tensor-parallel-size %d does not divide %zu GPUs (valid: %s)\n",
+                    __func__, (int) tps_param, n_devs, divisors.c_str());
+            return -1;
+        }
+        return (int64_t) tps_param;
+    };
+
     // create list of devices to use with this model
     if (params.devices) {
         if (params.split_mode == LLAMA_SPLIT_MODE_TENSOR) {
@@ -167,15 +219,23 @@ static bool llama_prepare_model_devices(const llama_model_params & params, llama
                 LLAMA_LOG_ERROR("%s: LLAMA_SPLIT_MODE_TENSOR needs >= 1 devices\n", __func__);
                 return false;
             }
-            LLAMA_LOG_INFO("%s: creating a Meta device with %zu devices\n", __func__, n_devs);
+            n_devs = draft_subset_devs(n_devs);
+            const int64_t tps = resolve_tps(n_devs);
+            if (tps < 0) {
+                return false;
+            }
+            const size_t n_stages = n_devs / (size_t) tps;
+            LLAMA_LOG_INFO("%s: creating a Meta device with %zu devices (tps=%zu, n_stages=%zu)\n",
+                    __func__, n_devs, (size_t) tps, n_stages);
             for (size_t i = 0; i < n_devs; ++i) {
                 LLAMA_LOG_INFO("%s: - device %zu: %s\n", __func__, i, ggml_backend_dev_name(params.devices[i]));
             }
             model->get_split_state_ud.n_devices = n_devs;
-            model->get_split_state_ud.model = model;
+            model->get_split_state_ud.n_stages  = n_stages;
+            model->get_split_state_ud.model     = model;
             model->devices.push_back({
                 true, ggml_backend_meta_device(
-                params.devices, n_devs, llama_meta_device_get_split_state, &model->get_split_state_ud)
+                params.devices, n_devs, (size_t) tps, llama_meta_device_get_split_state, &model->get_split_state_ud)
             });
         } else {
             for (ggml_backend_dev_t * dev = params.devices; *dev; ++dev) {
@@ -206,17 +266,25 @@ static bool llama_prepare_model_devices(const llama_model_params & params, llama
                 return false;
             }
 
-            LLAMA_LOG_INFO("%s: creating a Meta device for tensor parallelism from %zu devices:\n", __func__, devs.size());
+            devs.resize(draft_subset_devs(devs.size()));
+            const int64_t tps = resolve_tps(devs.size());
+            if (tps < 0) {
+                return false;
+            }
+            const size_t n_stages = devs.size() / (size_t) tps;
+            LLAMA_LOG_INFO("%s: creating a Meta device for tensor parallelism from %zu devices (tps=%zu, n_stages=%zu):\n",
+                    __func__, devs.size(), (size_t) tps, n_stages);
             for (size_t i = 0; i < devs.size(); ++i) {
                 LLAMA_LOG_INFO("%s: - device %zu: %s (%s)\n", __func__, i, ggml_backend_dev_name(devs[i]), ggml_backend_dev_description(devs[i]));
             }
 
             GGML_ASSERT(!devs.empty());
             model->get_split_state_ud.n_devices = devs.size();
+            model->get_split_state_ud.n_stages  = n_stages;
             model->get_split_state_ud.model     = model;
             gpus.push_back({
                 true, ggml_backend_meta_device(
-                devs.data(), devs.size(), llama_meta_device_get_split_state, &model->get_split_state_ud)
+                devs.data(), devs.size(), (size_t) tps, llama_meta_device_get_split_state, &model->get_split_state_ud)
             });
         } else {
             for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
@@ -324,7 +392,19 @@ static std::pair<int, llama_model *> llama_model_load(struct gguf_context * meta
         ml.print_info();
         std::unique_ptr<llama_model> model_ptr(llama_model_create(ml, params));
 
-        bool ok = llama_prepare_model_devices(params, model_ptr.get());
+        // A DFlash drafter with a DSV4 backbone constrains which TP group widths can
+        // split it (see the head-split rules in llama-model.cpp). Read the constraint
+        // before the Meta device is created so an auto (tpsd=0) width can honor it.
+        uint32_t tps_auto_divisor = 0;
+        if (params.split_mode == LLAMA_SPLIT_MODE_TENSOR && model_ptr->arch == LLM_ARCH_DFLASH) {
+            uint32_t hc_mult = 0;
+            ml.get_key(LLM_KV_HYPER_CONNECTION_COUNT, hc_mult, false);
+            if (hc_mult > 0) {
+                ml.get_key(LLM_KV_ATTENTION_OUTPUT_GROUP_COUNT, tps_auto_divisor, false);
+            }
+        }
+
+        bool ok = llama_prepare_model_devices(params, model_ptr.get(), tps_auto_divisor);
         if (!ok) {
             return {-1, nullptr};
         }
@@ -440,6 +520,9 @@ static struct llama_model * llama_model_load_from_file_impl(
         return nullptr;
     }
 
+    if (file == nullptr && metadata == nullptr) {
+        model->path = path_model;
+    }
     return model;
 }
 

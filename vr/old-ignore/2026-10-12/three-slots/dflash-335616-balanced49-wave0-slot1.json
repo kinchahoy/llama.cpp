@@ -1,0 +1,8580 @@
+{
+  "index": 0,
+  "content": " n_elements;\nint64_t     n_elements;\nint64_t     n_elements;\nint64\n\nHere\n\nThe code is cut off at the end, but I can provide a thorough review of what's present. Let me analyze it carefully.\n\n## Findings\n\n### 1. **Critical: Duplicate/Corrupted Struct Members (Lines ~280-283)**\n\n```cpp\nint64_t     n_elements;\nint64_t     n_elements;\nint64_t     n_elements;\nint6\n```\n\nThis is clearly a copy-paste or merge error. The struct has `n_elements` declared three times, and the last line is truncated mid-identifier. This will not compile. The intended fields were likely something like:\n\n```cpp\nint64_t     n_elements;\nint64_t     n_bytes;\nint64_t     n_chunks;\n```\n\nor similar. This must be fixed before anything else.\n\n---\n\n### 2. **Critical: `counter[bid]` Race Condition in the Chunked Kernel**\n\n```cpp\nif (tid == 0) {\n    s_token = counter[bid] + ",
+  "tokens": [],
+  "id_slot": 1,
+  "stop": true,
+  "model": "unsloth/Qwen3.8-27B-GGUF:Q8_0",
+  "tokens_predicted": 256,
+  "tokens_evaluated": 4617,
+  "generation_settings": {
+    "seed": 42,
+    "temperature": 0.0,
+    "dynatemp_range": 0.0,
+    "dynatemp_exponent": 1.0,
+    "top_k": 1,
+    "top_p": 0.949999988079071,
+    "min_p": 0.05000000074505806,
+    "top_n_sigma": -1.0,
+    "xtc_probability": 0.0,
+    "xtc_threshold": 0.10000000149011612,
+    "typical_p": 1.0,
+    "repeat_last_n": 64,
+    "repeat_penalty": 1.0,
+    "presence_penalty": 0.0,
+    "frequency_penalty": 0.0,
+    "dry_multiplier": 0.0,
+    "dry_base": 1.75,
+    "dry_allowed_length": 2,
+    "dry_penalty_last_n": 64,
+    "dry_sequence_breakers": [
+      "\n",
+      ":",
+      "\"",
+      "*"
+    ],
+    "mirostat": 0,
+    "mirostat_tau": 5.0,
+    "mirostat_eta": 0.10000000149011612,
+    "adaptive_target": -1.0,
+    "adaptive_decay": 0.8999999761581421,
+    "stop": [],
+    "max_tokens": 256,
+    "n_predict": 256,
+    "n_keep": 0,
+    "n_discard": 0,
+    "ignore_eos": true,
+    "stream": false,
+    "logit_bias": [
+      {
+        "bias": null,
+        "token": 248044
+      },
+      {
+        "bias": null,
+        "token": 248046
+      },
+      {
+        "bias": null,
+        "token": 248063
+      },
+      {
+        "bias": null,
+        "token": 248064
+      },
+      {
+        "bias": null,
+        "token": 248065
+      }
+    ],
+    "n_probs": 2,
+    "min_keep": 0,
+    "grammar": "",
+    "grammar_lazy": false,
+    "grammar_triggers": [],
+    "preserved_tokens": [],
+    "chat_format": "Content-only",
+    "reasoning_format": "deepseek",
+    "reasoning_in_content": false,
+    "generation_prompt": "",
+    "samplers": [
+      "penalties",
+      "dry",
+      "top_n_sigma",
+      "top_k",
+      "typ_p",
+      "top_p",
+      "min_p",
+      "xtc",
+      "temperature"
+    ],
+    "speculative.types": "none,draft-dflash",
+    "timings_per_token": false,
+    "post_sampling_probs": false,
+    "backend_sampling": false,
+    "lora": []
+  },
+  "prompt": "Review this CUDA code for correctness and explain your findings:\n#include \"allreduce.cuh\"\n\n#if !defined(GGML_USE_MUSA)\n\n#include \"convert.cuh\"\n#include \"ggml-impl.h\"\n\n#include <algorithm>\n#include <cstdlib>\n#include <cstring>\n#include <limits>\n#include <type_traits>\n\n// ---------------------------------------------------------------------------\n// AllReduce for tensor-parallel inference across two GPUs (CUDA or\n// ROCm/HIP).\n//\n// Provides an in-place sum reduction over matching tensors on two GPUs\n// in the same process.  Used by the tensor-split path alongside NCCL;\n// targets setups without NVLink/xGMI, where data is exchanged between the\n// GPUs by staging it through pinned host memory over PCIe.\n//\n// Two reduction strategies are selected per call by tensor size:\n//\n//   * Chunked kernel path (small reductions): a single CUDA kernel both\n//     stages data through pinned host memory and performs the local sum.\n//     Cross-GPU synchronization happens *inside the kernel* (busy-wait on\n//     a host-memory flag), which keeps launch overhead low for the\n//     latency-sensitive token-generation case.\n//\n//   * Copy-engine path (large reductions): the transfer is split into\n//     D2H + H2D cudaMemcpyAsync chunks driven by the GPU's copy engine,\n//     followed by a small device-side add kernel.  Cross-GPU\n//     synchronization happens *outside the kernel*, via CUDA events\n//     between streams.  This keeps the compute engine free while large\n//     transfers are in flight, which matters for prefill-sized tensors.\n//     Reductions larger than the per-call inner cap are processed by an\n//     outer chunker that issues sequential inner calls.\n// ---------------------------------------------------------------------------\n\n// ---------------------------------------------------------------------------\n// Cross-GPU signal mechanism\n//\n// One int per (slot, rank) pair in pinned host memory.  Each AR call writes a\n// strictly increasing token (= the AR call number) into its own arrival int.\n// The peer spins until its read of the other's arrival int equals the token\n// it expects for this call -- a mismatch means the peer hasn't arrived yet.\n// Tokens never repeat over realistic call rates (32-bit int wraps in tens of\n// days at thousands of ARs/sec), so arrival ints don't need to be reset\n// between calls; we initialize once at pipeline init and let the values\n// accumulate.\n//\n// There is exactly one writer (the owning GPU) and one reader (the peer), so\n// we don't need atomics.  A volatile store paired with __threadfence_system()\n// provides the release ordering that makes the D2H writes visible system-wide\n// before the arrival token is observed.\n//\n// atomicAdd_system() requires hostNativeAtomicSupported, which is unavailable\n// on PCIe-attached consumer GPUs without NVLink, so the volatile path is the\n// portable choice.\n// ---------------------------------------------------------------------------\n\nstatic __device__ __forceinline__ void ggml_cuda_ar_signal_set(int * p, int token) {\n    *(volatile int *)p = token;\n}\nstatic __device__ __forceinline__ int ggml_cuda_ar_signal_get(const int * p) {\n    return *(const volatile int *)p;\n}\n\n// Byte spacing between adjacent arrival ints.  64 bytes (one cache line)\n// ensures each GPU/block's arrival slot lives on its own line, preventing\n// false-sharing stalls on the polling GPU.\nstatic constexpr size_t GGML_CUDA_AR_ARRIVAL_STRIDE = 64;\n\n// Number of blocks the chunked kernel launches with.  Each block stripes a\n// disjoint slice of the data and synchronizes through its own arrival-token\n// slot so multiple SMs can pump PCIe stores in parallel.\nstatic constexpr int GGML_CUDA_AR_KERNEL_BLOCKS = 8;\n\n// Number of slots in the staging / arrival ring.  Two slots are enough: AR N+1 is a\n// barrier, so when a rank starts AR N+2 its peer has finished reading slot[N%2].\nstatic constexpr int GGML_CUDA_AR_POOL_SIZE = 2;\n\n// ---------------------------------------------------------------------------\n// Chunked kernel AllReduce -- 2 GPUs, supports float, half, and bfloat16.\n//\n// Both GPUs run this kernel simultaneously on independent streams.  sendbuf\n// and recvbuf live in T_dst (the caller's tensor type); host_mine / host_other\n// carry data in T_wire (the on-wire type, possibly narrower than T_dst -- e.g.\n// T_dst=F32 with T_wire=BF16 halves the bytes pushed across PCIe).  When\n// T_dst == T_wire the casts below are no-ops.\n//\n// Each GPU runs three phases:\n//\n//   Phase 1 (all threads): cast sendbuf (T_dst) -> T_wire and store as\n//                          single-instruction-width vectors into host_mine.\n//                          __threadfence_system() commits these writes to host\n//                          memory.\n//   Phase 2 (thread 0):    write token to arrival_mine; spin until\n//                          arrival_other == token.\n//   Phase 3 (all threads): read T_wire vectors from host_other, cast\n//                          each element to T_dst, and sum with the local\n//                          sendbuf value (also rounded through T_wire so that\n//                          both GPUs truncate identically -- this guarantees\n//                          bit-equivalent results across the two devices).\n//\n// Multi-block: blocks stripe vectors across (gridDim.x * blockDim.x) global\n// threads to keep multiple SMs issuing PCIe stores in parallel.  Each block\n// has its own arrival-token slot (offset by blockIdx.x * ARRIVAL_STRIDE);\n// thread 0 of each block signals/spins on that slot independently of other\n// blocks.  Tail elements (the leftover < ELEMS_PER_VEC at the end) are\n// handled only by block 0 to avoid cross-block writes to the same slots.\n// ---------------------------------------------------------------------------\ntemplate <typename T_dst, typename T_wire>\nstatic __global__ void ggml_cuda_ar_kernel(\n        const T_dst  *              sendbuf,\n        T_dst        *              recvbuf,\n        T_wire       * __restrict__ host_mine_base,\n        const T_wire * __restrict__ host_other_base,\n        size_t                      slot_elems,\n        int                         count,\n        int *                       arrival,\n        int                         rank,\n        int *                       counter) {\n\n    // Vector unit for the wire type, sized to the arch's widest single-instruction\n    // copy (16 B on Volta+).  Each phase-1 iter writes one vector to host memory;\n    // each phase-3 iter reads one and produces ELEMS_PER_VEC sums.\n    constexpr int ELEMS_PER_VEC = ggml_cuda_get_max_cpy_bytes() / sizeof(T_wire);\n    constexpr int ARRIVAL_INTS  = (int)(GGML_CUDA_AR_ARRIVAL_STRIDE / sizeof(int));\n\n    const int tid       = threadIdx.x;\n    const int nt        = blockDim.x;\n    const int bid       = blockIdx.x;\n    const int gtid      = bid * nt + tid;\n    const int gnt       = gridDim.x * nt;\n    const int count_vec = count / ELEMS_PER_VEC;\n    const int tail      = count_vec * ELEMS_PER_VEC;\n\n    // Token and slot come from a per-block device counter, not from the host.\n    // Both ranks run the same AR sequence, so their counters stay equal. This keeps the kernel valid in a replayed graph.\n    __shared__ int s_token;\n    if (tid == 0) {\n        s_token = counter[bid] + 1;\n    }\n    __syncthreads();\n    const int token = s_token;\n    const int slot  = token % GGML_CUDA_AR_POOL_SIZE;\n\n    T_wire       * host_mine  = host_mine_base  + slot * slot_elems;\n    const T_wire * host_other = host_other_base + slot * slot_elems;\n    int       * arrival_mine  = arrival + (slot * 2 + rank)     * GGML_CUDA_AR_KERNEL_BLOCKS * ARRIVAL_INTS;\n    const int * arrival_other = arrival + (slot * 2 + 1 - rank) * GGML_CUDA_AR_KERNEL_BLOCKS * ARRIVAL_INTS;\n\n    // Phase 1: cast sendbuf (T_dst) -> host_mine (T_wire) and store as vectors.\n    {\n        for (int i = gtid; i < count_vec; i += gnt) {\n            const int off = i * ELEMS_PER_VEC;\n            T_wire wire[ELEMS_PER_VEC];\n            #pragma unroll\n            for (int k = 0; k < ELEMS_PER_VEC; ++k) {\n                wire[k] = ggml_cuda_cast<T_wire>(sendbuf[off + k]);\n            }\n            ggml_cuda_memcpy_1<sizeof(wire)>(&host_mine[off], wire);\n        }\n        if (bid == 0 && tid < count - tail) {\n            host_mine[tail + tid] = ggml_cuda_cast<T_wire>(sendbuf[tail + tid]);\n        }\n    }\n\n    // Commit this block's host writes before signalling.\n    __threadfence_system();\n    __syncthreads();\n\n    // Phase 2: thread 0 of each block signals on its own arrival slot, then\n    // spins for the matching slot from peer.  Per-block tokens mean blocks\n    // proceed independently -- no inter-block barrier needed.\n    if (tid == 0) {\n        int       * my_slot    = arrival_mine  + bid * ARRIVAL_INTS;\n        const int * other_slot = arrival_other + bid * ARRIVAL_INTS;\n\n        ggml_cuda_ar_signal_set(my_slot, token);\n        __threadfence_system(); // make our signal visible system-wide\n\n        while (ggml_cuda_ar_signal_get(other_slot) != token) {\n#ifdef GGML_USE_HIP\n            // Equals ~100ns at 2500 MHz (sleeps for n * [1,64] clock cycles)\n            __builtin_amdgcn_s_sleep(4);\n#elif __CUDA_ARCH__ >= GGML_CUDA_CC_VOLTA\n            __nanosleep(100);\n#else\n            NO_DEVICE_CODE;\n#endif // GGML_USE_HIP\n        }\n        counter[bid] = token;\n    }\n\n    __syncthreads();\n\n    // Acquire peer's host_other writes (this block's stripe of them).\n    __threadfence_system();\n\n    // Phase 3: read peer's T_wire vector, cast both sides through T_wire for\n    // bit-equivalence, sum in T_dst precision, and write back to recvbuf.\n    {\n        for (int i = gtid; i < count_vec; i += gnt) {\n            const int off = i * ELEMS_PER_VEC;\n            T_wire wire[ELEMS_PER_VEC];\n            ggml_cuda_memcpy_1<sizeof(wire)>(wire, &host_other[off]);\n            #pragma unroll\n            for (int k = 0; k < ELEMS_PER_VEC; ++k) {\n                const T_wire d_low = ggml_cuda_cast<T_wire>(sendbuf[off + k]);\n                recvbuf[off + k] = ggml_cuda_cast<T_dst>(\n                    ggml_cuda_cast<float>(d_low) + ggml_cuda_cast<float>(wire[k]));\n            }\n        }\n        if (bid == 0 && tid < count - tail) {\n            const T_wire d_low = ggml_cuda_cast<T_wire>(sendbuf[tail + tid]);\n            recvbuf[tail + tid] = ggml_cuda_cast<T_dst>(\n                ggml_cuda_cast<float>(d_low) +\n                ggml_cuda_cast<float>(host_other[tail + tid]));\n        }\n    }\n}\n\n// Combined load-convert-add kernel.  The peer's contribution arrives as T_src\n// (which may be a lower-precision type than T_dst when the BF16 round-trip is\n// active).  For bit-equivalence between the two GPUs, dst is first rounded\n// through T_src's precision via ggml_cuda_cast -- peer already truncated its\n// own value the same way before sending -- so both sides perform identical\n// arithmetic.  When T_dst == T_src the round-trip cast is a no-op.\ntemplate <typename T_dst, typename T_src>\nstatic __global__ void ggml_cuda_ar_add_kernel(\n        T_dst       * __restrict__ dst,\n        const T_src * __restrict__ src,\n        int count) {\n    const int tid = blockIdx.x * blockDim.x + threadIdx.x;\n    const int nt  = gridDim.x * blockDim.x;\n    for (int i = tid; i < count; i += nt) {\n        const T_src d_low = ggml_cuda_cast<T_src>(dst[i]);\n        dst[i] = ggml_cuda_cast<T_dst>(\n            ggml_cuda_cast<float>(d_low) + ggml_cuda_cast<float>(src[i]));\n    }\n}\n\n// ---------------------------------------------------------------------------\n// Pipeline structure\n// ---------------------------------------------------------------------------\n\n// The copy-engine path also uses GGML_CUDA_AR_POOL_SIZE event slots; acquire_slot host-syncs on them before reuse.\n\n// Maximum chunk size (bytes per GPU) handled by one chunked kernel launch.\n// Larger tensors are reduced by issuing multiple chunked launches.\nstatic constexpr size_t GGML_CUDA_AR_MAX_BYTES = 1024 * 1024; // 1 MB\n\n// Copy-engine path: largest tensor accepted on this path; sets host_large /\n// dev_tmp allocation size.\nstatic constexpr size_t GGML_CUDA_AR_COPY_MAX_BYTES = 32 * 1024 * 1024; // 32 MB\n\n// AR wire size at which the copy-engine path takes over from the chunked-\n// kernel path.  Override via GGML_CUDA_AR_COPY_THRESHOLD.\nstatic constexpr size_t GGML_CUDA_AR_COPY_THRESHOLD_DEFAULT = 1024 * 1024; // 1 MB\n// Per-call CE chunk-size heuristic: chunk_bytes = clamp(nbytes / 4, MIN, MAX).\n// The /4 keeps ~4 chunks in flight at any moment (good D2H/H2D overlap with\n// the peer); the clamps cover the cases where nbytes/4 is too small (per-\n// memcpy fixed cost dominates) or too large (chunk-level pipelining stalls).\n// Env var GGML_CUDA_AR_COPY_CHUNK_BYTES can override with a fixed value.\nstatic constexpr size_t GGML_CUDA_AR_COPY_CHUNK_BYTES_HEURISTIC_MIN = 512 * 1024;       // 512 KB\nstatic constexpr size_t GGML_CUDA_AR_COPY_CHUNK_BYTES_HEURISTIC_MAX = 2 * 1024 * 1024;  // 2 MB\n// Absolute floor that an env-var override is allowed to set; this caps the\n// per-slot copy-event array.  256 KB -> up to 128 chunks per 32 MB tensor.\nstatic constexpr size_t GGML_CUDA_AR_COPY_CHUNK_BYTES_MIN = 256 * 1024;\nstatic constexpr int GGML_CUDA_AR_COPY_MAX_CHUNKS =\n    static_cast<int>((GGML_CUDA_AR_COPY_MAX_BYTES + GGML_CUDA_AR_COPY_CHUNK_BYTES_MIN - 1) /\n                    GGML_CUDA_AR_COPY_CHUNK_BYTES_MIN);\n\nstruct ggml_cuda_ar_event_slot {\n    cudaEvent_t app = nullptr;  // upstream computation complete\n    cudaEvent_t cpy[GGML_CUDA_AR_COPY_MAX_CHUNKS] = {};  // copy-engine D2H chunks complete\n    cudaEvent_t h2d = nullptr;  // copy-engine H2Ds complete (handoff AR stream -> compute stream)\n    cudaEvent_t ker = nullptr;  // AllReduce kernel complete\n};\n\n// Mapped pinned host allocation: cudaHostAlloc + cudaHostGetDevicePointer\n// in one place, with the host handle preserved for cudaFreeHost.  Used where\n// the CPU never touches the buffer -- only the device reads/writes via the\n// mapped device pointer.  Required on systems where cudaDevAttrCanUseHost-\n// PointerForRegisteredMem is 0 and the host pointer can't be used as a\n// device pointer.\nstruct ggml_cuda_ar_host_mapping {\n    uint8_t * host = nullptr;   // cudaFreeHost handle; also the H-side ptr for cudaMemcpyAsync\n    uint8_t * dev  = nullptr;   // device-side pointer for kernels / cudaMemset\n\n    cudaError_t alloc(size_t bytes) {\n        cudaError_t rc = cudaHostAlloc(reinterpret_cast<void **>(&host), bytes,\n                                       cudaHostAllocPortable | cudaHostAllocMapped);\n        if (rc != cudaSuccess) {\n            host = nullptr;\n            return rc;\n        }\n        rc = cudaHostGetDevicePointer(reinterpret_cast<void **>(&dev), host, 0);\n        if (rc != cudaSuccess) {\n            CUDA_CHECK(cudaFreeHost(host));\n            host = nullptr;\n            dev  = nullptr;\n        }\n        return rc;\n    }\n\n    void free() {\n        if (host) {\n            CUDA_CHECK(cudaFreeHost(host));\n            host = nullptr;\n            dev  = nullptr;\n        }\n    }\n};\n\nstruct ggml_cuda_ar_pipeline {\n    int      n_devices;\n    int      devices[GGML_CUDA_MAX_DEVICES];\n    size_t   buf_bytes;    // bytes per device in host_buf[]\n    size_t   copy_bytes;   // bytes per device in host_large[] / dev_tmp[]\n    size_t   copy_threshold;\n    size_t   copy_chunk_bytes;\n    size_t   bf16_threshold; // tensors >= this size (bytes) are reduced via FP32->BF16 round-trip; 0 disables\n    uint64_t call_count;\n\n    // Per-device resources.\n    ggml_cuda_ar_host_mapping host_buf[GGML_CUDA_MAX_DEVICES];   // pinned staging (chunked kernel)\n    ggml_cuda_ar_host_mapping host_large[GGML_CUDA_MAX_DEVICES]; // pinned staging (copy-engine)\n    char *                    dev_tmp[GGML_CUDA_MAX_DEVICES];    // device scratch for copy-engine path\n    // Slab path: BF16 copy of the local input, written on streams[i]; src_read_done[i] marks the last read of the F32 input.\n    char *                    dev_src[GGML_CUDA_MAX_DEVICES];\n    cudaEvent_t               src_read_done[GGML_CUDA_MAX_DEVICES];\n    cudaStream_t             streams[GGML_CUDA_MAX_DEVICES];   // non-blocking\n    // Copy-engine stage 2 (H2D) stream. Separate from streams[] so the H2Ds overlap the D2Hs (full-duplex link).\n    // Equals streams[i] when GGML_CUDA_AR_DUPLEX=0.\n    cudaStream_t             h2d_streams[GGML_CUDA_MAX_DEVICES];\n    ggml_cuda_ar_event_slot  ev_pool[GGML_CUDA_MAX_DEVICES][GGML_CUDA_AR_POOL_SIZE];\n\n    // Copy-engine: per-device \"I finished reading my peer's host_large\"\n    // event.  Indexed by RECORDER device.  Recorded same-device on streams[i]\n    // after stage 2's last H2D from host_large[peer].  Waited cross-device\n    // by peer's stage-1 stream before the next AR overwrites host_large[peer].\n    cudaEvent_t              host_large_read_done[GGML_CUDA_MAX_DEVICES];\n    bool                     host_large_read_done_valid;\n\n    // Copy-engine: per-device \"my add_kernel is done with dev_tmp\" event.\n    // Recorded on the compute stream after each add_kernel; the AR stream\n    // waits on it before the next copy_impl's H2D overwrites dev_tmp.  Lets us\n    // single-buffer dev_tmp despite add_kernel running on a separate stream.\n    cudaEvent_t              dev_tmp_kernel_done[GGML_CUDA_MAX_DEVICES];\n    bool                     dev_tmp_kernel_done_valid;\n\n    // Arrival ring: ARRIVAL_STRIDE bytes between adjacent ints.  Mapped pinned\n    // memory; CPU never reads/writes -- only the kernel and cudaMemset.\n    // Indexed as [slot][rank][block] inside ggml_cuda_ar_kernel.\n    ggml_cuda_ar_host_mapping arrival;\n\n    // Chunked kernel: per-device, per-block AR counter in device memory.\n    int *                    counter[GGML_CUDA_MAX_DEVICES];\n\n    // Split-launch plan, filled by ggml_cuda_ar_prepare for ggml_cuda_ar_launch_rank.\n    struct {\n        ggml_backend_t backends[GGML_CUDA_MAX_DEVICES];\n        void *         data[GGML_CUDA_MAX_DEVICES];\n        bool           compute[GGML_CUDA_MAX_DEVICES];\n        ggml_type      type;\n        bool           use_bf16;\n        int64_t    ",
+  "has_new_line": true,
+  "truncated": false,
+  "stop_type": "limit",
+  "stopping_word": "",
+  "tokens_cached": 4872,
+  "timings": {
+    "cache_n": 0,
+    "prompt_n": 4617,
+    "prompt_ms": 18739.22,
+    "prompt_per_token_ms": 4.058743773012779,
+    "prompt_per_second": 246.38165302504586,
+    "predicted_n": 256,
+    "predicted_ms": 12660.451,
+    "predicted_per_token_ms": 49.64882745098039,
+    "predicted_per_second": 20.141462575069404,
+    "draft_n": 376,
+    "draft_n_accepted": 178
+  },
+  "completion_probabilities": [
+    {
+      "id": 307,
+      "token": " n",
+      "bytes": [
+        32,
+        110
+      ],
+      "logprob": -1.0320138931274414,
+      "top_logprobs": [
+        {
+          "id": 307,
+          "token": " n",
+          "bytes": [
+            32,
+            110
+          ],
+          "logprob": -1.0320138931274414
+        },
+        {
+          "id": 1698,
+          "token": " count",
+          "bytes": [
+            32,
+            99,
+            111,
+            117,
+            110,
+            116
+          ],
+          "logprob": -1.4496105909347534
+        }
+      ]
+    },
+    {
+      "id": 22091,
+      "token": "_elements",
+      "bytes": [
+        95,
+        101,
+        108,
+        101,
+        109,
+        101,
+        110,
+        116,
+        115
+      ],
+      "logprob": -0.7673212885856628,
+      "top_logprobs": [
+        {
+          "id": 22091,
+          "token": "_elements",
+          "bytes": [
+            95,
+            101,
+            108,
+            101,
+            109,
+            101,
+            110,
+            116,
+            115
+          ],
+          "logprob": -0.7673212885856628
+        },
+        {
+          "id": 27263,
+          "token": "_elem",
+          "bytes": [
+            95,
+            101,
+            108,
+            101,
+            109
+          ],
+          "logprob": -1.7291513681411743
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "token": ";",
+      "bytes": [
+        59
+      ],
+      "logprob": -0.026539599522948265,
+      "top_logprobs": [
+        {
+          "id": 26,
+          "token": ";",
+          "bytes": [
+            59
+          ],
+          "logprob": -0.026539599522948265
+        },
+        {
+          "id": 10467,
+          "token": "_total",
+          "bytes": [
+            95,
+            116,
+            111,
+            116,
+            97,
+            108
+          ],
+          "logprob": -4.848087310791016
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "token": "\n",
+      "bytes": [
+        10
+      ],
+      "logprob": -0.0891420915722847,
+      "top_logprobs": [
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -0.0891420915722847
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -2.6444647312164307
+        }
+      ]
+    },
+    {
+      "id": 390,
+      "token": "int",
+      "bytes": [
+        105,
+        110,
+        116
+      ],
+      "logprob": -0.20759007334709167,
+      "top_logprobs": [
+        {
+          "id": 390,
+          "token": "int",
+          "bytes": [
+            105,
+            110,
+            116
+          ],
+          "logprob": -0.20759007334709167
+        },
+        {
+          "id": 514,
+          "token": " int",
+          "bytes": [
+            32,
+            105,
+            110,
+            116
+          ],
+          "logprob": -2.8439674377441406
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "token": "6",
+      "bytes": [
+        54
+      ],
+      "logprob": -0.00570359081029892,
+      "top_logprobs": [
+        {
+          "id": 21,
+          "token": "6",
+          "bytes": [
+            54
+          ],
+          "logprob": -0.00570359081029892
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.140454292297363
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "token": "4",
+      "bytes": [
+        52
+      ],
+      "logprob": -0.003042493714019656,
+      "top_logprobs": [
+        {
+          "id": 19,
+          "token": "4",
+          "bytes": [
+            52
+          ],
+          "logprob": -0.003042493714019656
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.420256614685059
+        }
+      ]
+    },
+    {
+      "id": 516,
+      "token": "_t",
+      "bytes": [
+        95,
+        116
+      ],
+      "logprob": -0.019513092935085297,
+      "top_logprobs": [
+        {
+          "id": 516,
+          "token": "_t",
+          "bytes": [
+            95,
+            116
+          ],
+          "logprob": -0.019513092935085297
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -4.425859451293945
+        }
+      ]
+    },
+    {
+      "id": 257,
+      "token": "    ",
+      "bytes": [
+        32,
+        32,
+        32,
+        32
+      ],
+      "logprob": -0.2586664855480194,
+      "top_logprobs": [
+        {
+          "id": 257,
+          "token": "    ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -0.2586664855480194
+        },
+        {
+          "id": 285,
+          "token": "       ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -2.422584056854248
+        }
+      ]
+    },
+    {
+      "id": 307,
+      "token": " n",
+      "bytes": [
+        32,
+        110
+      ],
+      "logprob": -0.06195707991719246,
+      "top_logprobs": [
+        {
+          "id": 307,
+          "token": " n",
+          "bytes": [
+            32,
+            110
+          ],
+          "logprob": -0.06195707991719246
+        },
+        {
+          "id": 4206,
+          "token": " offset",
+          "bytes": [
+            32,
+            111,
+            102,
+            102,
+            115,
+            101,
+            116
+          ],
+          "logprob": -5.9076008796691895
+        }
+      ]
+    },
+    {
+      "id": 22091,
+      "token": "_elements",
+      "bytes": [
+        95,
+        101,
+        108,
+        101,
+        109,
+        101,
+        110,
+        116,
+        115
+      ],
+      "logprob": -0.3508749008178711,
+      "top_logprobs": [
+        {
+          "id": 22091,
+          "token": "_elements",
+          "bytes": [
+            95,
+            101,
+            108,
+            101,
+            109,
+            101,
+            110,
+            116,
+            115
+          ],
+          "logprob": -0.3508749008178711
+        },
+        {
+          "id": 12164,
+          "token": "_bytes",
+          "bytes": [
+            95,
+            98,
+            121,
+            116,
+            101,
+            115
+          ],
+          "logprob": -2.4211721420288086
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "token": ";",
+      "bytes": [
+        59
+      ],
+      "logprob": -1.1890757083892822,
+      "top_logprobs": [
+        {
+          "id": 26,
+          "token": ";",
+          "bytes": [
+            59
+          ],
+          "logprob": -1.1890757083892822
+        },
+        {
+          "id": 72645,
+          "token": "_wire",
+          "bytes": [
+            95,
+            119,
+            105,
+            114,
+            101
+          ],
+          "logprob": -2.5817768573760986
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "token": "\n",
+      "bytes": [
+        10
+      ],
+      "logprob": -0.4645967185497284,
+      "top_logprobs": [
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -0.4645967185497284
+        },
+        {
+          "id": 220,
+          "token": " ",
+          "bytes": [
+            32
+          ],
+          "logprob": -1.649876594543457
+        }
+      ]
+    },
+    {
+      "id": 390,
+      "token": "int",
+      "bytes": [
+        105,
+        110,
+        116
+      ],
+      "logprob": -0.0404711551964283,
+      "top_logprobs": [
+        {
+          "id": 390,
+          "token": "int",
+          "bytes": [
+            105,
+            110,
+            116
+          ],
+          "logprob": -0.0404711551964283
+        },
+        {
+          "id": 71093,
+          "token": "```",
+          "bytes": [
+            96,
+            96,
+            96
+          ],
+          "logprob": -3.930098533630371
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "token": "6",
+      "bytes": [
+        54
+      ],
+      "logprob": -0.00550519023090601,
+      "top_logprobs": [
+        {
+          "id": 21,
+          "token": "6",
+          "bytes": [
+            54
+          ],
+          "logprob": -0.00550519023090601
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -5.639843463897705
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "token": "4",
+      "bytes": [
+        52
+      ],
+      "logprob": -8.011185127543285e-05,
+      "top_logprobs": [
+        {
+          "id": 19,
+          "token": "4",
+          "bytes": [
+            52
+          ],
+          "logprob": -8.011185127543285e-05
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -10.123678207397461
+        }
+      ]
+    },
+    {
+      "id": 516,
+      "token": "_t",
+      "bytes": [
+        95,
+        116
+      ],
+      "logprob": -6.056015263311565e-05,
+      "top_logprobs": [
+        {
+          "id": 516,
+          "token": "_t",
+          "bytes": [
+            95,
+            116
+          ],
+          "logprob": -6.056015263311565e-05
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -10.042330741882324
+        }
+      ]
+    },
+    {
+      "id": 257,
+      "token": "    ",
+      "bytes": [
+        32,
+        32,
+        32,
+        32
+      ],
+      "logprob": -0.010144674219191074,
+      "top_logprobs": [
+        {
+          "id": 257,
+          "token": "    ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -0.010144674219191074
+        },
+        {
+          "id": 307,
+          "token": " n",
+          "bytes": [
+            32,
+            110
+          ],
+          "logprob": -5.525916576385498
+        }
+      ]
+    },
+    {
+      "id": 307,
+      "token": " n",
+      "bytes": [
+        32,
+        110
+      ],
+      "logprob": -0.012832552194595337,
+      "top_logprobs": [
+        {
+          "id": 307,
+          "token": " n",
+          "bytes": [
+            32,
+            110
+          ],
+          "logprob": -0.012832552194595337
+        },
+        {
+          "id": 771,
+          "token": " ar",
+          "bytes": [
+            32,
+            97,
+            114
+          ],
+          "logprob": -4.809164047241211
+        }
+      ]
+    },
+    {
+      "id": 22091,
+      "token": "_elements",
+      "bytes": [
+        95,
+        101,
+        108,
+        101,
+        109,
+        101,
+        110,
+        116,
+        115
+      ],
+      "logprob": -0.0037711949553340673,
+      "top_logprobs": [
+        {
+          "id": 22091,
+          "token": "_elements",
+          "bytes": [
+            95,
+            101,
+            108,
+            101,
+            109,
+            101,
+            110,
+            116,
+            115
+          ],
+          "logprob": -0.0037711949553340673
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.512205600738525
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "token": ";",
+      "bytes": [
+        59
+      ],
+      "logprob": -0.0034955369774252176,
+      "top_logprobs": [
+        {
+          "id": 26,
+          "token": ";",
+          "bytes": [
+            59
+          ],
+          "logprob": -0.0034955369774252176
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.014071941375732
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "token": "\n",
+      "bytes": [
+        10
+      ],
+      "logprob": -0.45538267493247986,
+      "top_logprobs": [
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -0.45538267493247986
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -1.0771573781967163
+        }
+      ]
+    },
+    {
+      "id": 390,
+      "token": "int",
+      "bytes": [
+        105,
+        110,
+        116
+      ],
+      "logprob": -0.11403016000986099,
+      "top_logprobs": [
+        {
+          "id": 390,
+          "token": "int",
+          "bytes": [
+            105,
+            110,
+            116
+          ],
+          "logprob": -0.11403016000986099
+        },
+        {
+          "id": 285,
+          "token": "       ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -2.431288957595825
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "token": "6",
+      "bytes": [
+        54
+      ],
+      "logprob": -0.004496236331760883,
+      "top_logprobs": [
+        {
+          "id": 21,
+          "token": "6",
+          "bytes": [
+            54
+          ],
+          "logprob": -0.004496236331760883
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -5.6463942527771
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "token": "4",
+      "bytes": [
+        52
+      ],
+      "logprob": -3.0637256713816896e-05,
+      "top_logprobs": [
+        {
+          "id": 19,
+          "token": "4",
+          "bytes": [
+            52
+          ],
+          "logprob": -3.0637256713816896e-05
+        },
+        {
+          "id": 26907,
+          "token": " Split",
+          "bytes": [
+            32,
+            83,
+            112,
+            108,
+            105,
+            116
+          ],
+          "logprob": -11.511011123657227
+        }
+      ]
+    },
+    {
+      "id": 271,
+      "token": "\n\n",
+      "bytes": [
+        10,
+        10
+      ],
+      "logprob": -0.4469452202320099,
+      "top_logprobs": [
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -0.4469452202320099
+        },
+        {
+          "id": 27734,
+          "token": " compilation",
+          "bytes": [
+            32,
+            99,
+            111,
+            109,
+            112,
+            105,
+            108,
+            97,
+            116,
+            105,
+            111,
+            110
+          ],
+          "logprob": -2.191598892211914
+        }
+      ]
+    },
+    {
+      "id": 8160,
+      "token": "Here",
+      "bytes": [
+        72,
+        101,
+        114,
+        101
+      ],
+      "logprob": -1.0155521631240845,
+      "top_logprobs": [
+        {
+          "id": 8160,
+          "token": "Here",
+          "bytes": [
+            72,
+            101,
+            114,
+            101
+          ],
+          "logprob": -1.0155521631240845
+        },
+        {
+          "id": 248068,
+          "token": "<think>",
+          "bytes": [
+            60,
+            116,
+            104,
+            105,
+            110,
+            107,
+            62
+          ],
+          "logprob": -1.2531486749649048
+        }
+      ]
+    },
+    {
+      "id": 271,
+      "token": "\n\n",
+      "bytes": [
+        10,
+        10
+      ],
+      "logprob": -0.6587859988212585,
+      "top_logprobs": [
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -0.6587859988212585
+        },
+        {
+          "id": 579,
+          "token": "'s",
+          "bytes": [
+            39,
+            115
+          ],
+          "logprob": -1.8820430040359497
+        }
+      ]
+    },
+    {
+      "id": 760,
+      "token": "The",
+      "bytes": [
+        84,
+        104,
+        101
+      ],
+      "logprob": -0.9651744365692139,
+      "top_logprobs": [
+        {
+          "id": 760,
+          "token": "The",
+          "bytes": [
+            84,
+            104,
+            101
+          ],
+          "logprob": -0.9651744365692139
+        },
+        {
+          "id": 40,
+          "token": "I",
+          "bytes": [
+            73
+          ],
+          "logprob": -1.0425117015838623
+        }
+      ]
+    },
+    {
+      "id": 1970,
+      "token": " code",
+      "bytes": [
+        32,
+        99,
+        111,
+        100,
+        101
+      ],
+      "logprob": -0.24791401624679565,
+      "top_logprobs": [
+        {
+          "id": 1970,
+          "token": " code",
+          "bytes": [
+            32,
+            99,
+            111,
+            100,
+            101
+          ],
+          "logprob": -0.24791401624679565
+        },
+        {
+          "id": 52965,
+          "token": " CUDA",
+          "bytes": [
+            32,
+            67,
+            85,
+            68,
+            65
+          ],
+          "logprob": -1.7365939617156982
+        }
+      ]
+    },
+    {
+      "id": 369,
+      "token": " is",
+      "bytes": [
+        32,
+        105,
+        115
+      ],
+      "logprob": -1.1294225454330444,
+      "top_logprobs": [
+        {
+          "id": 369,
+          "token": " is",
+          "bytes": [
+            32,
+            105,
+            115
+          ],
+          "logprob": -1.1294225454330444
+        },
+        {
+          "id": 488,
+          "token": " you",
+          "bytes": [
+            32,
+            121,
+            111,
+            117
+          ],
+          "logprob": -1.7864794731140137
+        }
+      ]
+    },
+    {
+      "id": 3799,
+      "token": " cut",
+      "bytes": [
+        32,
+        99,
+        117,
+        116
+      ],
+      "logprob": -0.6803959608078003,
+      "top_logprobs": [
+        {
+          "id": 3799,
+          "token": " cut",
+          "bytes": [
+            32,
+            99,
+            117,
+            116
+          ],
+          "logprob": -0.6803959608078003
+        },
+        {
+          "id": 2972,
+          "token": " **",
+          "bytes": [
+            32,
+            42,
+            42
+          ],
+          "logprob": -1.332955241203308
+        }
+      ]
+    },
+    {
+      "id": 974,
+      "token": " off",
+      "bytes": [
+        32,
+        111,
+        102,
+        102
+      ],
+      "logprob": -0.007048174273222685,
+      "top_logprobs": [
+        {
+          "id": 974,
+          "token": " off",
+          "bytes": [
+            32,
+            111,
+            102,
+            102
+          ],
+          "logprob": -0.007048174273222685
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -5.429232120513916
+        }
+      ]
+    },
+    {
+      "id": 506,
+      "token": " at",
+      "bytes": [
+        32,
+        97,
+        116
+      ],
+      "logprob": -1.353437900543213,
+      "top_logprobs": [
+        {
+          "id": 506,
+          "token": " at",
+          "bytes": [
+            32,
+            97,
+            116
+          ],
+          "logprob": -1.353437900543213
+        },
+        {
+          "id": 11,
+          "token": ",",
+          "bytes": [
+            44
+          ],
+          "logprob": -1.3781514167785645
+        }
+      ]
+    },
+    {
+      "id": 279,
+      "token": " the",
+      "bytes": [
+        32,
+        116,
+        104,
+        101
+      ],
+      "logprob": -0.07629206031560898,
+      "top_logprobs": [
+        {
+          "id": 279,
+          "token": " the",
+          "bytes": [
+            32,
+            116,
+            104,
+            101
+          ],
+          "logprob": -0.07629206031560898
+        },
+        {
+          "id": 1510,
+          "token": " `",
+          "bytes": [
+            32,
+            96
+          ],
+          "logprob": -3.080472946166992
+        }
+      ]
+    },
+    {
+      "id": 809,
+      "token": " end",
+      "bytes": [
+        32,
+        101,
+        110,
+        100
+      ],
+      "logprob": -0.5406652688980103,
+      "top_logprobs": [
+        {
+          "id": 809,
+          "token": " end",
+          "bytes": [
+            32,
+            101,
+            110,
+            100
+          ],
+          "logprob": -0.5406652688980103
+        },
+        {
+          "id": 1546,
+          "token": " very",
+          "bytes": [
+            32,
+            118,
+            101,
+            114,
+            121
+          ],
+          "logprob": -1.1902148723602295
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "token": ",",
+      "bytes": [
+        44
+      ],
+      "logprob": -0.3266771733760834,
+      "top_logprobs": [
+        {
+          "id": 11,
+          "token": ",",
+          "bytes": [
+            44
+          ],
+          "logprob": -0.3266771733760834
+        },
+        {
+          "id": 318,
+          "token": " (",
+          "bytes": [
+            32,
+            40
+          ],
+          "logprob": -2.166900396347046
+        }
+      ]
+    },
+    {
+      "id": 694,
+      "token": " but",
+      "bytes": [
+        32,
+        98,
+        117,
+        116
+      ],
+      "logprob": -0.21642760932445526,
+      "top_logprobs": [
+        {
+          "id": 694,
+          "token": " but",
+          "bytes": [
+            32,
+            98,
+            117,
+            116
+          ],
+          "logprob": -0.21642760932445526
+        },
+        {
+          "id": 748,
+          "token": " so",
+          "bytes": [
+            32,
+            115,
+            111
+          ],
+          "logprob": -2.0800235271453857
+        }
+      ]
+    },
+    {
+      "id": 353,
+      "token": " I",
+      "bytes": [
+        32,
+        73
+      ],
+      "logprob": -0.8748257160186768,
+      "top_logprobs": [
+        {
+          "id": 353,
+          "token": " I",
+          "bytes": [
+            32,
+            73
+          ],
+          "logprob": -0.8748257160186768
+        },
+        {
+          "id": 1017,
+          "token": " there",
+          "bytes": [
+            32,
+            116,
+            104,
+            101,
+            114,
+            101
+          ],
+          "logprob": -1.6137535572052002
+        }
+      ]
+    },
+    {
+      "id": 628,
+      "token": " can",
+      "bytes": [
+        32,
+        99,
+        97,
+        110
+      ],
+      "logprob": -0.057328224182128906,
+      "top_logprobs": [
+        {
+          "id": 628,
+          "token": " can",
+          "bytes": [
+            32,
+            99,
+            97,
+            110
+          ],
+          "logprob": -0.057328224182128906
+        },
+        {
+          "id": 3172,
+          "token": "'ll",
+          "bytes": [
+            39,
+            108,
+            108
+          ],
+          "logprob": -3.431868553161621
+        }
+      ]
+    },
+    {
+      "id": 3300,
+      "token": " provide",
+      "bytes": [
+        32,
+        112,
+        114,
+        111,
+        118,
+        105,
+        100,
+        101
+      ],
+      "logprob": -1.1244584321975708,
+      "top_logprobs": [
+        {
+          "id": 3300,
+          "token": " provide",
+          "bytes": [
+            32,
+            112,
+            114,
+            111,
+            118,
+            105,
+            100,
+            101
+          ],
+          "logprob": -1.1244584321975708
+        },
+        {
+          "id": 3286,
+          "token": " review",
+          "bytes": [
+            32,
+            114,
+            101,
+            118,
+            105,
+            101,
+            119
+          ],
+          "logprob": -1.2974835634231567
+        }
+      ]
+    },
+    {
+      "id": 264,
+      "token": " a",
+      "bytes": [
+        32,
+        97
+      ],
+      "logprob": -0.002161213895305991,
+      "top_logprobs": [
+        {
+          "id": 264,
+          "token": " a",
+          "bytes": [
+            32,
+            97
+          ],
+          "logprob": -0.002161213895305991
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.564399719238281
+        }
+      ]
+    },
+    {
+      "id": 16908,
+      "token": " thorough",
+      "bytes": [
+        32,
+        116,
+        104,
+        111,
+        114,
+        111,
+        117,
+        103,
+        104
+      ],
+      "logprob": -0.05902713164687157,
+      "top_logprobs": [
+        {
+          "id": 16908,
+          "token": " thorough",
+          "bytes": [
+            32,
+            116,
+            104,
+            111,
+            114,
+            111,
+            117,
+            103,
+            104
+          ],
+          "logprob": -0.05902713164687157
+        },
+        {
+          "id": 15352,
+          "token": " comprehensive",
+          "bytes": [
+            32,
+            99,
+            111,
+            109,
+            112,
+            114,
+            101,
+            104,
+            101,
+            110,
+            115,
+            105,
+            118,
+            101
+          ],
+          "logprob": -3.412670612335205
+        }
+      ]
+    },
+    {
+      "id": 3286,
+      "token": " review",
+      "bytes": [
+        32,
+        114,
+        101,
+        118,
+        105,
+        101,
+        119
+      ],
+      "logprob": -0.0077009922824800014,
+      "top_logprobs": [
+        {
+          "id": 3286,
+          "token": " review",
+          "bytes": [
+            32,
+            114,
+            101,
+            118,
+            105,
+            101,
+            119
+          ],
+          "logprob": -0.0077009922824800014
+        },
+        {
+          "id": 55404,
+          "token": " correctness",
+          "bytes": [
+            32,
+            99,
+            111,
+            114,
+            114,
+            101,
+            99,
+            116,
+            110,
+            101,
+            115,
+            115
+          ],
+          "logprob": -5.604910850524902
+        }
+      ]
+    },
+    {
+      "id": 314,
+      "token": " of",
+      "bytes": [
+        32,
+        111,
+        102
+      ],
+      "logprob": -0.008145695552229881,
+      "top_logprobs": [
+        {
+          "id": 314,
+          "token": " of",
+          "bytes": [
+            32,
+            111,
+            102
+          ],
+          "logprob": -0.008145695552229881
+        },
+        {
+          "id": 3018,
+          "token": " based",
+          "bytes": [
+            32,
+            98,
+            97,
+            115,
+            101,
+            100
+          ],
+          "logprob": -4.906930446624756
+        }
+      ]
+    },
+    {
+      "id": 1092,
+      "token": " what",
+      "bytes": [
+        32,
+        119,
+        104,
+        97,
+        116
+      ],
+      "logprob": -0.57468581199646,
+      "top_logprobs": [
+        {
+          "id": 1092,
+          "token": " what",
+          "bytes": [
+            32,
+            119,
+            104,
+            97,
+            116
+          ],
+          "logprob": -0.57468581199646
+        },
+        {
+          "id": 4156,
+          "token": " everything",
+          "bytes": [
+            32,
+            101,
+            118,
+            101,
+            114,
+            121,
+            116,
+            104,
+            105,
+            110,
+            103
+          ],
+          "logprob": -1.3916947841644287
+        }
+      ]
+    },
+    {
+      "id": 579,
+      "token": "'s",
+      "bytes": [
+        39,
+        115
+      ],
+      "logprob": -0.11088210344314575,
+      "top_logprobs": [
+        {
+          "id": 579,
+          "token": "'s",
+          "bytes": [
+            39,
+            115
+          ],
+          "logprob": -0.11088210344314575
+        },
+        {
+          "id": 369,
+          "token": " is",
+          "bytes": [
+            32,
+            105,
+            115
+          ],
+          "logprob": -2.269634485244751
+        }
+      ]
+    },
+    {
+      "id": 2945,
+      "token": " present",
+      "bytes": [
+        32,
+        112,
+        114,
+        101,
+        115,
+        101,
+        110,
+        116
+      ],
+      "logprob": -0.7773159146308899,
+      "top_logprobs": [
+        {
+          "id": 2945,
+          "token": " present",
+          "bytes": [
+            32,
+            112,
+            114,
+            101,
+            115,
+            101,
+            110,
+            116
+          ],
+          "logprob": -0.7773159146308899
+        },
+        {
+          "id": 9155,
+          "token": " visible",
+          "bytes": [
+            32,
+            118,
+            105,
+            115,
+            105,
+            98,
+            108,
+            101
+          ],
+          "logprob": -0.9624412655830383
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "token": ".",
+      "bytes": [
+        46
+      ],
+      "logprob": -0.010296903550624847,
+      "top_logprobs": [
+        {
+          "id": 13,
+          "token": ".",
+          "bytes": [
+            46
+          ],
+          "logprob": -0.010296903550624847
+        },
+        {
+          "id": 11,
+          "token": ",",
+          "bytes": [
+            44
+          ],
+          "logprob": -5.596707344055176
+        }
+      ]
+    },
+    {
+      "id": 6558,
+      "token": " Let",
+      "bytes": [
+        32,
+        76,
+        101,
+        116
+      ],
+      "logprob": -0.11307351291179657,
+      "top_logprobs": [
+        {
+          "id": 6558,
+          "token": " Let",
+          "bytes": [
+            32,
+            76,
+            101,
+            116
+          ],
+          "logprob": -0.11307351291179657
+        },
+        {
+          "id": 5514,
+          "token": " Here",
+          "bytes": [
+            32,
+            72,
+            101,
+            114,
+            101
+          ],
+          "logprob": -2.838848352432251
+        }
+      ]
+    },
+    {
+      "id": 728,
+      "token": " me",
+      "bytes": [
+        32,
+        109,
+        101
+      ],
+      "logprob": -0.0027853860519826412,
+      "top_logprobs": [
+        {
+          "id": 728,
+          "token": " me",
+          "bytes": [
+            32,
+            109,
+            101
+          ],
+          "logprob": -0.0027853860519826412
+        },
+        {
+          "id": 579,
+          "token": "'s",
+          "bytes": [
+            39,
+            115
+          ],
+          "logprob": -6.346888065338135
+        }
+      ]
+    },
+    {
+      "id": 22903,
+      "token": " analyze",
+      "bytes": [
+        32,
+        97,
+        110,
+        97,
+        108,
+        121,
+        122,
+        101
+      ],
+      "logprob": -0.22732174396514893,
+      "top_logprobs": [
+        {
+          "id": 22903,
+          "token": " analyze",
+          "bytes": [
+            32,
+            97,
+            110,
+            97,
+            108,
+            121,
+            122,
+            101
+          ],
+          "logprob": -0.22732174396514893
+        },
+        {
+          "id": 708,
+          "token": " go",
+          "bytes": [
+            32,
+            103,
+            111
+          ],
+          "logprob": -2.2589969635009766
+        }
+      ]
+    },
+    {
+      "id": 424,
+      "token": " it",
+      "bytes": [
+        32,
+        105,
+        116
+      ],
+      "logprob": -0.4922732412815094,
+      "top_logprobs": [
+        {
+          "id": 424,
+          "token": " it",
+          "bytes": [
+            32,
+            105,
+            116
+          ],
+          "logprob": -0.4922732412815094
+        },
+        {
+          "id": 279,
+          "token": " the",
+          "bytes": [
+            32,
+            116,
+            104,
+            101
+          ],
+          "logprob": -1.2903803586959839
+        }
+      ]
+    },
+    {
+      "id": 15060,
+      "token": " carefully",
+      "bytes": [
+        32,
+        99,
+        97,
+        114,
+        101,
+        102,
+        117,
+        108,
+        108,
+        121
+      ],
+      "logprob": -1.0438324213027954,
+      "top_logprobs": [
+        {
+          "id": 15060,
+          "token": " carefully",
+          "bytes": [
+            32,
+            99,
+            97,
+            114,
+            101,
+            102,
+            117,
+            108,
+            108,
+            121
+          ],
+          "logprob": -1.0438324213027954
+        },
+        {
+          "id": 57710,
+          "token": " systematically",
+          "bytes": [
+            32,
+            115,
+            121,
+            115,
+            116,
+            101,
+            109,
+            97,
+            116,
+            105,
+            99,
+            97,
+            108,
+            108,
+            121
+          ],
+          "logprob": -1.0645424127578735
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "token": ".",
+      "bytes": [
+        46
+      ],
+      "logprob": -0.07898461073637009,
+      "top_logprobs": [
+        {
+          "id": 13,
+          "token": ".",
+          "bytes": [
+            46
+          ],
+          "logprob": -0.07898461073637009
+        },
+        {
+          "id": 364,
+          "token": " for",
+          "bytes": [
+            32,
+            102,
+            111,
+            114
+          ],
+          "logprob": -2.768338441848755
+        }
+      ]
+    },
+    {
+      "id": 271,
+      "token": "\n\n",
+      "bytes": [
+        10,
+        10
+      ],
+      "logprob": -0.05157129094004631,
+      "top_logprobs": [
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -0.05157129094004631
+        },
+        {
+          "id": 1358,
+          "token": "\n\n\n",
+          "bytes": [
+            10,
+            10,
+            10
+          ],
+          "logprob": -3.3521676063537598
+        }
+      ]
+    },
+    {
+      "id": 550,
+      "token": "##",
+      "bytes": [
+        35,
+        35
+      ],
+      "logprob": -1.1937329769134521,
+      "top_logprobs": [
+        {
+          "id": 550,
+          "token": "##",
+          "bytes": [
+            35,
+            35
+          ],
+          "logprob": -1.1937329769134521
+        },
+        {
+          "id": 332,
+          "token": "**",
+          "bytes": [
+            42,
+            42
+          ],
+          "logprob": -1.462222695350647
+        }
+      ]
+    },
+    {
+      "id": 7145,
+      "token": " Find",
+      "bytes": [
+        32,
+        70,
+        105,
+        110,
+        100
+      ],
+      "logprob": -1.213559627532959,
+      "top_logprobs": [
+        {
+          "id": 7145,
+          "token": " Find",
+          "bytes": [
+            32,
+            70,
+            105,
+            110,
+            100
+          ],
+          "logprob": -1.213559627532959
+        },
+        {
+          "id": 9988,
+          "token": " Review",
+          "bytes": [
+            32,
+            82,
+            101,
+            118,
+            105,
+            101,
+            119
+          ],
+          "logprob": -1.3549553155899048
+        }
+      ]
+    },
+    {
+      "id": 793,
+      "token": "ings",
+      "bytes": [
+        105,
+        110,
+        103,
+        115
+      ],
+      "logprob": -3.2067811844171956e-05,
+      "top_logprobs": [
+        {
+          "id": 793,
+          "token": "ings",
+          "bytes": [
+            105,
+            110,
+            103,
+            115
+          ],
+          "logprob": -3.2067811844171956e-05
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -10.717439651489258
+        }
+      ]
+    },
+    {
+      "id": 271,
+      "token": "\n\n",
+      "bytes": [
+        10,
+        10
+      ],
+      "logprob": -0.0019577820785343647,
+      "top_logprobs": [
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -0.0019577820785343647
+        },
+        {
+          "id": 494,
+          "token": " from",
+          "bytes": [
+            32,
+            102,
+            114,
+            111,
+            109
+          ],
+          "logprob": -7.257718086242676
+        }
+      ]
+    },
+    {
+      "id": 13962,
+      "token": "###",
+      "bytes": [
+        35,
+        35,
+        35
+      ],
+      "logprob": -0.004594613332301378,
+      "top_logprobs": [
+        {
+          "id": 13962,
+          "token": "###",
+          "bytes": [
+            35,
+            35,
+            35
+          ],
+          "logprob": -0.004594613332301378
+        },
+        {
+          "id": 332,
+          "token": "**",
+          "bytes": [
+            42,
+            42
+          ],
+          "logprob": -6.737617492675781
+        }
+      ]
+    },
+    {
+      "id": 220,
+      "token": " ",
+      "bytes": [
+        32
+      ],
+      "logprob": -0.057759057730436325,
+      "top_logprobs": [
+        {
+          "id": 220,
+          "token": " ",
+          "bytes": [
+            32
+          ],
+          "logprob": -0.057759057730436325
+        },
+        {
+          "id": 33513,
+          "token": " Critical",
+          "bytes": [
+            32,
+            67,
+            114,
+            105,
+            116,
+            105,
+            99,
+            97,
+            108
+          ],
+          "logprob": -3.094853162765503
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "token": "1",
+      "bytes": [
+        49
+      ],
+      "logprob": -0.00012481991143431515,
+      "top_logprobs": [
+        {
+          "id": 16,
+          "token": "1",
+          "bytes": [
+            49
+          ],
+          "logprob": -0.00012481991143431515
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -9.947529792785645
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "token": ".",
+      "bytes": [
+        46
+      ],
+      "logprob": -0.008054840378463268,
+      "top_logprobs": [
+        {
+          "id": 13,
+          "token": ".",
+          "bytes": [
+            46
+          ],
+          "logprob": -0.008054840378463268
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -4.871835708618164
+        }
+      ]
+    },
+    {
+      "id": 2972,
+      "token": " **",
+      "bytes": [
+        32,
+        42,
+        42
+      ],
+      "logprob": -0.5512160062789917,
+      "top_logprobs": [
+        {
+          "id": 2972,
+          "token": " **",
+          "bytes": [
+            32,
+            42,
+            42
+          ],
+          "logprob": -0.5512160062789917
+        },
+        {
+          "id": 33513,
+          "token": " Critical",
+          "bytes": [
+            32,
+            67,
+            114,
+            105,
+            116,
+            105,
+            99,
+            97,
+            108
+          ],
+          "logprob": -1.8374155759811401
+        }
+      ]
+    },
+    {
+      "id": 40621,
+      "token": "Critical",
+      "bytes": [
+        67,
+        114,
+        105,
+        116,
+        105,
+        99,
+        97,
+        108
+      ],
+      "logprob": -0.7698902487754822,
+      "top_logprobs": [
+        {
+          "id": 40621,
+          "token": "Critical",
+          "bytes": [
+            67,
+            114,
+            105,
+            116,
+            105,
+            99,
+            97,
+            108
+          ],
+          "logprob": -0.7698902487754822
+        },
+        {
+          "id": 1237,
+          "token": "Tr",
+          "bytes": [
+            84,
+            114
+          ],
+          "logprob": -1.8416352272033691
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "token": ":",
+      "bytes": [
+        58
+      ],
+      "logprob": -0.22393286228179932,
+      "top_logprobs": [
+        {
+          "id": 25,
+          "token": ":",
+          "bytes": [
+            58
+          ],
+          "logprob": -0.22393286228179932
+        },
+        {
+          "id": 29505,
+          "token": " Bug",
+          "bytes": [
+            32,
+            66,
+            117,
+            103
+          ],
+          "logprob": -1.7275702953338623
+        }
+      ]
+    },
+    {
+      "id": 68659,
+      "token": " Duplicate",
+      "bytes": [
+        32,
+        68,
+        117,
+        112,
+        108,
+        105,
+        99,
+        97,
+        116,
+        101
+      ],
+      "logprob": -0.49426355957984924,
+      "top_logprobs": [
+        {
+          "id": 68659,
+          "token": " Duplicate",
+          "bytes": [
+            32,
+            68,
+            117,
+            112,
+            108,
+            105,
+            99,
+            97,
+            116,
+            101
+          ],
+          "logprob": -0.49426355957984924
+        },
+        {
+          "id": 414,
+          "token": " D",
+          "bytes": [
+            32,
+            68
+          ],
+          "logprob": -2.012270927429199
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "token": "/",
+      "bytes": [
+        47
+      ],
+      "logprob": -1.056746006011963,
+      "top_logprobs": [
+        {
+          "id": 14,
+          "token": "/",
+          "bytes": [
+            47
+          ],
+          "logprob": -1.056746006011963
+        },
+        {
+          "id": 1510,
+          "token": " `",
+          "bytes": [
+            32,
+            96
+          ],
+          "logprob": -1.9667744636535645
+        }
+      ]
+    },
+    {
+      "id": 10266,
+      "token": "Cor",
+      "bytes": [
+        67,
+        111,
+        114
+      ],
+      "logprob": -0.15870551764965057,
+      "top_logprobs": [
+        {
+          "id": 10266,
+          "token": "Cor",
+          "bytes": [
+            67,
+            111,
+            114
+          ],
+          "logprob": -0.15870551764965057
+        },
+        {
+          "id": 1237,
+          "token": "Tr",
+          "bytes": [
+            84,
+            114
+          ],
+          "logprob": -1.9431579113006592
+        }
+      ]
+    },
+    {
+      "id": 82987,
+      "token": "rupted",
+      "bytes": [
+        114,
+        117,
+        112,
+        116,
+        101,
+        100
+      ],
+      "logprob": -0.11937820166349411,
+      "top_logprobs": [
+        {
+          "id": 82987,
+          "token": "rupted",
+          "bytes": [
+            114,
+            117,
+            112,
+            116,
+            101,
+            100
+          ],
+          "logprob": -0.11937820166349411
+        },
+        {
+          "id": 6377,
+          "token": "rupt",
+          "bytes": [
+            114,
+            117,
+            112,
+            116
+          ],
+          "logprob": -2.192021608352661
+        }
+      ]
+    },
+    {
+      "id": 15664,
+      "token": " Struct",
+      "bytes": [
+        32,
+        83,
+        116,
+        114,
+        117,
+        99,
+        116
+      ],
+      "logprob": -1.9502149820327759,
+      "top_logprobs": [
+        {
+          "id": 15664,
+          "token": " Struct",
+          "bytes": [
+            32,
+            83,
+            116,
+            114,
+            117,
+            99,
+            116
+          ],
+          "logprob": -1.9502149820327759
+        },
+        {
+          "id": 23804,
+          "token": " Fields",
+          "bytes": [
+            32,
+            70,
+            105,
+            101,
+            108,
+            100,
+            115
+          ],
+          "logprob": -1.95162832736969
+        }
+      ]
+    },
+    {
+      "id": 16457,
+      "token": " Members",
+      "bytes": [
+        32,
+        77,
+        101,
+        109,
+        98,
+        101,
+        114,
+        115
+      ],
+      "logprob": -0.5578831434249878,
+      "top_logprobs": [
+        {
+          "id": 16457,
+          "token": " Members",
+          "bytes": [
+            32,
+            77,
+            101,
+            109,
+            98,
+            101,
+            114,
+            115
+          ],
+          "logprob": -0.5578831434249878
+        },
+        {
+          "id": 23804,
+          "token": " Fields",
+          "bytes": [
+            32,
+            70,
+            105,
+            101,
+            108,
+            100,
+            115
+          ],
+          "logprob": -1.3691586256027222
+        }
+      ]
+    },
+    {
+      "id": 318,
+      "token": " (",
+      "bytes": [
+        32,
+        40
+      ],
+      "logprob": -0.5778949856758118,
+      "top_logprobs": [
+        {
+          "id": 318,
+          "token": " (",
+          "bytes": [
+            32,
+            40
+          ],
+          "logprob": -0.5778949856758118
+        },
+        {
+          "id": 332,
+          "token": "**",
+          "bytes": [
+            42,
+            42
+          ],
+          "logprob": -1.1559895277023315
+        }
+      ]
+    },
+    {
+      "id": 16302,
+      "token": "Lines",
+      "bytes": [
+        76,
+        105,
+        110,
+        101,
+        115
+      ],
+      "logprob": -1.2919784784317017,
+      "top_logprobs": [
+        {
+          "id": 16302,
+          "token": "Lines",
+          "bytes": [
+            76,
+            105,
+            110,
+            101,
+            115
+          ],
+          "logprob": -1.2919784784317017
+        },
+        {
+          "id": 3601,
+          "token": "End",
+          "bytes": [
+            69,
+            110,
+            100
+          ],
+          "logprob": -1.4092117547988892
+        }
+      ]
+    },
+    {
+      "id": 3835,
+      "token": " ~",
+      "bytes": [
+        32,
+        126
+      ],
+      "logprob": -0.5834356546401978,
+      "top_logprobs": [
+        {
+          "id": 3835,
+          "token": " ~",
+          "bytes": [
+            32,
+            126
+          ],
+          "logprob": -0.5834356546401978
+        },
+        {
+          "id": 3043,
+          "token": " near",
+          "bytes": [
+            32,
+            110,
+            101,
+            97,
+            114
+          ],
+          "logprob": -1.0270049571990967
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "token": "2",
+      "bytes": [
+        50
+      ],
+      "logprob": -0.7451669573783875,
+      "top_logprobs": [
+        {
+          "id": 17,
+          "token": "2",
+          "bytes": [
+            50
+          ],
+          "logprob": -0.7451669573783875
+        },
+        {
+          "id": 18,
+          "token": "3",
+          "bytes": [
+            51
+          ],
+          "logprob": -1.4800416231155396
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "token": "8",
+      "bytes": [
+        56
+      ],
+      "logprob": -1.7629318237304688,
+      "top_logprobs": [
+        {
+          "id": 23,
+          "token": "8",
+          "bytes": [
+            56
+          ],
+          "logprob": -1.7629318237304688
+        },
+        {
+          "id": 19,
+          "token": "4",
+          "bytes": [
+            52
+          ],
+          "logprob": -1.792562484741211
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "token": "0",
+      "bytes": [
+        48
+      ],
+      "logprob": -0.3763800859451294,
+      "top_logprobs": [
+        {
+          "id": 15,
+          "token": "0",
+          "bytes": [
+            48
+          ],
+          "logprob": -0.3763800859451294
+        },
+        {
+          "id": 20,
+          "token": "5",
+          "bytes": [
+            53
+          ],
+          "logprob": -2.503260850906372
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "token": "-",
+      "bytes": [
+        45
+      ],
+      "logprob": -0.3126862943172455,
+      "top_logprobs": [
+        {
+          "id": 12,
+          "token": "-",
+          "bytes": [
+            45
+          ],
+          "logprob": -0.3126862943172455
+        },
+        {
+          "id": 4006,
+          "token": "\u2013",
+          "bytes": [
+            226,
+            128,
+            147
+          ],
+          "logprob": -1.4340909719467163
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "token": "2",
+      "bytes": [
+        50
+      ],
+      "logprob": -0.00701299961656332,
+      "top_logprobs": [
+        {
+          "id": 17,
+          "token": "2",
+          "bytes": [
+            50
+          ],
+          "logprob": -0.00701299961656332
+        },
+        {
+          "id": 18,
+          "token": "3",
+          "bytes": [
+            51
+          ],
+          "logprob": -5.172875881195068
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "token": "8",
+      "bytes": [
+        56
+      ],
+      "logprob": -0.02643769420683384,
+      "top_logprobs": [
+        {
+          "id": 23,
+          "token": "8",
+          "bytes": [
+            56
+          ],
+          "logprob": -0.02643769420683384
+        },
+        {
+          "id": 24,
+          "token": "9",
+          "bytes": [
+            57
+          ],
+          "logprob": -3.660726547241211
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "token": "3",
+      "bytes": [
+        51
+      ],
+      "logprob": -0.6225482225418091,
+      "top_logprobs": [
+        {
+          "id": 18,
+          "token": "3",
+          "bytes": [
+            51
+          ],
+          "logprob": -0.6225482225418091
+        },
+        {
+          "id": 20,
+          "token": "5",
+          "bytes": [
+            53
+          ],
+          "logprob": -1.2379485368728638
+        }
+      ]
+    },
+    {
+      "id": 31230,
+      "token": ")**",
+      "bytes": [
+        41,
+        42,
+        42
+      ],
+      "logprob": -0.001876862719655037,
+      "top_logprobs": [
+        {
+          "id": 31230,
+          "token": ")**",
+          "bytes": [
+            41,
+            42,
+            42
+          ],
+          "logprob": -0.001876862719655037
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.202159881591797
+        }
+      ]
+    },
+    {
+      "id": 271,
+      "token": "\n\n",
+      "bytes": [
+        10,
+        10
+      ],
+      "logprob": -0.0027458781842142344,
+      "top_logprobs": [
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -0.0027458781842142344
+        },
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -6.023454189300537
+        }
+      ]
+    },
+    {
+      "id": 71093,
+      "token": "```",
+      "bytes": [
+        96,
+        96,
+        96
+      ],
+      "logprob": -0.45383718609809875,
+      "top_logprobs": [
+        {
+          "id": 71093,
+          "token": "```",
+          "bytes": [
+            96,
+            96,
+            96
+          ],
+          "logprob": -0.45383718609809875
+        },
+        {
+          "id": 1597,
+          "token": "At",
+          "bytes": [
+            65,
+            116
+          ],
+          "logprob": -1.8494040966033936
+        }
+      ]
+    },
+    {
+      "id": 10504,
+      "token": "cpp",
+      "bytes": [
+        99,
+        112,
+        112
+      ],
+      "logprob": -0.02409110777080059,
+      "top_logprobs": [
+        {
+          "id": 10504,
+          "token": "cpp",
+          "bytes": [
+            99,
+            112,
+            112
+          ],
+          "logprob": -0.02409110777080059
+        },
+        {
+          "id": 66,
+          "token": "c",
+          "bytes": [
+            99
+          ],
+          "logprob": -4.500810146331787
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "token": "\n",
+      "bytes": [
+        10
+      ],
+      "logprob": -0.0011953103821724653,
+      "top_logprobs": [
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -0.0011953103821724653
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.577172756195068
+        }
+      ]
+    },
+    {
+      "id": 390,
+      "token": "int",
+      "bytes": [
+        105,
+        110,
+        116
+      ],
+      "logprob": -0.783183217048645,
+      "top_logprobs": [
+        {
+          "id": 390,
+          "token": "int",
+          "bytes": [
+            105,
+            110,
+            116
+          ],
+          "logprob": -0.783183217048645
+        },
+        {
+          "id": 285,
+          "token": "       ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -1.1786319017410278
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "token": "6",
+      "bytes": [
+        54
+      ],
+      "logprob": -0.0017773797735571861,
+      "top_logprobs": [
+        {
+          "id": 21,
+          "token": "6",
+          "bytes": [
+            54
+          ],
+          "logprob": -0.0017773797735571861
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.955501079559326
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "token": "4",
+      "bytes": [
+        52
+      ],
+      "logprob": -0.00036735128378495574,
+      "top_logprobs": [
+        {
+          "id": 19,
+          "token": "4",
+          "bytes": [
+            52
+          ],
+          "logprob": -0.00036735128378495574
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -8.17939281463623
+        }
+      ]
+    },
+    {
+      "id": 516,
+      "token": "_t",
+      "bytes": [
+        95,
+        116
+      ],
+      "logprob": -0.0020987344905734062,
+      "top_logprobs": [
+        {
+          "id": 516,
+          "token": "_t",
+          "bytes": [
+            95,
+            116
+          ],
+          "logprob": -0.0020987344905734062
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.569767475128174
+        }
+      ]
+    },
+    {
+      "id": 257,
+      "token": "    ",
+      "bytes": [
+        32,
+        32,
+        32,
+        32
+      ],
+      "logprob": -0.00850438978523016,
+      "top_logprobs": [
+        {
+          "id": 257,
+          "token": "    ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -0.00850438978523016
+        },
+        {
+          "id": 307,
+          "token": " n",
+          "bytes": [
+            32,
+            110
+          ],
+          "logprob": -4.9467082023620605
+        }
+      ]
+    },
+    {
+      "id": 307,
+      "token": " n",
+      "bytes": [
+        32,
+        110
+      ],
+      "logprob": -0.00014818811905570328,
+      "top_logprobs": [
+        {
+          "id": 307,
+          "token": " n",
+          "bytes": [
+            32,
+            110
+          ],
+          "logprob": -0.00014818811905570328
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -9.06615924835205
+        }
+      ]
+    },
+    {
+      "id": 22091,
+      "token": "_elements",
+      "bytes": [
+        95,
+        101,
+        108,
+        101,
+        109,
+        101,
+        110,
+        116,
+        115
+      ],
+      "logprob": -0.003792255185544491,
+      "top_logprobs": [
+        {
+          "id": 22091,
+          "token": "_elements",
+          "bytes": [
+            95,
+            101,
+            108,
+            101,
+            109,
+            101,
+            110,
+            116,
+            115
+          ],
+          "logprob": -0.003792255185544491
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.001644611358643
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "token": ";",
+      "bytes": [
+        59
+      ],
+      "logprob": -0.0014969580806791782,
+      "top_logprobs": [
+        {
+          "id": 26,
+          "token": ";",
+          "bytes": [
+            59
+          ],
+          "logprob": -0.0014969580806791782
+        },
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -6.719773769378662
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "token": "\n",
+      "bytes": [
+        10
+      ],
+      "logprob": -0.0014721256447955966,
+      "top_logprobs": [
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -0.0014721256447955966
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.973374843597412
+        }
+      ]
+    },
+    {
+      "id": 390,
+      "token": "int",
+      "bytes": [
+        105,
+        110,
+        116
+      ],
+      "logprob": -0.0029648940544575453,
+      "top_logprobs": [
+        {
+          "id": 390,
+          "token": "int",
+          "bytes": [
+            105,
+            110,
+            116
+          ],
+          "logprob": -0.0029648940544575453
+        },
+        {
+          "id": 248046,
+          "token": "",
+          "bytes": [],
+          "logprob": -7.265179634094238
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "token": "6",
+      "bytes": [
+        54
+      ],
+      "logprob": -0.0010352723766118288,
+      "top_logprobs": [
+        {
+          "id": 21,
+          "token": "6",
+          "bytes": [
+            54
+          ],
+          "logprob": -0.0010352723766118288
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.173274517059326
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "token": "4",
+      "bytes": [
+        52
+      ],
+      "logprob": -0.00034994049929082394,
+      "top_logprobs": [
+        {
+          "id": 19,
+          "token": "4",
+          "bytes": [
+            52
+          ],
+          "logprob": -0.00034994049929082394
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -8.53796672821045
+        }
+      ]
+    },
+    {
+      "id": 516,
+      "token": "_t",
+      "bytes": [
+        95,
+        116
+      ],
+      "logprob": -0.0029043371323496103,
+      "top_logprobs": [
+        {
+          "id": 516,
+          "token": "_t",
+          "bytes": [
+            95,
+            116
+          ],
+          "logprob": -0.0029043371323496103
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.3905863761901855
+        }
+      ]
+    },
+    {
+      "id": 257,
+      "token": "    ",
+      "bytes": [
+        32,
+        32,
+        32,
+        32
+      ],
+      "logprob": -0.0038055379409343004,
+      "top_logprobs": [
+        {
+          "id": 257,
+          "token": "    ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -0.0038055379409343004
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.356794834136963
+        }
+      ]
+    },
+    {
+      "id": 307,
+      "token": " n",
+      "bytes": [
+        32,
+        110
+      ],
+      "logprob": -0.009978743270039558,
+      "top_logprobs": [
+        {
+          "id": 307,
+          "token": " n",
+          "bytes": [
+            32,
+            110
+          ],
+          "logprob": -0.009978743270039558
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.144237995147705
+        }
+      ]
+    },
+    {
+      "id": 22091,
+      "token": "_elements",
+      "bytes": [
+        95,
+        101,
+        108,
+        101,
+        109,
+        101,
+        110,
+        116,
+        115
+      ],
+      "logprob": -0.0035596590023487806,
+      "top_logprobs": [
+        {
+          "id": 22091,
+          "token": "_elements",
+          "bytes": [
+            95,
+            101,
+            108,
+            101,
+            109,
+            101,
+            110,
+            116,
+            115
+          ],
+          "logprob": -0.0035596590023487806
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -5.994339466094971
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "token": ";",
+      "bytes": [
+        59
+      ],
+      "logprob": -0.004032924771308899,
+      "top_logprobs": [
+        {
+          "id": 26,
+          "token": ";",
+          "bytes": [
+            59
+          ],
+          "logprob": -0.004032924771308899
+        },
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -5.779034614562988
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "token": "\n",
+      "bytes": [
+        10
+      ],
+      "logprob": -0.0005792864831164479,
+      "top_logprobs": [
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -0.0005792864831164479
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -8.585417747497559
+        }
+      ]
+    },
+    {
+      "id": 390,
+      "token": "int",
+      "bytes": [
+        105,
+        110,
+        116
+      ],
+      "logprob": -0.00042548886267468333,
+      "top_logprobs": [
+        {
+          "id": 390,
+          "token": "int",
+          "bytes": [
+            105,
+            110,
+            116
+          ],
+          "logprob": -0.00042548886267468333
+        },
+        {
+          "id": 71093,
+          "token": "```",
+          "bytes": [
+            96,
+            96,
+            96
+          ],
+          "logprob": -8.455057144165039
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "token": "6",
+      "bytes": [
+        54
+      ],
+      "logprob": -0.0009577687014825642,
+      "top_logprobs": [
+        {
+          "id": 21,
+          "token": "6",
+          "bytes": [
+            54
+          ],
+          "logprob": -0.0009577687014825642
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.21034574508667
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "token": "4",
+      "bytes": [
+        52
+      ],
+      "logprob": -0.0025127483531832695,
+      "top_logprobs": [
+        {
+          "id": 19,
+          "token": "4",
+          "bytes": [
+            52
+          ],
+          "logprob": -0.0025127483531832695
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.158310890197754
+        }
+      ]
+    },
+    {
+      "id": 516,
+      "token": "_t",
+      "bytes": [
+        95,
+        116
+      ],
+      "logprob": -0.0010271577630192041,
+      "top_logprobs": [
+        {
+          "id": 516,
+          "token": "_t",
+          "bytes": [
+            95,
+            116
+          ],
+          "logprob": -0.0010271577630192041
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.566794395446777
+        }
+      ]
+    },
+    {
+      "id": 257,
+      "token": "    ",
+      "bytes": [
+        32,
+        32,
+        32,
+        32
+      ],
+      "logprob": -0.030144551768898964,
+      "top_logprobs": [
+        {
+          "id": 257,
+          "token": "    ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -0.030144551768898964
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -3.9298219680786133
+        }
+      ]
+    },
+    {
+      "id": 307,
+      "token": " n",
+      "bytes": [
+        32,
+        110
+      ],
+      "logprob": -0.3070743978023529,
+      "top_logprobs": [
+        {
+          "id": 307,
+          "token": " n",
+          "bytes": [
+            32,
+            110
+          ],
+          "logprob": -0.3070743978023529
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -1.7872380018234253
+        }
+      ]
+    },
+    {
+      "id": 22091,
+      "token": "_elements",
+      "bytes": [
+        95,
+        101,
+        108,
+        101,
+        109,
+        101,
+        110,
+        116,
+        115
+      ],
+      "logprob": -0.16856838762760162,
+      "top_logprobs": [
+        {
+          "id": 22091,
+          "token": "_elements",
+          "bytes": [
+            95,
+            101,
+            108,
+            101,
+            109,
+            101,
+            110,
+            116,
+            115
+          ],
+          "logprob": -0.16856838762760162
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -2.3256022930145264
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "token": ";",
+      "bytes": [
+        59
+      ],
+      "logprob": -0.034566063433885574,
+      "top_logprobs": [
+        {
+          "id": 26,
+          "token": ";",
+          "bytes": [
+            59
+          ],
+          "logprob": -0.034566063433885574
+        },
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -3.5522358417510986
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "token": "\n",
+      "bytes": [
+        10
+      ],
+      "logprob": -0.0013947075931355357,
+      "top_logprobs": [
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -0.0013947075931355357
+        },
+        {
+          "id": 1358,
+          "token": "\n\n\n",
+          "bytes": [
+            10,
+            10,
+            10
+          ],
+          "logprob": -7.32938814163208
+        }
+      ]
+    },
+    {
+      "id": 390,
+      "token": "int",
+      "bytes": [
+        105,
+        110,
+        116
+      ],
+      "logprob": -0.017386384308338165,
+      "top_logprobs": [
+        {
+          "id": 390,
+          "token": "int",
+          "bytes": [
+            105,
+            110,
+            116
+          ],
+          "logprob": -0.017386384308338165
+        },
+        {
+          "id": 71093,
+          "token": "```",
+          "bytes": [
+            96,
+            96,
+            96
+          ],
+          "logprob": -4.095993995666504
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "token": "6",
+      "bytes": [
+        54
+      ],
+      "logprob": -0.001103055663406849,
+      "top_logprobs": [
+        {
+          "id": 21,
+          "token": "6",
+          "bytes": [
+            54
+          ],
+          "logprob": -0.001103055663406849
+        },
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -7.1090312004089355
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "token": "\n",
+      "bytes": [
+        10
+      ],
+      "logprob": -0.42917144298553467,
+      "top_logprobs": [
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -0.42917144298553467
+        },
+        {
+          "id": 19,
+          "token": "4",
+          "bytes": [
+            52
+          ],
+          "logprob": -1.201073408126831
+        }
+      ]
+    },
+    {
+      "id": 71093,
+      "token": "```",
+      "bytes": [
+        96,
+        96,
+        96
+      ],
+      "logprob": -0.00205208663828671,
+      "top_logprobs": [
+        {
+          "id": 71093,
+          "token": "```",
+          "bytes": [
+            96,
+            96,
+            96
+          ],
+          "logprob": -0.00205208663828671
+        },
+        {
+          "id": 8160,
+          "token": "Here",
+          "bytes": [
+            72,
+            101,
+            114,
+            101
+          ],
+          "logprob": -7.689879417419434
+        }
+      ]
+    },
+    {
+      "id": 271,
+      "token": "\n\n",
+      "bytes": [
+        10,
+        10
+      ],
+      "logprob": -0.0018997942097485065,
+      "top_logprobs": [
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -0.0018997942097485065
+        },
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -7.320917129516602
+        }
+      ]
+    },
+    {
+      "id": 1919,
+      "token": "This",
+      "bytes": [
+        84,
+        104,
+        105,
+        115
+      ],
+      "logprob": -0.5770465731620789,
+      "top_logprobs": [
+        {
+          "id": 1919,
+          "token": "This",
+          "bytes": [
+            84,
+            104,
+            105,
+            115
+          ],
+          "logprob": -0.5770465731620789
+        },
+        {
+          "id": 760,
+          "token": "The",
+          "bytes": [
+            84,
+            104,
+            101
+          ],
+          "logprob": -0.9667637348175049
+        }
+      ]
+    },
+    {
+      "id": 369,
+      "token": " is",
+      "bytes": [
+        32,
+        105,
+        115
+      ],
+      "logprob": -0.01958019658923149,
+      "top_logprobs": [
+        {
+          "id": 369,
+          "token": " is",
+          "bytes": [
+            32,
+            105,
+            115
+          ],
+          "logprob": -0.01958019658923149
+        },
+        {
+          "id": 7701,
+          "token": " appears",
+          "bytes": [
+            32,
+            97,
+            112,
+            112,
+            101,
+            97,
+            114,
+            115
+          ],
+          "logprob": -4.413522243499756
+        }
+      ]
+    },
+    {
+      "id": 9077,
+      "token": " clearly",
+      "bytes": [
+        32,
+        99,
+        108,
+        101,
+        97,
+        114,
+        108,
+        121
+      ],
+      "logprob": -0.8705700039863586,
+      "top_logprobs": [
+        {
+          "id": 9077,
+          "token": " clearly",
+          "bytes": [
+            32,
+            99,
+            108,
+            101,
+            97,
+            114,
+            108,
+            121
+          ],
+          "logprob": -0.8705700039863586
+        },
+        {
+          "id": 264,
+          "token": " a",
+          "bytes": [
+            32,
+            97
+          ],
+          "logprob": -0.8920982480049133
+        }
+      ]
+    },
+    {
+      "id": 264,
+      "token": " a",
+      "bytes": [
+        32,
+        97
+      ],
+      "logprob": -0.23957428336143494,
+      "top_logprobs": [
+        {
+          "id": 264,
+          "token": " a",
+          "bytes": [
+            32,
+            97
+          ],
+          "logprob": -0.23957428336143494
+        },
+        {
+          "id": 47739,
+          "token": " corrupted",
+          "bytes": [
+            32,
+            99,
+            111,
+            114,
+            114,
+            117,
+            112,
+            116,
+            101,
+            100
+          ],
+          "logprob": -2.1362836360931396
+        }
+      ]
+    },
+    {
+      "id": 2880,
+      "token": " copy",
+      "bytes": [
+        32,
+        99,
+        111,
+        112,
+        121
+      ],
+      "logprob": -0.9516584873199463,
+      "top_logprobs": [
+        {
+          "id": 2880,
+          "token": " copy",
+          "bytes": [
+            32,
+            99,
+            111,
+            112,
+            121
+          ],
+          "logprob": -0.9516584873199463
+        },
+        {
+          "id": 20600,
+          "token": " corruption",
+          "bytes": [
+            32,
+            99,
+            111,
+            114,
+            114,
+            117,
+            112,
+            116,
+            105,
+            111,
+            110
+          ],
+          "logprob": -1.5944998264312744
+        }
+      ]
+    },
+    {
+      "id": 2195,
+      "token": "-p",
+      "bytes": [
+        45,
+        112
+      ],
+      "logprob": -0.011583942919969559,
+      "top_logprobs": [
+        {
+          "id": 2195,
+          "token": "-p",
+          "bytes": [
+            45,
+            112
+          ],
+          "logprob": -0.011583942919969559
+        },
+        {
+          "id": 4181,
+          "token": "/p",
+          "bytes": [
+            47,
+            112
+          ],
+          "logprob": -4.717245578765869
+        }
+      ]
+    },
+    {
+      "id": 5352,
+      "token": "aste",
+      "bytes": [
+        97,
+        115,
+        116,
+        101
+      ],
+      "logprob": -0.00017853184544946998,
+      "top_logprobs": [
+        {
+          "id": 5352,
+          "token": "aste",
+          "bytes": [
+            97,
+            115,
+            116,
+            101
+          ],
+          "logprob": -0.00017853184544946998
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -8.975052833557129
+        }
+      ]
+    },
+    {
+      "id": 466,
+      "token": " or",
+      "bytes": [
+        32,
+        111,
+        114
+      ],
+      "logprob": -0.7172756791114807,
+      "top_logprobs": [
+        {
+          "id": 466,
+          "token": " or",
+          "bytes": [
+            32,
+            111,
+            114
+          ],
+          "logprob": -0.7172756791114807
+        },
+        {
+          "id": 1412,
+          "token": " error",
+          "bytes": [
+            32,
+            101,
+            114,
+            114,
+            111,
+            114
+          ],
+          "logprob": -1.5937328338623047
+        }
+      ]
+    },
+    {
+      "id": 10562,
+      "token": " merge",
+      "bytes": [
+        32,
+        109,
+        101,
+        114,
+        103,
+        101
+      ],
+      "logprob": -0.2860928475856781,
+      "top_logprobs": [
+        {
+          "id": 10562,
+          "token": " merge",
+          "bytes": [
+            32,
+            109,
+            101,
+            114,
+            103,
+            101
+          ],
+          "logprob": -0.2860928475856781
+        },
+        {
+          "id": 15205,
+          "token": " editing",
+          "bytes": [
+            32,
+            101,
+            100,
+            105,
+            116,
+            105,
+            110,
+            103
+          ],
+          "logprob": -2.967496871948242
+        }
+      ]
+    },
+    {
+      "id": 1412,
+      "token": " error",
+      "bytes": [
+        32,
+        101,
+        114,
+        114,
+        111,
+        114
+      ],
+      "logprob": -0.7714978456497192,
+      "top_logprobs": [
+        {
+          "id": 1412,
+          "token": " error",
+          "bytes": [
+            32,
+            101,
+            114,
+            114,
+            111,
+            114
+          ],
+          "logprob": -0.7714978456497192
+        },
+        {
+          "id": 35426,
+          "token": " artifact",
+          "bytes": [
+            32,
+            97,
+            114,
+            116,
+            105,
+            102,
+            97,
+            99,
+            116
+          ],
+          "logprob": -0.9959832429885864
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "token": ".",
+      "bytes": [
+        46
+      ],
+      "logprob": -0.03201828524470329,
+      "top_logprobs": [
+        {
+          "id": 13,
+          "token": ".",
+          "bytes": [
+            46
+          ],
+          "logprob": -0.03201828524470329
+        },
+        {
+          "id": 303,
+          "token": " in",
+          "bytes": [
+            32,
+            105,
+            110
+          ],
+          "logprob": -4.371657848358154
+        }
+      ]
+    },
+    {
+      "id": 561,
+      "token": " The",
+      "bytes": [
+        32,
+        84,
+        104,
+        101
+      ],
+      "logprob": -0.2857927083969116,
+      "top_logprobs": [
+        {
+          "id": 561,
+          "token": " The",
+          "bytes": [
+            32,
+            84,
+            104,
+            101
+          ],
+          "logprob": -0.2857927083969116
+        },
+        {
+          "id": 1394,
+          "token": " You",
+          "bytes": [
+            32,
+            89,
+            111,
+            117
+          ],
+          "logprob": -2.8533873558044434
+        }
+      ]
+    },
+    {
+      "id": 1968,
+      "token": " struct",
+      "bytes": [
+        32,
+        115,
+        116,
+        114,
+        117,
+        99,
+        116
+      ],
+      "logprob": -0.13027241826057434,
+      "top_logprobs": [
+        {
+          "id": 1968,
+          "token": " struct",
+          "bytes": [
+            32,
+            115,
+            116,
+            114,
+            117,
+            99,
+            116
+          ],
+          "logprob": -0.13027241826057434
+        },
+        {
+          "id": 1510,
+          "token": " `",
+          "bytes": [
+            32,
+            96
+          ],
+          "logprob": -2.6255977153778076
+        }
+      ]
+    },
+    {
+      "id": 682,
+      "token": " has",
+      "bytes": [
+        32,
+        104,
+        97,
+        115
+      ],
+      "logprob": -0.8114045262336731,
+      "top_logprobs": [
+        {
+          "id": 682,
+          "token": " has",
+          "bytes": [
+            32,
+            104,
+            97,
+            115
+          ],
+          "logprob": -0.8114045262336731
+        },
+        {
+          "id": 4314,
+          "token": " member",
+          "bytes": [
+            32,
+            109,
+            101,
+            109,
+            98,
+            101,
+            114
+          ],
+          "logprob": -1.037223219871521
+        }
+      ]
+    },
+    {
+      "id": 1510,
+      "token": " `",
+      "bytes": [
+        32,
+        96
+      ],
+      "logprob": -0.5189942717552185,
+      "top_logprobs": [
+        {
+          "id": 1510,
+          "token": " `",
+          "bytes": [
+            32,
+            96
+          ],
+          "logprob": -0.5189942717552185
+        },
+        {
+          "id": 2250,
+          "token": " three",
+          "bytes": [
+            32,
+            116,
+            104,
+            114,
+            101,
+            101
+          ],
+          "logprob": -1.1191015243530273
+        }
+      ]
+    },
+    {
+      "id": 77,
+      "token": "n",
+      "bytes": [
+        110
+      ],
+      "logprob": -0.01896124891936779,
+      "top_logprobs": [
+        {
+          "id": 77,
+          "token": "n",
+          "bytes": [
+            110
+          ],
+          "logprob": -0.01896124891936779
+        },
+        {
+          "id": 390,
+          "token": "int",
+          "bytes": [
+            105,
+            110,
+            116
+          ],
+          "logprob": -4.096302509307861
+        }
+      ]
+    },
+    {
+      "id": 22091,
+      "token": "_elements",
+      "bytes": [
+        95,
+        101,
+        108,
+        101,
+        109,
+        101,
+        110,
+        116,
+        115
+      ],
+      "logprob": -0.005086821038275957,
+      "top_logprobs": [
+        {
+          "id": 22091,
+          "token": "_elements",
+          "bytes": [
+            95,
+            101,
+            108,
+            101,
+            109,
+            101,
+            110,
+            116,
+            115
+          ],
+          "logprob": -0.005086821038275957
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -5.906244277954102
+        }
+      ]
+    },
+    {
+      "id": 63,
+      "token": "`",
+      "bytes": [
+        96
+      ],
+      "logprob": -0.001776543795131147,
+      "top_logprobs": [
+        {
+          "id": 63,
+          "token": "`",
+          "bytes": [
+            96
+          ],
+          "logprob": -0.001776543795131147
+        },
+        {
+          "id": 26,
+          "token": ";",
+          "bytes": [
+            59
+          ],
+          "logprob": -6.6379499435424805
+        }
+      ]
+    },
+    {
+      "id": 13866,
+      "token": " declared",
+      "bytes": [
+        32,
+        100,
+        101,
+        99,
+        108,
+        97,
+        114,
+        101,
+        100
+      ],
+      "logprob": -0.013063088990747929,
+      "top_logprobs": [
+        {
+          "id": 13866,
+          "token": " declared",
+          "bytes": [
+            32,
+            100,
+            101,
+            99,
+            108,
+            97,
+            114,
+            101,
+            100
+          ],
+          "logprob": -0.013063088990747929
+        },
+        {
+          "id": 4364,
+          "token": " defined",
+          "bytes": [
+            32,
+            100,
+            101,
+            102,
+            105,
+            110,
+            101,
+            100
+          ],
+          "logprob": -4.801620006561279
+        }
+      ]
+    },
+    {
+      "id": 2250,
+      "token": " three",
+      "bytes": [
+        32,
+        116,
+        104,
+        114,
+        101,
+        101
+      ],
+      "logprob": -0.08265377581119537,
+      "top_logprobs": [
+        {
+          "id": 2250,
+          "token": " three",
+          "bytes": [
+            32,
+            116,
+            104,
+            114,
+            101,
+            101
+          ],
+          "logprob": -0.08265377581119537
+        },
+        {
+          "id": 2972,
+          "token": " **",
+          "bytes": [
+            32,
+            42,
+            42
+          ],
+          "logprob": -2.7717273235321045
+        }
+      ]
+    },
+    {
+      "id": 2942,
+      "token": " times",
+      "bytes": [
+        32,
+        116,
+        105,
+        109,
+        101,
+        115
+      ],
+      "logprob": -0.0012937805149704218,
+      "top_logprobs": [
+        {
+          "id": 2942,
+          "token": " times",
+          "bytes": [
+            32,
+            116,
+            105,
+            109,
+            101,
+            115
+          ],
+          "logprob": -0.0012937805149704218
+        },
+        {
+          "id": 318,
+          "token": " (",
+          "bytes": [
+            32,
+            40
+          ],
+          "logprob": -7.8246235847473145
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "token": ",",
+      "bytes": [
+        44
+      ],
+      "logprob": -0.8210484385490417,
+      "top_logprobs": [
+        {
+          "id": 11,
+          "token": ",",
+          "bytes": [
+            44
+          ],
+          "logprob": -0.8210484385490417
+        },
+        {
+          "id": 321,
+          "token": " and",
+          "bytes": [
+            32,
+            97,
+            110,
+            100
+          ],
+          "logprob": -1.2767541408538818
+        }
+      ]
+    },
+    {
+      "id": 321,
+      "token": " and",
+      "bytes": [
+        32,
+        97,
+        110,
+        100
+      ],
+      "logprob": -0.41395479440689087,
+      "top_logprobs": [
+        {
+          "id": 321,
+          "token": " and",
+          "bytes": [
+            32,
+            97,
+            110,
+            100
+          ],
+          "logprob": -0.41395479440689087
+        },
+        {
+          "id": 7854,
+          "token": " followed",
+          "bytes": [
+            32,
+            102,
+            111,
+            108,
+            108,
+            111,
+            119,
+            101,
+            100
+          ],
+          "logprob": -1.5273715257644653
+        }
+      ]
+    },
+    {
+      "id": 279,
+      "token": " the",
+      "bytes": [
+        32,
+        116,
+        104,
+        101
+      ],
+      "logprob": -0.21816302835941315,
+      "top_logprobs": [
+        {
+          "id": 279,
+          "token": " the",
+          "bytes": [
+            32,
+            116,
+            104,
+            101
+          ],
+          "logprob": -0.21816302835941315
+        },
+        {
+          "id": 264,
+          "token": " a",
+          "bytes": [
+            32,
+            97
+          ],
+          "logprob": -2.453739643096924
+        }
+      ]
+    },
+    {
+      "id": 1483,
+      "token": " last",
+      "bytes": [
+        32,
+        108,
+        97,
+        115,
+        116
+      ],
+      "logprob": -0.2573241889476776,
+      "top_logprobs": [
+        {
+          "id": 1483,
+          "token": " last",
+          "bytes": [
+            32,
+            108,
+            97,
+            115,
+            116
+          ],
+          "logprob": -0.2573241889476776
+        },
+        {
+          "id": 11400,
+          "token": " fourth",
+          "bytes": [
+            32,
+            102,
+            111,
+            117,
+            114,
+            116,
+            104
+          ],
+          "logprob": -2.146148681640625
+        }
+      ]
+    },
+    {
+      "id": 1500,
+      "token": " line",
+      "bytes": [
+        32,
+        108,
+        105,
+        110,
+        101
+      ],
+      "logprob": -0.09411954134702682,
+      "top_logprobs": [
+        {
+          "id": 1500,
+          "token": " line",
+          "bytes": [
+            32,
+            108,
+            105,
+            110,
+            101
+          ],
+          "logprob": -0.09411954134702682
+        },
+        {
+          "id": 17466,
+          "token": " declaration",
+          "bytes": [
+            32,
+            100,
+            101,
+            99,
+            108,
+            97,
+            114,
+            97,
+            116,
+            105,
+            111,
+            110
+          ],
+          "logprob": -3.2211661338806152
+        }
+      ]
+    },
+    {
+      "id": 369,
+      "token": " is",
+      "bytes": [
+        32,
+        105,
+        115
+      ],
+      "logprob": -0.16917084157466888,
+      "top_logprobs": [
+        {
+          "id": 369,
+          "token": " is",
+          "bytes": [
+            32,
+            105,
+            115
+          ],
+          "logprob": -0.16917084157466888
+        },
+        {
+          "id": 1510,
+          "token": " `",
+          "bytes": [
+            32,
+            96
+          ],
+          "logprob": -1.883190631866455
+        }
+      ]
+    },
+    {
+      "id": 57739,
+      "token": " truncated",
+      "bytes": [
+        32,
+        116,
+        114,
+        117,
+        110,
+        99,
+        97,
+        116,
+        101,
+        100
+      ],
+      "logprob": -0.37094447016716003,
+      "top_logprobs": [
+        {
+          "id": 57739,
+          "token": " truncated",
+          "bytes": [
+            32,
+            116,
+            114,
+            117,
+            110,
+            99,
+            97,
+            116,
+            101,
+            100
+          ],
+          "logprob": -0.37094447016716003
+        },
+        {
+          "id": 264,
+          "token": " a",
+          "bytes": [
+            32,
+            97
+          ],
+          "logprob": -1.3173880577087402
+        }
+      ]
+    },
+    {
+      "id": 4937,
+      "token": " mid",
+      "bytes": [
+        32,
+        109,
+        105,
+        100
+      ],
+      "logprob": -0.49478545784950256,
+      "top_logprobs": [
+        {
+          "id": 4937,
+          "token": " mid",
+          "bytes": [
+            32,
+            109,
+            105,
+            100
+          ],
+          "logprob": -0.49478545784950256
+        },
+        {
+          "id": 13,
+          "token": ".",
+          "bytes": [
+            46
+          ],
+          "logprob": -1.700044870376587
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "token": "-",
+      "bytes": [
+        45
+      ],
+      "logprob": -0.6858983039855957,
+      "top_logprobs": [
+        {
+          "id": 12,
+          "token": "-",
+          "bytes": [
+            45
+          ],
+          "logprob": -0.6858983039855957
+        },
+        {
+          "id": 33686,
+          "token": "-token",
+          "bytes": [
+            45,
+            116,
+            111,
+            107,
+            101,
+            110
+          ],
+          "logprob": -0.9248109459877014
+        }
+      ]
+    },
+    {
+      "id": 15441,
+      "token": "identifier",
+      "bytes": [
+        105,
+        100,
+        101,
+        110,
+        116,
+        105,
+        102,
+        105,
+        101,
+        114
+      ],
+      "logprob": -0.005158234387636185,
+      "top_logprobs": [
+        {
+          "id": 15441,
+          "token": "identifier",
+          "bytes": [
+            105,
+            100,
+            101,
+            110,
+            116,
+            105,
+            102,
+            105,
+            101,
+            114
+          ],
+          "logprob": -0.005158234387636185
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.052878379821777
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "token": ".",
+      "bytes": [
+        46
+      ],
+      "logprob": -0.27285340428352356,
+      "top_logprobs": [
+        {
+          "id": 13,
+          "token": ".",
+          "bytes": [
+            46
+          ],
+          "logprob": -0.27285340428352356
+        },
+        {
+          "id": 27718,
+          "token": " (`",
+          "bytes": [
+            32,
+            40,
+            96
+          ],
+          "logprob": -1.4527260065078735
+        }
+      ]
+    },
+    {
+      "id": 1061,
+      "token": " This",
+      "bytes": [
+        32,
+        84,
+        104,
+        105,
+        115
+      ],
+      "logprob": -0.11596232652664185,
+      "top_logprobs": [
+        {
+          "id": 1061,
+          "token": " This",
+          "bytes": [
+            32,
+            84,
+            104,
+            105,
+            115
+          ],
+          "logprob": -0.11596232652664185
+        },
+        {
+          "id": 2972,
+          "token": " **",
+          "bytes": [
+            32,
+            42,
+            42
+          ],
+          "logprob": -2.7476608753204346
+        }
+      ]
+    },
+    {
+      "id": 668,
+      "token": " will",
+      "bytes": [
+        32,
+        119,
+        105,
+        108,
+        108
+      ],
+      "logprob": -0.6067535877227783,
+      "top_logprobs": [
+        {
+          "id": 668,
+          "token": " will",
+          "bytes": [
+            32,
+            119,
+            105,
+            108,
+            108
+          ],
+          "logprob": -0.6067535877227783
+        },
+        {
+          "id": 2972,
+          "token": " **",
+          "bytes": [
+            32,
+            42,
+            42
+          ],
+          "logprob": -1.6246120929718018
+        }
+      ]
+    },
+    {
+      "id": 524,
+      "token": " not",
+      "bytes": [
+        32,
+        110,
+        111,
+        116
+      ],
+      "logprob": -0.768524169921875,
+      "top_logprobs": [
+        {
+          "id": 524,
+          "token": " not",
+          "bytes": [
+            32,
+            110,
+            111,
+            116
+          ],
+          "logprob": -0.768524169921875
+        },
+        {
+          "id": 2972,
+          "token": " **",
+          "bytes": [
+            32,
+            42,
+            42
+          ],
+          "logprob": -1.0259761810302734
+        }
+      ]
+    },
+    {
+      "id": 18612,
+      "token": " compile",
+      "bytes": [
+        32,
+        99,
+        111,
+        109,
+        112,
+        105,
+        108,
+        101
+      ],
+      "logprob": -0.0013998406939208508,
+      "top_logprobs": [
+        {
+          "id": 18612,
+          "token": " compile",
+          "bytes": [
+            32,
+            99,
+            111,
+            109,
+            112,
+            105,
+            108,
+            101
+          ],
+          "logprob": -0.0013998406939208508
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.053712844848633
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "token": ".",
+      "bytes": [
+        46
+      ],
+      "logprob": -0.006617758888751268,
+      "top_logprobs": [
+        {
+          "id": 13,
+          "token": ".",
+          "bytes": [
+            46
+          ],
+          "logprob": -0.006617758888751268
+        },
+        {
+          "id": 430,
+          "token": " as",
+          "bytes": [
+            32,
+            97,
+            115
+          ],
+          "logprob": -5.866118431091309
+        }
+      ]
+    },
+    {
+      "id": 561,
+      "token": " The",
+      "bytes": [
+        32,
+        84,
+        104,
+        101
+      ],
+      "logprob": -0.9580028653144836,
+      "top_logprobs": [
+        {
+          "id": 561,
+          "token": " The",
+          "bytes": [
+            32,
+            84,
+            104,
+            101
+          ],
+          "logprob": -0.9580028653144836
+        },
+        {
+          "id": 1049,
+          "token": " It",
+          "bytes": [
+            32,
+            73,
+            116
+          ],
+          "logprob": -1.016869306564331
+        }
+      ]
+    },
+    {
+      "id": 10287,
+      "token": " intended",
+      "bytes": [
+        32,
+        105,
+        110,
+        116,
+        101,
+        110,
+        100,
+        101,
+        100
+      ],
+      "logprob": -0.7729920744895935,
+      "top_logprobs": [
+        {
+          "id": 10287,
+          "token": " intended",
+          "bytes": [
+            32,
+            105,
+            110,
+            116,
+            101,
+            110,
+            100,
+            101,
+            100
+          ],
+          "logprob": -0.7729920744895935
+        },
+        {
+          "id": 7151,
+          "token": " intent",
+          "bytes": [
+            32,
+            105,
+            110,
+            116,
+            101,
+            110,
+            116
+          ],
+          "logprob": -1.8043489456176758
+        }
+      ]
+    },
+    {
+      "id": 4881,
+      "token": " fields",
+      "bytes": [
+        32,
+        102,
+        105,
+        101,
+        108,
+        100,
+        115
+      ],
+      "logprob": -1.2293697595596313,
+      "top_logprobs": [
+        {
+          "id": 4881,
+          "token": " fields",
+          "bytes": [
+            32,
+            102,
+            105,
+            101,
+            108,
+            100,
+            115
+          ],
+          "logprob": -1.2293697595596313
+        },
+        {
+          "id": 1970,
+          "token": " code",
+          "bytes": [
+            32,
+            99,
+            111,
+            100,
+            101
+          ],
+          "logprob": -1.879106044769287
+        }
+      ]
+    },
+    {
+      "id": 998,
+      "token": " were",
+      "bytes": [
+        32,
+        119,
+        101,
+        114,
+        101
+      ],
+      "logprob": -0.6609722375869751,
+      "top_logprobs": [
+        {
+          "id": 998,
+          "token": " were",
+          "bytes": [
+            32,
+            119,
+            101,
+            114,
+            101
+          ],
+          "logprob": -0.6609722375869751
+        },
+        {
+          "id": 513,
+          "token": " are",
+          "bytes": [
+            32,
+            97,
+            114,
+            101
+          ],
+          "logprob": -1.4147392511367798
+        }
+      ]
+    },
+    {
+      "id": 4222,
+      "token": " likely",
+      "bytes": [
+        32,
+        108,
+        105,
+        107,
+        101,
+        108,
+        121
+      ],
+      "logprob": -0.018549054861068726,
+      "top_logprobs": [
+        {
+          "id": 4222,
+          "token": " likely",
+          "bytes": [
+            32,
+            108,
+            105,
+            107,
+            101,
+            108,
+            121
+          ],
+          "logprob": -0.018549054861068726
+        },
+        {
+          "id": 4507,
+          "token": " probably",
+          "bytes": [
+            32,
+            112,
+            114,
+            111,
+            98,
+            97,
+            98,
+            108,
+            121
+          ],
+          "logprob": -4.236490249633789
+        }
+      ]
+    },
+    {
+      "id": 2414,
+      "token": " something",
+      "bytes": [
+        32,
+        115,
+        111,
+        109,
+        101,
+        116,
+        104,
+        105,
+        110,
+        103
+      ],
+      "logprob": -0.34571459889411926,
+      "top_logprobs": [
+        {
+          "id": 2414,
+          "token": " something",
+          "bytes": [
+            32,
+            115,
+            111,
+            109,
+            101,
+            116,
+            104,
+            105,
+            110,
+            103
+          ],
+          "logprob": -0.34571459889411926
+        },
+        {
+          "id": 1510,
+          "token": " `",
+          "bytes": [
+            32,
+            96
+          ],
+          "logprob": -1.9415111541748047
+        }
+      ]
+    },
+    {
+      "id": 1040,
+      "token": " like",
+      "bytes": [
+        32,
+        108,
+        105,
+        107,
+        101
+      ],
+      "logprob": -0.001957901520654559,
+      "top_logprobs": [
+        {
+          "id": 1040,
+          "token": " like",
+          "bytes": [
+            32,
+            108,
+            105,
+            107,
+            101
+          ],
+          "logprob": -0.001957901520654559
+        },
+        {
+          "id": 745,
+          "token": " else",
+          "bytes": [
+            32,
+            101,
+            108,
+            115,
+            101
+          ],
+          "logprob": -7.436053276062012
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "token": ":",
+      "bytes": [
+        58
+      ],
+      "logprob": -0.6777839660644531,
+      "top_logprobs": [
+        {
+          "id": 25,
+          "token": ":",
+          "bytes": [
+            58
+          ],
+          "logprob": -0.6777839660644531
+        },
+        {
+          "id": 1510,
+          "token": " `",
+          "bytes": [
+            32,
+            96
+          ],
+          "logprob": -0.7096043229103088
+        }
+      ]
+    },
+    {
+      "id": 271,
+      "token": "\n\n",
+      "bytes": [
+        10,
+        10
+      ],
+      "logprob": -0.05150251090526581,
+      "top_logprobs": [
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -0.05150251090526581
+        },
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -3.402435541152954
+        }
+      ]
+    },
+    {
+      "id": 71093,
+      "token": "```",
+      "bytes": [
+        96,
+        96,
+        96
+      ],
+      "logprob": -0.015832222998142242,
+      "top_logprobs": [
+        {
+          "id": 71093,
+          "token": "```",
+          "bytes": [
+            96,
+            96,
+            96
+          ],
+          "logprob": -0.015832222998142242
+        },
+        {
+          "id": 390,
+          "token": "int",
+          "bytes": [
+            105,
+            110,
+            116
+          ],
+          "logprob": -6.267162322998047
+        }
+      ]
+    },
+    {
+      "id": 10504,
+      "token": "cpp",
+      "bytes": [
+        99,
+        112,
+        112
+      ],
+      "logprob": -0.01081946212798357,
+      "top_logprobs": [
+        {
+          "id": 10504,
+          "token": "cpp",
+          "bytes": [
+            99,
+            112,
+            112
+          ],
+          "logprob": -0.01081946212798357
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -4.7367143630981445
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "token": "\n",
+      "bytes": [
+        10
+      ],
+      "logprob": -0.0021577493753284216,
+      "top_logprobs": [
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -0.0021577493753284216
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.420351505279541
+        }
+      ]
+    },
+    {
+      "id": 390,
+      "token": "int",
+      "bytes": [
+        105,
+        110,
+        116
+      ],
+      "logprob": -0.030360866338014603,
+      "top_logprobs": [
+        {
+          "id": 390,
+          "token": "int",
+          "bytes": [
+            105,
+            110,
+            116
+          ],
+          "logprob": -0.030360866338014603
+        },
+        {
+          "id": 285,
+          "token": "       ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -4.555467128753662
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "token": "6",
+      "bytes": [
+        54
+      ],
+      "logprob": -0.0026468466967344284,
+      "top_logprobs": [
+        {
+          "id": 21,
+          "token": "6",
+          "bytes": [
+            54
+          ],
+          "logprob": -0.0026468466967344284
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.417827129364014
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "token": "4",
+      "bytes": [
+        52
+      ],
+      "logprob": -0.0007101434166543186,
+      "top_logprobs": [
+        {
+          "id": 19,
+          "token": "4",
+          "bytes": [
+            52
+          ],
+          "logprob": -0.0007101434166543186
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.481577396392822
+        }
+      ]
+    },
+    {
+      "id": 516,
+      "token": "_t",
+      "bytes": [
+        95,
+        116
+      ],
+      "logprob": -0.001283037825487554,
+      "top_logprobs": [
+        {
+          "id": 516,
+          "token": "_t",
+          "bytes": [
+            95,
+            116
+          ],
+          "logprob": -0.001283037825487554
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.613306522369385
+        }
+      ]
+    },
+    {
+      "id": 257,
+      "token": "    ",
+      "bytes": [
+        32,
+        32,
+        32,
+        32
+      ],
+      "logprob": -0.4519464671611786,
+      "top_logprobs": [
+        {
+          "id": 257,
+          "token": "    ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -0.4519464671611786
+        },
+        {
+          "id": 307,
+          "token": " n",
+          "bytes": [
+            32,
+            110
+          ],
+          "logprob": -1.3375399112701416
+        }
+      ]
+    },
+    {
+      "id": 307,
+      "token": " n",
+      "bytes": [
+        32,
+        110
+      ],
+      "logprob": -0.0009296684293076396,
+      "top_logprobs": [
+        {
+          "id": 307,
+          "token": " n",
+          "bytes": [
+            32,
+            110
+          ],
+          "logprob": -0.0009296684293076396
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.489656925201416
+        }
+      ]
+    },
+    {
+      "id": 22091,
+      "token": "_elements",
+      "bytes": [
+        95,
+        101,
+        108,
+        101,
+        109,
+        101,
+        110,
+        116,
+        115
+      ],
+      "logprob": -0.0036665580701082945,
+      "top_logprobs": [
+        {
+          "id": 22091,
+          "token": "_elements",
+          "bytes": [
+            95,
+            101,
+            108,
+            101,
+            109,
+            101,
+            110,
+            116,
+            115
+          ],
+          "logprob": -0.0036665580701082945
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.7681145668029785
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "token": ";",
+      "bytes": [
+        59
+      ],
+      "logprob": -0.0021345731802284718,
+      "top_logprobs": [
+        {
+          "id": 26,
+          "token": ";",
+          "bytes": [
+            59
+          ],
+          "logprob": -0.0021345731802284718
+        },
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -6.310565948486328
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "token": "\n",
+      "bytes": [
+        10
+      ],
+      "logprob": -0.0024474982637912035,
+      "top_logprobs": [
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -0.0024474982637912035
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.5465569496154785
+        }
+      ]
+    },
+    {
+      "id": 390,
+      "token": "int",
+      "bytes": [
+        105,
+        110,
+        116
+      ],
+      "logprob": -0.21378424763679504,
+      "top_logprobs": [
+        {
+          "id": 390,
+          "token": "int",
+          "bytes": [
+            105,
+            110,
+            116
+          ],
+          "logprob": -0.21378424763679504
+        },
+        {
+          "id": 2073,
+          "token": "size",
+          "bytes": [
+            115,
+            105,
+            122,
+            101
+          ],
+          "logprob": -1.989100456237793
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "token": "6",
+      "bytes": [
+        54
+      ],
+      "logprob": -0.02179594710469246,
+      "top_logprobs": [
+        {
+          "id": 21,
+          "token": "6",
+          "bytes": [
+            54
+          ],
+          "logprob": -0.02179594710469246
+        },
+        {
+          "id": 260,
+          "token": "        ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32,
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -4.50651216506958
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "token": "4",
+      "bytes": [
+        52
+      ],
+      "logprob": -0.020296720787882805,
+      "top_logprobs": [
+        {
+          "id": 19,
+          "token": "4",
+          "bytes": [
+            52
+          ],
+          "logprob": -0.020296720787882805
+        },
+        {
+          "id": 516,
+          "token": "_t",
+          "bytes": [
+            95,
+            116
+          ],
+          "logprob": -4.067699909210205
+        }
+      ]
+    },
+    {
+      "id": 516,
+      "token": "_t",
+      "bytes": [
+        95,
+        116
+      ],
+      "logprob": -0.022368071600794792,
+      "top_logprobs": [
+        {
+          "id": 516,
+          "token": "_t",
+          "bytes": [
+            95,
+            116
+          ],
+          "logprob": -0.022368071600794792
+        },
+        {
+          "id": 3430,
+          "token": "_tr",
+          "bytes": [
+            95,
+            116,
+            114
+          ],
+          "logprob": -4.870744228363037
+        }
+      ]
+    },
+    {
+      "id": 257,
+      "token": "    ",
+      "bytes": [
+        32,
+        32,
+        32,
+        32
+      ],
+      "logprob": -0.004036755301058292,
+      "top_logprobs": [
+        {
+          "id": 257,
+          "token": "    ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -0.004036755301058292
+        },
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -6.785836219787598
+        }
+      ]
+    },
+    {
+      "id": 307,
+      "token": " n",
+      "bytes": [
+        32,
+        110
+      ],
+      "logprob": -0.17350037395954132,
+      "top_logprobs": [
+        {
+          "id": 307,
+          "token": " n",
+          "bytes": [
+            32,
+            110
+          ],
+          "logprob": -0.17350037395954132
+        },
+        {
+          "id": 4206,
+          "token": " offset",
+          "bytes": [
+            32,
+            111,
+            102,
+            102,
+            115,
+            101,
+            116
+          ],
+          "logprob": -2.782095193862915
+        }
+      ]
+    },
+    {
+      "id": 12164,
+      "token": "_bytes",
+      "bytes": [
+        95,
+        98,
+        121,
+        116,
+        101,
+        115
+      ],
+      "logprob": -0.4939740002155304,
+      "top_logprobs": [
+        {
+          "id": 12164,
+          "token": "_bytes",
+          "bytes": [
+            95,
+            98,
+            121,
+            116,
+            101,
+            115
+          ],
+          "logprob": -0.4939740002155304
+        },
+        {
+          "id": 22091,
+          "token": "_elements",
+          "bytes": [
+            95,
+            101,
+            108,
+            101,
+            109,
+            101,
+            110,
+            116,
+            115
+          ],
+          "logprob": -1.827927827835083
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "token": ";",
+      "bytes": [
+        59
+      ],
+      "logprob": -0.0031428798101842403,
+      "top_logprobs": [
+        {
+          "id": 26,
+          "token": ";",
+          "bytes": [
+            59
+          ],
+          "logprob": -0.0031428798101842403
+        },
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -6.706794261932373
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "token": "\n",
+      "bytes": [
+        10
+      ],
+      "logprob": -0.016939615830779076,
+      "top_logprobs": [
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -0.016939615830779076
+        },
+        {
+          "id": 950,
+          "token": "      ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -4.832010746002197
+        }
+      ]
+    },
+    {
+      "id": 390,
+      "token": "int",
+      "bytes": [
+        105,
+        110,
+        116
+      ],
+      "logprob": -0.332438200712204,
+      "top_logprobs": [
+        {
+          "id": 390,
+          "token": "int",
+          "bytes": [
+            105,
+            110,
+            116
+          ],
+          "logprob": -0.332438200712204
+        },
+        {
+          "id": 2554,
+          "token": "bool",
+          "bytes": [
+            98,
+            111,
+            111,
+            108
+          ],
+          "logprob": -2.0352542400360107
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "token": "6",
+      "bytes": [
+        54
+      ],
+      "logprob": -0.008723588660359383,
+      "top_logprobs": [
+        {
+          "id": 21,
+          "token": "6",
+          "bytes": [
+            54
+          ],
+          "logprob": -0.008723588660359383
+        },
+        {
+          "id": 285,
+          "token": "       ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -5.802801609039307
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "token": "4",
+      "bytes": [
+        52
+      ],
+      "logprob": -0.00041189329931512475,
+      "top_logprobs": [
+        {
+          "id": 19,
+          "token": "4",
+          "bytes": [
+            52
+          ],
+          "logprob": -0.00041189329931512475
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -8.827120780944824
+        }
+      ]
+    },
+    {
+      "id": 516,
+      "token": "_t",
+      "bytes": [
+        95,
+        116
+      ],
+      "logprob": -0.0019761763978749514,
+      "top_logprobs": [
+        {
+          "id": 516,
+          "token": "_t",
+          "bytes": [
+            95,
+            116
+          ],
+          "logprob": -0.0019761763978749514
+        },
+        {
+          "id": 406,
+          "token": "     ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -7.268560409545898
+        }
+      ]
+    },
+    {
+      "id": 257,
+      "token": "    ",
+      "bytes": [
+        32,
+        32,
+        32,
+        32
+      ],
+      "logprob": -0.004425948020070791,
+      "top_logprobs": [
+        {
+          "id": 257,
+          "token": "    ",
+          "bytes": [
+            32,
+            32,
+            32,
+            32
+          ],
+          "logprob": -0.004425948020070791
+        },
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -6.088469505310059
+        }
+      ]
+    },
+    {
+      "id": 307,
+      "token": " n",
+      "bytes": [
+        32,
+        110
+      ],
+      "logprob": -0.2051192671060562,
+      "top_logprobs": [
+        {
+          "id": 307,
+          "token": " n",
+          "bytes": [
+            32,
+            110
+          ],
+          "logprob": -0.2051192671060562
+        },
+        {
+          "id": 11540,
+          "token": " chunk",
+          "bytes": [
+            32,
+            99,
+            104,
+            117,
+            110,
+            107
+          ],
+          "logprob": -2.5095932483673096
+        }
+      ]
+    },
+    {
+      "id": 63261,
+      "token": "_chunks",
+      "bytes": [
+        95,
+        99,
+        104,
+        117,
+        110,
+        107,
+        115
+      ],
+      "logprob": -0.720820426940918,
+      "top_logprobs": [
+        {
+          "id": 63261,
+          "token": "_chunks",
+          "bytes": [
+            95,
+            99,
+            104,
+            117,
+            110,
+            107,
+            115
+          ],
+          "logprob": -0.720820426940918
+        },
+        {
+          "id": 12866,
+          "token": "_vec",
+          "bytes": [
+            95,
+            118,
+            101,
+            99
+          ],
+          "logprob": -1.0841035842895508
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "token": ";",
+      "bytes": [
+        59
+      ],
+      "logprob": -0.008617470040917397,
+      "top_logprobs": [
+        {
+          "id": 26,
+          "token": ";",
+          "bytes": [
+            59
+          ],
+          "logprob": -0.008617470040917397
+        },
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -5.047420501708984
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "token": "\n",
+      "bytes": [
+        10
+      ],
+      "logprob": -0.07213713973760605,
+      "top_logprobs": [
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -0.07213713973760605
+        },
+        {
+          "id": 220,
+          "token": " ",
+          "bytes": [
+            32
+          ],
+          "logprob": -3.090949296951294
+        }
+      ]
+    },
+    {
+      "id": 71093,
+      "token": "```",
+      "bytes": [
+        96,
+        96,
+        96
+      ],
+      "logprob": -0.19478435814380646,
+      "top_logprobs": [
+        {
+          "id": 71093,
+          "token": "```",
+          "bytes": [
+            96,
+            96,
+            96
+          ],
+          "logprob": -0.19478435814380646
+        },
+        {
+          "id": 320,
+          "token": "//",
+          "bytes": [
+            47,
+            47
+          ],
+          "logprob": -1.8563481569290161
+        }
+      ]
+    },
+    {
+      "id": 271,
+      "token": "\n\n",
+      "bytes": [
+        10,
+        10
+      ],
+      "logprob": -0.007638286333531141,
+      "top_logprobs": [
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -0.007638286333531141
+        },
+        {
+          "id": 1358,
+          "token": "\n\n\n",
+          "bytes": [
+            10,
+            10,
+            10
+          ],
+          "logprob": -5.307017803192139
+        }
+      ]
+    },
+    {
+      "id": 269,
+      "token": "or",
+      "bytes": [
+        111,
+        114
+      ],
+      "logprob": -0.5625864863395691,
+      "top_logprobs": [
+        {
+          "id": 269,
+          "token": "or",
+          "bytes": [
+            111,
+            114
+          ],
+          "logprob": -0.5625864863395691
+        },
+        {
+          "id": 1919,
+          "token": "This",
+          "bytes": [
+            84,
+            104,
+            105,
+            115
+          ],
+          "logprob": -1.4495036602020264
+        }
+      ]
+    },
+    {
+      "id": 4283,
+      "token": " similar",
+      "bytes": [
+        32,
+        115,
+        105,
+        109,
+        105,
+        108,
+        97,
+        114
+      ],
+      "logprob": -0.0313662551343441,
+      "top_logprobs": [
+        {
+          "id": 4283,
+          "token": " similar",
+          "bytes": [
+            32,
+            115,
+            105,
+            109,
+            105,
+            108,
+            97,
+            114
+          ],
+          "logprob": -0.0313662551343441
+        },
+        {
+          "id": 8554,
+          "token": " whatever",
+          "bytes": [
+            32,
+            119,
+            104,
+            97,
+            116,
+            101,
+            118,
+            101,
+            114
+          ],
+          "logprob": -4.189664840698242
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "token": ".",
+      "bytes": [
+        46
+      ],
+      "logprob": -0.19807805120944977,
+      "top_logprobs": [
+        {
+          "id": 13,
+          "token": ".",
+          "bytes": [
+            46
+          ],
+          "logprob": -0.19807805120944977
+        },
+        {
+          "id": 12103,
+          "token": " distinct",
+          "bytes": [
+            32,
+            100,
+            105,
+            115,
+            116,
+            105,
+            110,
+            99,
+            116
+          ],
+          "logprob": -2.184375762939453
+        }
+      ]
+    },
+    {
+      "id": 1061,
+      "token": " This",
+      "bytes": [
+        32,
+        84,
+        104,
+        105,
+        115
+      ],
+      "logprob": -0.37483182549476624,
+      "top_logprobs": [
+        {
+          "id": 1061,
+          "token": " This",
+          "bytes": [
+            32,
+            84,
+            104,
+            105,
+            115
+          ],
+          "logprob": -0.37483182549476624
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -1.9371334314346313
+        }
+      ]
+    },
+    {
+      "id": 1902,
+      "token": " must",
+      "bytes": [
+        32,
+        109,
+        117,
+        115,
+        116
+      ],
+      "logprob": -0.9214403629302979,
+      "top_logprobs": [
+        {
+          "id": 1902,
+          "token": " must",
+          "bytes": [
+            32,
+            109,
+            117,
+            115,
+            116
+          ],
+          "logprob": -0.9214403629302979
+        },
+        {
+          "id": 369,
+          "token": " is",
+          "bytes": [
+            32,
+            105,
+            115
+          ],
+          "logprob": -0.9537889957427979
+        }
+      ]
+    },
+    {
+      "id": 381,
+      "token": " be",
+      "bytes": [
+        32,
+        98,
+        101
+      ],
+      "logprob": -0.0015973085537552834,
+      "top_logprobs": [
+        {
+          "id": 381,
+          "token": " be",
+          "bytes": [
+            32,
+            98,
+            101
+          ],
+          "logprob": -0.0015973085537552834
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.509282112121582
+        }
+      ]
+    },
+    {
+      "id": 8097,
+      "token": " fixed",
+      "bytes": [
+        32,
+        102,
+        105,
+        120,
+        101,
+        100
+      ],
+      "logprob": -0.011026151478290558,
+      "top_logprobs": [
+        {
+          "id": 8097,
+          "token": " fixed",
+          "bytes": [
+            32,
+            102,
+            105,
+            120,
+            101,
+            100
+          ],
+          "logprob": -0.011026151478290558
+        },
+        {
+          "id": 34773,
+          "token": " corrected",
+          "bytes": [
+            32,
+            99,
+            111,
+            114,
+            114,
+            101,
+            99,
+            116,
+            101,
+            100
+          ],
+          "logprob": -4.788951873779297
+        }
+      ]
+    },
+    {
+      "id": 1518,
+      "token": " before",
+      "bytes": [
+        32,
+        98,
+        101,
+        102,
+        111,
+        114,
+        101
+      ],
+      "logprob": -0.08840017765760422,
+      "top_logprobs": [
+        {
+          "id": 1518,
+          "token": " before",
+          "bytes": [
+            32,
+            98,
+            101,
+            102,
+            111,
+            114,
+            101
+          ],
+          "logprob": -0.08840017765760422
+        },
+        {
+          "id": 13,
+          "token": ".",
+          "bytes": [
+            46
+          ],
+          "logprob": -2.8994715213775635
+        }
+      ]
+    },
+    {
+      "id": 3977,
+      "token": " anything",
+      "bytes": [
+        32,
+        97,
+        110,
+        121,
+        116,
+        104,
+        105,
+        110,
+        103
+      ],
+      "logprob": -0.4791160821914673,
+      "top_logprobs": [
+        {
+          "id": 3977,
+          "token": " anything",
+          "bytes": [
+            32,
+            97,
+            110,
+            121,
+            116,
+            104,
+            105,
+            110,
+            103
+          ],
+          "logprob": -0.4791160821914673
+        },
+        {
+          "id": 279,
+          "token": " the",
+          "bytes": [
+            32,
+            116,
+            104,
+            101
+          ],
+          "logprob": -1.3525577783584595
+        }
+      ]
+    },
+    {
+      "id": 745,
+      "token": " else",
+      "bytes": [
+        32,
+        101,
+        108,
+        115,
+        101
+      ],
+      "logprob": -0.0006829447811469436,
+      "top_logprobs": [
+        {
+          "id": 745,
+          "token": " else",
+          "bytes": [
+            32,
+            101,
+            108,
+            115,
+            101
+          ],
+          "logprob": -0.0006829447811469436
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.793302536010742
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "token": ".",
+      "bytes": [
+        46
+      ],
+      "logprob": -0.5587377548217773,
+      "top_logprobs": [
+        {
+          "id": 13,
+          "token": ".",
+          "bytes": [
+            46
+          ],
+          "logprob": -0.5587377548217773
+        },
+        {
+          "id": 628,
+          "token": " can",
+          "bytes": [
+            32,
+            99,
+            97,
+            110
+          ],
+          "logprob": -1.3836946487426758
+        }
+      ]
+    },
+    {
+      "id": 271,
+      "token": "\n\n",
+      "bytes": [
+        10,
+        10
+      ],
+      "logprob": -0.03291575238108635,
+      "top_logprobs": [
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -0.03291575238108635
+        },
+        {
+          "id": 1358,
+          "token": "\n\n\n",
+          "bytes": [
+            10,
+            10,
+            10
+          ],
+          "logprob": -3.731552839279175
+        }
+      ]
+    },
+    {
+      "id": 4277,
+      "token": "---",
+      "bytes": [
+        45,
+        45,
+        45
+      ],
+      "logprob": -0.020234011113643646,
+      "top_logprobs": [
+        {
+          "id": 4277,
+          "token": "---",
+          "bytes": [
+            45,
+            45,
+            45
+          ],
+          "logprob": -0.020234011113643646
+        },
+        {
+          "id": 13962,
+          "token": "###",
+          "bytes": [
+            35,
+            35,
+            35
+          ],
+          "logprob": -4.186423301696777
+        }
+      ]
+    },
+    {
+      "id": 271,
+      "token": "\n\n",
+      "bytes": [
+        10,
+        10
+      ],
+      "logprob": -0.003885955084115267,
+      "top_logprobs": [
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -0.003885955084115267
+        },
+        {
+          "id": 13962,
+          "token": "###",
+          "bytes": [
+            35,
+            35,
+            35
+          ],
+          "logprob": -6.275167942047119
+        }
+      ]
+    },
+    {
+      "id": 13962,
+      "token": "###",
+      "bytes": [
+        35,
+        35,
+        35
+      ],
+      "logprob": -0.005652398336678743,
+      "top_logprobs": [
+        {
+          "id": 13962,
+          "token": "###",
+          "bytes": [
+            35,
+            35,
+            35
+          ],
+          "logprob": -0.005652398336678743
+        },
+        {
+          "id": 12189,
+          "token": "Since",
+          "bytes": [
+            83,
+            105,
+            110,
+            99,
+            101
+          ],
+          "logprob": -6.342449188232422
+        }
+      ]
+    },
+    {
+      "id": 220,
+      "token": " ",
+      "bytes": [
+        32
+      ],
+      "logprob": -0.007925842888653278,
+      "top_logprobs": [
+        {
+          "id": 220,
+          "token": " ",
+          "bytes": [
+            32
+          ],
+          "logprob": -0.007925842888653278
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -5.184697151184082
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "token": "2",
+      "bytes": [
+        50
+      ],
+      "logprob": -0.06363249570131302,
+      "top_logprobs": [
+        {
+          "id": 17,
+          "token": "2",
+          "bytes": [
+            50
+          ],
+          "logprob": -0.06363249570131302
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -2.9283881187438965
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "token": ".",
+      "bytes": [
+        46
+      ],
+      "logprob": -0.019851569086313248,
+      "top_logprobs": [
+        {
+          "id": 13,
+          "token": ".",
+          "bytes": [
+            46
+          ],
+          "logprob": -0.019851569086313248
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -3.946176528930664
+        }
+      ]
+    },
+    {
+      "id": 2972,
+      "token": " **",
+      "bytes": [
+        32,
+        42,
+        42
+      ],
+      "logprob": -0.008351893164217472,
+      "top_logprobs": [
+        {
+          "id": 2972,
+          "token": " **",
+          "bytes": [
+            32,
+            42,
+            42
+          ],
+          "logprob": -0.008351893164217472
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -5.130843639373779
+        }
+      ]
+    },
+    {
+      "id": 40621,
+      "token": "Critical",
+      "bytes": [
+        67,
+        114,
+        105,
+        116,
+        105,
+        99,
+        97,
+        108
+      ],
+      "logprob": -0.7948580980300903,
+      "top_logprobs": [
+        {
+          "id": 40621,
+          "token": "Critical",
+          "bytes": [
+            67,
+            114,
+            105,
+            116,
+            105,
+            99,
+            97,
+            108
+          ],
+          "logprob": -0.7948580980300903
+        },
+        {
+          "id": 31995,
+          "token": "Correct",
+          "bytes": [
+            67,
+            111,
+            114,
+            114,
+            101,
+            99,
+            116
+          ],
+          "logprob": -1.3351298570632935
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "token": ":",
+      "bytes": [
+        58
+      ],
+      "logprob": -0.0021321838721632957,
+      "top_logprobs": [
+        {
+          "id": 25,
+          "token": ":",
+          "bytes": [
+            58
+          ],
+          "logprob": -0.0021321838721632957
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.475936412811279
+        }
+      ]
+    },
+    {
+      "id": 1510,
+      "token": " `",
+      "bytes": [
+        32,
+        96
+      ],
+      "logprob": -1.3956137895584106,
+      "top_logprobs": [
+        {
+          "id": 1510,
+          "token": " `",
+          "bytes": [
+            32,
+            96
+          ],
+          "logprob": -1.3956137895584106
+        },
+        {
+          "id": 22918,
+          "token": " Race",
+          "bytes": [
+            32,
+            82,
+            97,
+            99,
+            101
+          ],
+          "logprob": -1.4069682359695435
+        }
+      ]
+    },
+    {
+      "id": 8034,
+      "token": "counter",
+      "bytes": [
+        99,
+        111,
+        117,
+        110,
+        116,
+        101,
+        114
+      ],
+      "logprob": -0.4898929297924042,
+      "top_logprobs": [
+        {
+          "id": 8034,
+          "token": "counter",
+          "bytes": [
+            99,
+            111,
+            117,
+            110,
+            116,
+            101,
+            114
+          ],
+          "logprob": -0.4898929297924042
+        },
+        {
+          "id": 13985,
+          "token": "gg",
+          "bytes": [
+            103,
+            103
+          ],
+          "logprob": -1.9774303436279297
+        }
+      ]
+    },
+    {
+      "id": 17932,
+      "token": "[b",
+      "bytes": [
+        91,
+        98
+      ],
+      "logprob": -0.16104459762573242,
+      "top_logprobs": [
+        {
+          "id": 17932,
+          "token": "[b",
+          "bytes": [
+            91,
+            98
+          ],
+          "logprob": -0.16104459762573242
+        },
+        {
+          "id": 63,
+          "token": "`",
+          "bytes": [
+            96
+          ],
+          "logprob": -1.953650951385498
+        }
+      ]
+    },
+    {
+      "id": 306,
+      "token": "id",
+      "bytes": [
+        105,
+        100
+      ],
+      "logprob": -0.0008204367477446795,
+      "top_logprobs": [
+        {
+          "id": 306,
+          "token": "id",
+          "bytes": [
+            105,
+            100
+          ],
+          "logprob": -0.0008204367477446795
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.245424747467041
+        }
+      ]
+    },
+    {
+      "id": 60,
+      "token": "]",
+      "bytes": [
+        93
+      ],
+      "logprob": -0.001566265127621591,
+      "top_logprobs": [
+        {
+          "id": 60,
+          "token": "]",
+          "bytes": [
+            93
+          ],
+          "logprob": -0.001566265127621591
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.740389347076416
+        }
+      ]
+    },
+    {
+      "id": 63,
+      "token": "`",
+      "bytes": [
+        96
+      ],
+      "logprob": -0.06199011951684952,
+      "top_logprobs": [
+        {
+          "id": 63,
+          "token": "`",
+          "bytes": [
+            96
+          ],
+          "logprob": -0.06199011951684952
+        },
+        {
+          "id": 283,
+          "token": " =",
+          "bytes": [
+            32,
+            61
+          ],
+          "logprob": -3.024531841278076
+        }
+      ]
+    },
+    {
+      "id": 22918,
+      "token": " Race",
+      "bytes": [
+        32,
+        82,
+        97,
+        99,
+        101
+      ],
+      "logprob": -0.8138309717178345,
+      "top_logprobs": [
+        {
+          "id": 22918,
+          "token": " Race",
+          "bytes": [
+            32,
+            82,
+            97,
+            99,
+            101
+          ],
+          "logprob": -0.8138309717178345
+        },
+        {
+          "id": 369,
+          "token": " is",
+          "bytes": [
+            32,
+            105,
+            115
+          ],
+          "logprob": -1.9082847833633423
+        }
+      ]
+    },
+    {
+      "id": 14738,
+      "token": " Condition",
+      "bytes": [
+        32,
+        67,
+        111,
+        110,
+        100,
+        105,
+        116,
+        105,
+        111,
+        110
+      ],
+      "logprob": -0.35728055238723755,
+      "top_logprobs": [
+        {
+          "id": 14738,
+          "token": " Condition",
+          "bytes": [
+            32,
+            67,
+            111,
+            110,
+            100,
+            105,
+            116,
+            105,
+            111,
+            110
+          ],
+          "logprob": -0.35728055238723755
+        },
+        {
+          "id": 303,
+          "token": " in",
+          "bytes": [
+            32,
+            105,
+            110
+          ],
+          "logprob": -1.9959543943405151
+        }
+      ]
+    },
+    {
+      "id": 303,
+      "token": " in",
+      "bytes": [
+        32,
+        105,
+        110
+      ],
+      "logprob": -0.39040639996528625,
+      "top_logprobs": [
+        {
+          "id": 303,
+          "token": " in",
+          "bytes": [
+            32,
+            105,
+            110
+          ],
+          "logprob": -0.39040639996528625
+        },
+        {
+          "id": 593,
+          "token": " /",
+          "bytes": [
+            32,
+            47
+          ],
+          "logprob": -2.1394641399383545
+        }
+      ]
+    },
+    {
+      "id": 279,
+      "token": " the",
+      "bytes": [
+        32,
+        116,
+        104,
+        101
+      ],
+      "logprob": -0.6267475485801697,
+      "top_logprobs": [
+        {
+          "id": 279,
+          "token": " the",
+          "bytes": [
+            32,
+            116,
+            104,
+            101
+          ],
+          "logprob": -0.6267475485801697
+        },
+        {
+          "id": 43996,
+          "token": " Chunk",
+          "bytes": [
+            32,
+            67,
+            104,
+            117,
+            110,
+            107
+          ],
+          "logprob": -1.7962726354599
+        }
+      ]
+    },
+    {
+      "id": 43996,
+      "token": " Chunk",
+      "bytes": [
+        32,
+        67,
+        104,
+        117,
+        110,
+        107
+      ],
+      "logprob": -0.11842562258243561,
+      "top_logprobs": [
+        {
+          "id": 43996,
+          "token": " Chunk",
+          "bytes": [
+            32,
+            67,
+            104,
+            117,
+            110,
+            107
+          ],
+          "logprob": -0.11842562258243561
+        },
+        {
+          "id": 35393,
+          "token": " Kernel",
+          "bytes": [
+            32,
+            75,
+            101,
+            114,
+            110,
+            101,
+            108
+          ],
+          "logprob": -2.250105142593384
+        }
+      ]
+    },
+    {
+      "id": 290,
+      "token": "ed",
+      "bytes": [
+        101,
+        100
+      ],
+      "logprob": -0.0008722174097783864,
+      "top_logprobs": [
+        {
+          "id": 290,
+          "token": "ed",
+          "bytes": [
+            101,
+            100
+          ],
+          "logprob": -0.0008722174097783864
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.229565143585205
+        }
+      ]
+    },
+    {
+      "id": 35393,
+      "token": " Kernel",
+      "bytes": [
+        32,
+        75,
+        101,
+        114,
+        110,
+        101,
+        108
+      ],
+      "logprob": -0.003799016121774912,
+      "top_logprobs": [
+        {
+          "id": 35393,
+          "token": " Kernel",
+          "bytes": [
+            32,
+            75,
+            101,
+            114,
+            110,
+            101,
+            108
+          ],
+          "logprob": -0.003799016121774912
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.340121746063232
+        }
+      ]
+    },
+    {
+      "id": 332,
+      "token": "**",
+      "bytes": [
+        42,
+        42
+      ],
+      "logprob": -0.050280291587114334,
+      "top_logprobs": [
+        {
+          "id": 332,
+          "token": "**",
+          "bytes": [
+            42,
+            42
+          ],
+          "logprob": -0.050280291587114334
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -3.323124647140503
+        }
+      ]
+    },
+    {
+      "id": 271,
+      "token": "\n\n",
+      "bytes": [
+        10,
+        10
+      ],
+      "logprob": -0.002332604257389903,
+      "top_logprobs": [
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -0.002332604257389903
+        },
+        {
+          "id": 248046,
+          "token": "",
+          "bytes": [],
+          "logprob": -6.785177230834961
+        }
+      ]
+    },
+    {
+      "id": 71093,
+      "token": "```",
+      "bytes": [
+        96,
+        96,
+        96
+      ],
+      "logprob": -0.4440667927265167,
+      "top_logprobs": [
+        {
+          "id": 71093,
+          "token": "```",
+          "bytes": [
+            96,
+            96,
+            96
+          ],
+          "logprob": -0.4440667927265167
+        },
+        {
+          "id": 623,
+          "token": "In",
+          "bytes": [
+            73,
+            110
+          ],
+          "logprob": -1.1099183559417725
+        }
+      ]
+    },
+    {
+      "id": 10504,
+      "token": "cpp",
+      "bytes": [
+        99,
+        112,
+        112
+      ],
+      "logprob": -0.008168951608240604,
+      "top_logprobs": [
+        {
+          "id": 10504,
+          "token": "cpp",
+          "bytes": [
+            99,
+            112,
+            112
+          ],
+          "logprob": -0.008168951608240604
+        },
+        {
+          "id": 32804,
+          "token": "cuda",
+          "bytes": [
+            99,
+            117,
+            100,
+            97
+          ],
+          "logprob": -6.00432014465332
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "token": "\n",
+      "bytes": [
+        10
+      ],
+      "logprob": -0.0016483532963320613,
+      "top_logprobs": [
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -0.0016483532963320613
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.770847797393799
+        }
+      ]
+    },
+    {
+      "id": 331,
+      "token": "if",
+      "bytes": [
+        105,
+        102
+      ],
+      "logprob": -0.6242018342018127,
+      "top_logprobs": [
+        {
+          "id": 331,
+          "token": "if",
+          "bytes": [
+            105,
+            102
+          ],
+          "logprob": -0.6242018342018127
+        },
+        {
+          "id": 548,
+          "token": "__",
+          "bytes": [
+            95,
+            95
+          ],
+          "logprob": -0.8938665986061096
+        }
+      ]
+    },
+    {
+      "id": 318,
+      "token": " (",
+      "bytes": [
+        32,
+        40
+      ],
+      "logprob": -0.0028670362662523985,
+      "top_logprobs": [
+        {
+          "id": 318,
+          "token": " (",
+          "bytes": [
+            32,
+            40
+          ],
+          "logprob": -0.0028670362662523985
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.3313164710998535
+        }
+      ]
+    },
+    {
+      "id": 23674,
+      "token": "tid",
+      "bytes": [
+        116,
+        105,
+        100
+      ],
+      "logprob": -0.0010302603477612138,
+      "top_logprobs": [
+        {
+          "id": 23674,
+          "token": "tid",
+          "bytes": [
+            116,
+            105,
+            100
+          ],
+          "logprob": -0.0010302603477612138
+        },
+        {
+          "id": 12732,
+          "token": " tid",
+          "bytes": [
+            32,
+            116,
+            105,
+            100
+          ],
+          "logprob": -7.930665969848633
+        }
+      ]
+    },
+    {
+      "id": 606,
+      "token": " ==",
+      "bytes": [
+        32,
+        61,
+        61
+      ],
+      "logprob": -0.002346763852983713,
+      "top_logprobs": [
+        {
+          "id": 606,
+          "token": " ==",
+          "bytes": [
+            32,
+            61,
+            61
+          ],
+          "logprob": -0.002346763852983713
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.453005313873291
+        }
+      ]
+    },
+    {
+      "id": 220,
+      "token": " ",
+      "bytes": [
+        32
+      ],
+      "logprob": -0.00915900245308876,
+      "top_logprobs": [
+        {
+          "id": 220,
+          "token": " ",
+          "bytes": [
+            32
+          ],
+          "logprob": -0.00915900245308876
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -5.4097442626953125
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "token": "0",
+      "bytes": [
+        48
+      ],
+      "logprob": -0.27897655963897705,
+      "top_logprobs": [
+        {
+          "id": 15,
+          "token": "0",
+          "bytes": [
+            48
+          ],
+          "logprob": -0.27897655963897705
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -1.7205697298049927
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "token": ")",
+      "bytes": [
+        41
+      ],
+      "logprob": -0.1316380351781845,
+      "top_logprobs": [
+        {
+          "id": 8,
+          "token": ")",
+          "bytes": [
+            41
+          ],
+          "logprob": -0.1316380351781845
+        },
+        {
+          "id": 248046,
+          "token": "",
+          "bytes": [],
+          "logprob": -2.357771396636963
+        }
+      ]
+    },
+    {
+      "id": 313,
+      "token": " {",
+      "bytes": [
+        32,
+        123
+      ],
+      "logprob": -0.014186459593474865,
+      "top_logprobs": [
+        {
+          "id": 313,
+          "token": " {",
+          "bytes": [
+            32,
+            123
+          ],
+          "logprob": -0.014186459593474865
+        },
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -4.991042613983154
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "token": "\n",
+      "bytes": [
+        10
+      ],
+      "logprob": -0.013708123937249184,
+      "top_logprobs": [
+        {
+          "id": 198,
+          "token": "\n",
+          "bytes": [
+            10
+          ],
+          "logprob": -0.013708123937249184
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -4.928485870361328
+        }
+      ]
+    },
+    {
+      "id": 262,
+      "token": "   ",
+      "bytes": [
+        32,
+        32,
+        32
+      ],
+      "logprob": -0.014923572540283203,
+      "top_logprobs": [
+        {
+          "id": 262,
+          "token": "   ",
+          "bytes": [
+            32,
+            32,
+            32
+          ],
+          "logprob": -0.014923572540283203
+        },
+        {
+          "id": 71093,
+          "token": "```",
+          "bytes": [
+            96,
+            96,
+            96
+          ],
+          "logprob": -4.291294574737549
+        }
+      ]
+    },
+    {
+      "id": 274,
+      "token": " s",
+      "bytes": [
+        32,
+        115
+      ],
+      "logprob": -0.002548541873693466,
+      "top_logprobs": [
+        {
+          "id": 274,
+          "token": " s",
+          "bytes": [
+            32,
+            115
+          ],
+          "logprob": -0.002548541873693466
+        },
+        {
+          "id": 352,
+          "token": " st",
+          "bytes": [
+            32,
+            115,
+            116
+          ],
+          "logprob": -7.414753437042236
+        }
+      ]
+    },
+    {
+      "id": 6256,
+      "token": "_token",
+      "bytes": [
+        95,
+        116,
+        111,
+        107,
+        101,
+        110
+      ],
+      "logprob": -0.0010612275218591094,
+      "top_logprobs": [
+        {
+          "id": 6256,
+          "token": "_token",
+          "bytes": [
+            95,
+            116,
+            111,
+            107,
+            101,
+            110
+          ],
+          "logprob": -0.0010612275218591094
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.491761207580566
+        }
+      ]
+    },
+    {
+      "id": 283,
+      "token": " =",
+      "bytes": [
+        32,
+        61
+      ],
+      "logprob": -0.03946352005004883,
+      "top_logprobs": [
+        {
+          "id": 283,
+          "token": " =",
+          "bytes": [
+            32,
+            61
+          ],
+          "logprob": -0.03946352005004883
+        },
+        {
+          "id": 248046,
+          "token": "",
+          "bytes": [],
+          "logprob": -3.873995304107666
+        }
+      ]
+    },
+    {
+      "id": 5373,
+      "token": " counter",
+      "bytes": [
+        32,
+        99,
+        111,
+        117,
+        110,
+        116,
+        101,
+        114
+      ],
+      "logprob": -0.002348376903682947,
+      "top_logprobs": [
+        {
+          "id": 5373,
+          "token": " counter",
+          "bytes": [
+            32,
+            99,
+            111,
+            117,
+            110,
+            116,
+            101,
+            114
+          ],
+          "logprob": -0.002348376903682947
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.4207234382629395
+        }
+      ]
+    },
+    {
+      "id": 17932,
+      "token": "[b",
+      "bytes": [
+        91,
+        98
+      ],
+      "logprob": -0.0036765486001968384,
+      "top_logprobs": [
+        {
+          "id": 17932,
+          "token": "[b",
+          "bytes": [
+            91,
+            98
+          ],
+          "logprob": -0.0036765486001968384
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.0459394454956055
+        }
+      ]
+    },
+    {
+      "id": 306,
+      "token": "id",
+      "bytes": [
+        105,
+        100
+      ],
+      "logprob": -0.0010132556781172752,
+      "top_logprobs": [
+        {
+          "id": 306,
+          "token": "id",
+          "bytes": [
+            105,
+            100
+          ],
+          "logprob": -0.0010132556781172752
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -7.266333103179932
+        }
+      ]
+    },
+    {
+      "id": 60,
+      "token": "]",
+      "bytes": [
+        93
+      ],
+      "logprob": -0.0014126140158623457,
+      "top_logprobs": [
+        {
+          "id": 60,
+          "token": "]",
+          "bytes": [
+            93
+          ],
+          "logprob": -0.0014126140158623457
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.967534065246582
+        }
+      ]
+    },
+    {
+      "id": 478,
+      "token": " +",
+      "bytes": [
+        32,
+        43
+      ],
+      "logprob": -0.003454924561083317,
+      "top_logprobs": [
+        {
+          "id": 478,
+          "token": " +",
+          "bytes": [
+            32,
+            43
+          ],
+          "logprob": -0.003454924561083317
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.265451908111572
+        }
+      ]
+    },
+    {
+      "id": 220,
+      "token": " ",
+      "bytes": [
+        32
+      ],
+      "logprob": -0.0028505383525043726,
+      "top_logprobs": [
+        {
+          "id": 220,
+          "token": " ",
+          "bytes": [
+            32
+          ],
+          "logprob": -0.0028505383525043726
+        },
+        {
+          "id": 271,
+          "token": "\n\n",
+          "bytes": [
+            10,
+            10
+          ],
+          "logprob": -6.495267868041992
+        }
+      ]
+    }
+  ]
+}

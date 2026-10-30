@@ -446,6 +446,7 @@ namespace GGUFMeta {
     template bool llama_model_loader::get_key<uint32_t>   (enum llm_kv kid, uint32_t & result,    bool required);
     template bool llama_model_loader::get_key<int32_t>    (enum llm_kv kid, int32_t & result,     bool required);
     template bool llama_model_loader::get_key<std::string>(enum llm_kv kid, std::string & result, bool required);
+    template bool llama_model_loader::get_key<bool>(const std::string & key, bool & result, bool required);
 
     template<>
     bool llama_model_loader::get_key(enum llm_kv kid, enum llama_pooling_type & result, bool required) {
@@ -951,6 +952,20 @@ static bool weight_buft_supported(const llama_hparams & hparams, ggml_tensor * w
     ggml_tensor * op_tensor = nullptr;
 
     switch (op) {
+        case GGML_OP_CPY:
+            {
+                op_tensor = ggml_cast(ctx, w, GGML_TYPE_F32);
+            } break;
+        case GGML_OP_RESHAPE:
+            {
+                // A same-shape reshape still creates the view node that buffer-type
+                // gates need to see. Non-canonical layouts can then reject the weight.
+                // Reshape to the weight's OWN extents rather than assuming two
+                // dimensions: a tensor loaded through TENSOR_ALLOW_RESHAPE can arrive
+                // with three, as deepseek4's wo_a does, and a 2D reshape of it fails
+                // the element-count assert before the model can load at all.
+                op_tensor = ggml_reshape_4d(ctx, w, w->ne[0], w->ne[1], w->ne[2], w->ne[3]);
+            } break;
         case GGML_OP_GET_ROWS:
             {
                 ggml_tensor * b = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 512);
@@ -1070,6 +1085,16 @@ static bool weight_buft_supported(const llama_hparams & hparams, ggml_tensor * w
     GGML_ASSERT(w->buffer == nullptr);
     w->buffer = ggml_backend_buft_alloc_buffer(buft, 0);
     bool op_supported = ggml_backend_dev_supports_op(dev, op_tensor);
+    if (op_supported && op == GGML_OP_RESHAPE) {
+        // A reshape is a free view on every backend and the CPU device answers true
+        // for it unconditionally, so on its own it admits ANY buffer type, including
+        // a CPU extra buffer type that cannot hold the weight: F32 attn_output_a
+        // landed in CPU_REPACK with no repack traits and crashed set_tensor. The
+        // reshape probe only exists so that a layout-bound buffer type can reject
+        // the view. The weight is still consumed by a matmul, so that must pass too.
+        ggml_tensor * b = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, w->ne[0], 512, w->ne[2], w->ne[3]);
+        op_supported = ggml_backend_dev_supports_op(dev, ggml_mul_mat(ctx, w, b));
+    }
     ggml_backend_buffer_free(w->buffer);
     w->buffer = nullptr;
 
@@ -1208,6 +1233,16 @@ struct ggml_tensor * llama_model_loader::create_tensor(
             op = GGML_OP_MUL_MAT_ID;
         } else {
             op = info.op;
+        }
+
+        if (get_arch() == LLM_ARCH_DEEPSEEK41 && t_meta->type == GGML_TYPE_BF16 &&
+                (tn_tensor == LLM_TENSOR_ENGRAM_Q || tn_tensor == LLM_TENSOR_ENGRAM_K) &&
+                tn.suffix != nullptr && strcmp(tn.suffix, "weight") == 0) {
+            const char * cast_device = getenv("LLAMA_DSV41_ENGRAM_CAST_DEVICE");
+            if (cast_device != nullptr && atoi(cast_device) != 0) {
+                op = GGML_OP_CPY;
+                LLAMA_LOG_WARN("%s: experimental Engram F32 cast placement probe for %s\n", __func__, tn.str().c_str());
+            }
         }
 
         // sanity checks
@@ -1420,6 +1455,7 @@ void llama_model_loader::done_getting_tensors(bool partial) const {
     }
 }
 
+
 void llama_model_loader::init_mappings(bool prefetch, llama_mlocks * mlock_mmaps) {
     // note: read_lazy also requires mmap; this condition make sure it's usable even when --load-mode is not set to mmap
     if (use_mmap || lazy.any()) {
@@ -1615,20 +1651,28 @@ bool llama_model_loader::load_all_data(
         }
 
         if (buft != ggml_backend_dev_buffer_type(dev)) {
-            LLAMA_LOG_DEBUG("%s: buffer type %s is not the default buffer type for device %s for async uploads\n", func,
-                ggml_backend_buft_name(buft), ggml_backend_dev_name(dev));
-            return nullptr;
+            // A device-local extra buffer type (e.g. repacked weights) still takes
+            // the async path: its backend's set_tensor_async owns any layout
+            // conversion (the meta backend accumulates chunks and forwards whole
+            // tensors through a worker). Only another device's buffer type is
+            // rejected.
+            if (ggml_backend_buft_get_device(buft) != dev) {
+                LLAMA_LOG_DEBUG("%s: buffer type %s is not local to device %s for async uploads\n", func,
+                    ggml_backend_buft_name(buft), ggml_backend_dev_name(dev));
+                return nullptr;
+            }
         }
 
+        auto * host_buft = ggml_backend_dev_host_buffer_type(dev);
         ggml_backend_dev_props props;
         ggml_backend_dev_get_props(dev, &props);
-        if (!props.caps.async || !props.caps.host_buffer || !props.caps.events) {
+        const bool meta_host_buft = ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_META && host_buft != nullptr;
+        if (!props.caps.async || (!props.caps.host_buffer && !meta_host_buft) || !props.caps.events) {
             LLAMA_LOG_DEBUG("%s: device %s does not support async, host buffers or events\n", func,
                 ggml_backend_dev_name(dev));
             return nullptr;
         }
 
-        auto * host_buft = ggml_backend_dev_host_buffer_type(dev);
         if (!host_buft) {
             LLAMA_LOG_DEBUG("%s: no host buffer type found for device %s\n", func,
                 ggml_backend_dev_name(dev));
@@ -1658,7 +1702,7 @@ bool llama_model_loader::load_all_data(
             events.emplace_back(event);
         }
 
-        ggml_backend_t backend = ggml_backend_dev_init(dev, nullptr);
+        ggml_backend_t backend = ggml_backend_dev_init(dev, meta_host_buft ? "copy-only" : nullptr);
         if (!backend) {
             LLAMA_LOG_DEBUG("%s: failed to initialize backend for device %s for async uploads\n", func,
                 ggml_backend_dev_name(dev));

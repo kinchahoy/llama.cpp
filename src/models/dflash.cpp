@@ -144,7 +144,11 @@ void llama_model_dflash::load_arch_hparams(llama_model_loader & ml) {
     // DFlash has a single rope, so the SWA rope == main rope.
     if (ml.get_key(LLM_KV_ATTENTION_SLIDING_WINDOW, hparams.n_swa, false) && hparams.n_swa > 0) {
         hparams.swa_type = LLAMA_SWA_TYPE_STANDARD;
-        ml.get_arr(LLM_KV_ATTENTION_SLIDING_WINDOW_PATTERN, hparams.is_swa_impl);
+        // the per-layer pattern is optional, as it is for every other arch that reads it.
+        // A sidecar that declares a window without one means a uniform window on all
+        // layers, which is what set_swa_pattern(0) gives. Loading threw before this.
+        hparams.set_swa_pattern(0);
+        ml.get_key_or_arr(LLM_KV_ATTENTION_SLIDING_WINDOW_PATTERN, hparams.is_swa_impl, hparams.n_layer(), false);
         hparams.rope_freq_base_train_swa  = hparams.rope_freq_base_train;
         hparams.rope_freq_scale_train_swa = hparams.rope_freq_scale_train;
     }
@@ -1288,16 +1292,27 @@ llama_model_dflash::graph_dsv4::graph_dsv4(const llama_model & model, const llm_
     inpL = ggml_repeat_4d(ctx0, inpL, n_embd, hc, n_tokens, 1);
     cb(inpL, "hc_init", -1);
 
+    const bool hc_shift = model.hc_head_fn == nullptr;
+    ggml_tensor * carry_pre = nullptr;
+
     for (int il = 0; il < n_layer; ++il) {
         const auto & layer = model.layers[il];
 
         ggml_tensor * residual = inpL;
-        hc_pre attn_hc = build_hc_pre(inpL,
+        ggml_tensor * post = nullptr;
+        ggml_tensor * comb = nullptr;
+
+        ggml_tensor * attn_pre = nullptr;
+        ggml_tensor * cur = build_hc_pre(inpL,
                 layer.hc_attn_fn,
                 layer.hc_attn_scale,
                 layer.hc_attn_base,
-                il);
-        ggml_tensor * cur = attn_hc.cur;
+                &post, &comb, il, &attn_pre, hc_shift ? carry_pre : nullptr);
+        if (hc_shift && carry_pre == nullptr) {
+            // The initial one-hot mix selects copy 0.
+            cur = ggml_cont_2d(ctx0, ggml_view_2d(ctx0, inpL, n_embd, inpL->ne[2], inpL->nb[2], 0),
+                    n_embd, inpL->ne[2]);
+        }
         cb(cur, "hc_attn_pre", il);
 
         cur = build_norm(cur, layer.attn_norm, nullptr, LLM_NORM_RMS, il);
@@ -1305,16 +1320,18 @@ llama_model_dflash::graph_dsv4::graph_dsv4(const llama_model & model, const llm_
 
         cur = build_attention(model, inp_attn, cur, inp_pos, il);
 
-        inpL = build_hc_post(cur, residual, attn_hc.post, attn_hc.comb, il);
+        inpL = build_hc_post(cur, residual, post, comb, il);
         cb(inpL, "hc_attn_post", il);
 
         residual = inpL;
-        hc_pre ffn_hc = build_hc_pre(inpL,
+        cur = build_hc_pre(inpL,
                 layer.hc_ffn_fn,
                 layer.hc_ffn_scale,
                 layer.hc_ffn_base,
-                il);
-        cur = ffn_hc.cur;
+                &post, &comb, il, &last_ffn_pre, hc_shift ? attn_pre : nullptr);
+        if (hc_shift) {
+            carry_pre = last_ffn_pre;
+        }
         cb(cur, "hc_ffn_pre", il);
 
         cur = build_norm(cur, layer.ffn_norm, nullptr, LLM_NORM_RMS, il);
@@ -1343,11 +1360,11 @@ llama_model_dflash::graph_dsv4::graph_dsv4(const llama_model & model, const llm_
         cur = ggml_add(ctx0, moe_out, ffn_shexp);
         cb(cur, "ffn_out", il);
 
-        inpL = build_hc_post(cur, residual, ffn_hc.post, ffn_hc.comb, il);
+        inpL = build_hc_post(cur, residual, post, comb, il);
         cb(inpL, "l_out", il);
     }
 
-    ggml_tensor * cur = build_hc_head(inpL, model.hc_head_fn, model.hc_head_scale, model.hc_head_base);
+    ggml_tensor * cur = build_head_fold(model, inpL);
     cb(cur, "hc_head", -1);
 
     // confidence head input: the reference scores the pre-norm collapsed hidden state
@@ -1495,7 +1512,9 @@ llama_model_dflash::graph_dsv41::graph_dsv41(const llama_model & model, const ll
         const auto & layer = model.layers[il];
 
         ggml_tensor * residual = inpL;
-        const hc_mixes attn_mix = build_hc_mixes(inpL, layer.hc_attn_fn, layer.hc_attn_scale, layer.hc_attn_base, il);
+        ggml_tensor * post = nullptr;
+        ggml_tensor * comb = nullptr;
+        ggml_tensor * attn_pre = build_hc_mixes(inpL, layer.hc_attn_fn, layer.hc_attn_scale, layer.hc_attn_base, &post, &comb, false, il);
 
         ggml_tensor * cur;
         if (pre_prev == nullptr) {
@@ -1550,14 +1569,13 @@ llama_model_dflash::graph_dsv41::graph_dsv41(const llama_model & model, const ll
             cb(cur, "attn_out", il);
         }
 
-        inpL = build_hc_post(cur, residual, attn_mix.post, attn_mix.comb, il);
+        inpL = build_hc_post(cur, residual, post, comb, il);
         cb(inpL, "hc_attn_post", il);
 
         residual = inpL;
-        const hc_mixes ffn_mix = build_hc_mixes(inpL, layer.hc_ffn_fn, layer.hc_ffn_scale, layer.hc_ffn_base, il);
-        pre_prev = ffn_mix.pre;
+        pre_prev = build_hc_mixes(inpL, layer.hc_ffn_fn, layer.hc_ffn_scale, layer.hc_ffn_base, &post, &comb, false, il);
 
-        cur = build_hc_pre(inpL, attn_mix.pre, il);
+        cur = build_hc_pre(inpL, attn_pre, il);
         cb(cur, "hc_ffn_pre", il);
 
         cur = build_norm(cur, layer.ffn_norm, nullptr, LLM_NORM_RMS, il);
@@ -1586,7 +1604,7 @@ llama_model_dflash::graph_dsv41::graph_dsv41(const llama_model & model, const ll
         cur = ggml_add(ctx0, moe_out, ffn_shexp);
         cb(cur, "ffn_out", il);
 
-        inpL = build_hc_post(cur, residual, ffn_mix.post, ffn_mix.comb, il);
+        inpL = build_hc_post(cur, residual, post, comb, il);
 
         ggml_tensor * l_out = ggml_reshape_2d(ctx0, inpL, n_embd*hc, n_tokens);
         cb(l_out, "l_out", il);

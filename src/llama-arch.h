@@ -317,6 +317,22 @@ enum llm_kv {
     LLM_KV_ATTENTION_KEY_LENGTH_MLA_SWA,
     LLM_KV_ATTENTION_VALUE_LENGTH_MLA_SWA,
     LLM_KV_ATTENTION_KV_LORA_RANK_SWA,
+    LLM_KV_ATTENTION_KV_SOURCE_LAYER_IDS,
+    LLM_KV_ATTENTION_INDEX_SOURCE_LAYER_IDS,
+    LLM_KV_ATTENTION_CANDIDATE_SOURCE_LAYER_ID,
+    LLM_KV_ATTENTION_CANDIDATE_BLOCK_SIZE,
+    LLM_KV_ATTENTION_CANDIDATE_TOPK_BLOCKS,
+    LLM_KV_ENGRAM_LAYER_IDS,
+    LLM_KV_ENGRAM_HEAD_DIM,
+    LLM_KV_ENGRAM_N_HEADS,
+    LLM_KV_ENGRAM_MAX_NGRAM_SIZE,
+    LLM_KV_ENGRAM_PAD_TOKEN_ID,
+    LLM_KV_ENGRAM_COMPRESSED_VOCAB_SIZE,
+    LLM_KV_ENGRAM_NUM_EMBEDDINGS,
+    LLM_KV_ENGRAM_PRIMES,
+    LLM_KV_ENGRAM_OFFSETS,
+    LLM_KV_ENGRAM_MULTIPLIERS,
+    LLM_KV_ENGRAM_TOKEN_MAP,
     LLM_KV_ATTENTION_INDEXER_HEAD_COUNT,
     LLM_KV_ATTENTION_INDEXER_KEY_LENGTH,
     LLM_KV_ATTENTION_INDEXER_TOP_K,
@@ -344,9 +360,6 @@ enum llm_kv {
     LLM_KV_HYPER_CONNECTION_MAGNITUDE,
     LLM_KV_HYPER_CONNECTION_LOW_RANK,
     LLM_KV_HYPER_CONNECTION_SINGLE_PASS,
-
-    LLM_KV_ENGRAM_PAD_TOKEN_ID,
-    LLM_KV_ENGRAM_TOKEN_MAP,
 
     LLM_KV_PLE_LAYERS,
     LLM_KV_PLE_NGRAM_SIZE,
@@ -676,6 +689,10 @@ enum llm_tensor {
     LLM_TENSOR_ATTN_V_B,
     LLM_TENSOR_ATTN_Q_A_NORM,
     LLM_TENSOR_ATTN_KV_A_NORM,
+    LLM_TENSOR_ENGRAM_EMBED,
+    LLM_TENSOR_ENGRAM_WKV,
+    LLM_TENSOR_ENGRAM_Q,
+    LLM_TENSOR_ENGRAM_K,
     LLM_TENSOR_HC_HEAD_FN,
     LLM_TENSOR_HC_HEAD_BASE,
     LLM_TENSOR_HC_HEAD_SCALE,
@@ -809,6 +826,7 @@ enum llm_tensor {
     LLM_TENSOR_NEXTN_HNORM,
     LLM_TENSOR_NEXTN_SHARED_HEAD_HEAD,
     LLM_TENSOR_NEXTN_SHARED_HEAD_NORM,
+    LLM_TENSOR_NEXTN_FC_HIDDEN,
     LLM_TENSOR_NEXTN_HC_HEAD_NORM, // qwen4exp: the MTP block's own hyper-connection mixer
     LLM_TENSOR_NEXTN_HC_HEAD_DOWN,
     LLM_TENSOR_NEXTN_HC_HEAD_UP,
@@ -929,5 +947,7 @@ bool llm_arch_is_recurrent      (const llm_arch & arch);
 bool llm_arch_is_hybrid         (const llm_arch & arch);
 bool llm_arch_is_diffusion      (const llm_arch & arch);
 bool llm_arch_supports_sm_tensor(const llm_arch & arch);
+// under -sm tensor, replicate the attention on every device and split only the FFN/experts
+bool llm_arch_sm_tensor_replicates_attention(const llm_arch & arch);
 bool llm_arch_supports_rs_rollback(const llm_arch & arch);
 bool llm_arch_supports_mixed_batch(const llm_arch & arch);

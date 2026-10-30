@@ -1,0 +1,41 @@
+0.00.022.692 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.024.450 W srv  server_setup: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.028.125 I srv    load_model: loading model '/home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/c8b5954a88c2775c546b92593eda40ea041d3176/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00003.gguf'
+0.00.029.112 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+[shexp-split] splitting shared experts across the TP group (LLAMA_SHEXP_SPLIT=0 to disable)
+0.09.245.958 W q8_repack: repacking q8_0 tensors on device 0 (first: output_hc_down.weight, 3481600 bytes)
+0.09.250.015 W q8_repack: repacking q8_0 tensors on device 1 (first: output_hc_down.weight, 3481600 bytes)
+0.09.255.781 W q8_repack: repacking q6_K tensors on device 0 (first: output.weight, 260736000 bytes)
+0.09.516.429 W q8_repack: repacking q6_K tensors on device 1 (first: output.weight, 260736000 bytes)
+0.09.833.315 W q8_repack: repacking iq4_nl tensors on device 0 (first: blk.0.ffn_down_exps.weight, 188743680 bytes)
+0.09.936.567 W q8_repack: repacking iq4_nl tensors on device 1 (first: blk.0.ffn_down_exps.weight, 283115520 bytes)
+0.19.233.427 W TP custom AR: peer access not available between GPU 0 and 1
+0.19.233.430 W TP custom AR: peer access not available between GPU 1 and 0
+0.19.233.430 W TP custom AR: disabled because full peer access is not available
+0.19.388.459 I cmn          init: llama threadpool init, n_threads = 4
+0.19.812.646 I common_speculative_init_result: loading draft model '/home/raistlin/.cache/models/qwen38-flash-next-mtp/MTP/mtp-Qwen3.8-Flash-Next-Q8_0.gguf'
+0.22.091.289 W TP custom AR: peer access not available between GPU 0 and 1
+0.22.091.292 W TP custom AR: peer access not available between GPU 1 and 0
+0.22.091.292 W TP custom AR: disabled because full peer access is not available
+0.22.159.373 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 100096, kv_unified = 'false'
+0.22.159.413 W set_sampler: backend sampling not supported with SPLIT_MODE_TENSOR; using CPU
+0.22.159.414 W spec common_specu: backend offload failed for seq_id=0; using CPU sampler
+0.23.016.632 W [repack-moe-fusion] type=q8_0 cols=2 fused up/gate mat-vec engaged
+0.23.045.734 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.23.045.761 I srv  server_run_i: model loaded
+0.23.045.763 I srv  server_on_li: listening on http://127.0.0.1:46875
+0.23.067.809 I slot get_availabl: id  0 | task -1 | selected slot by LRU, n_tokens = 0, t_last = -1
+0.23.067.869 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+0.23.934.521 W launch_gated_delta_net: gdn-chunk-snapshots: keep_rs chunked path TAKEN (default)
+0.27.223.084 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   1581, progress = 0.75, t =   4.16 s / 380.49 tokens per second
+0.28.415.164 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   2093, progress = 1.00, t =   5.35 s / 391.42 tokens per second
+0.31.621.218 I slot print_timing: id  0 | task 0 | n_gen =    123, tg =  40.35 t/s, tg_3s =  40.68 t/s
+0.33.988.409 I slot print_timing: id  0 | task 0 | prompt eval time =    5529.75 ms /  2097 tokens (    2.64 ms per token,   379.22 tokens per second)
+0.33.988.412 I slot print_timing: id  0 | task 0 |        eval time =    5390.77 ms /   256 tokens (   21.14 ms per token,    47.30 tokens per second)
+0.33.988.412 I slot print_timing: id  0 | task 0 |       total time =   10920.51 ms /  2353 tokens
+0.33.988.414 I slot print_timing: id  0 | task 0 |    graphs reused =         95
+0.33.988.414 I slot print_timing: id  0 | task 0 |   graph reallocs =          0    /     0        (same size) / (changed size)
+0.33.988.417 I slot print_timing: id  0 | task 0 | draft acceptance = 0.80928 (  157 accepted /   194 generated), mean len =  2.62
+0.33.988.435 I statistics        draft-mtp: #calls(b,p,g,a) =    1    103     97     97, #gen drafts =     97, #acc drafts =    85, #gen tokens =    194, #acc tokens =   157, #mean acc len = 2.62, #acc rate/pos = (0.876, 0.742), dur(b,p,g,a) = 0.008, 135.157, 918.439, 0.175 ms
+0.33.988.516 I slot      release: id  0 | task 0 | stop processing: n_tokens = 2352, truncated = 0
+0.33.989.880 I srv    operator(): operator(): cleaning up before exit...

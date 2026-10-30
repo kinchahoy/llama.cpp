@@ -1,0 +1,15 @@
+Working directory for relative paths: /home/raistlin/infer/mx-llama.cpp
+source /home/raistlin/amd-clean/env/therock.sh
+
+All runs used `env -u GGML_CUDA_TP_OVERLAP GGML_CUDA_FLASHNEXT_MOE=1 LLAMA_QWEN4_MTP_DEVICE=0 taskset -c 0-7 /usr/bin/time -v -o <per-run>.time timeout --kill-after=2s 55s .worktrees/experiment/catchup-418f905a4/build-catchup/bin/llama-cli` followed by the exact argv below. Time output also records CPU%, maximum RSS and exit status. `--threads 8 --threads-batch 8` is included for all runs.
+
+1. IQ3_XXS target, GPU experts, MTP off; output files `iq3-xxs.*`:
+-m /home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/c8b5954a88c2775c546b92593eda40ea041d3176/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00003.gguf --offline -lm dio -ngl 999 -dev ROCm0,ROCm1 -sm tensor -ts 1,1 -fa on -b 1024 -ub 512 -c 100096 -ctk q8_0 -ctv q8_0 --temp 0 --top-k 1 --seed 42 -f /home/raistlin/infer/mx-llama.cpp/flake.nix -n 128 -st --no-display-prompt --simple-io --log-verbosity 4 -t 8 -tb 8
+
+2. IQ4_XS target, first 8 MoE layers on CPU, op-offload default/on; output files `iq4-xs-cpu8-opoffload.*`:
+-m /home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/766911a6b7369840a91dbcd95f9f997acaab6cd6/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf --offline -lm dio -ngl 999 -ncmoe 8 -dev ROCm0,ROCm1 -sm tensor -ts 1,1 -fa on -b 1024 -ub 512 -c 100096 -ctk q8_0 -ctv q8_0 --temp 0 --top-k 1 --seed 42 -f /home/raistlin/infer/mx-llama.cpp/flake.nix -n 128 -st --no-display-prompt --simple-io --log-verbosity 4 -t 8 -tb 8
+
+3. Same IQ4_XS target and CPU MoE placement, op-offload disabled; output files `iq4-xs-cpu8-no-op-offload.*`:
+-m /home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/766911a6b7369840a91dbcd95f9f997acaab6cd6/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf --offline -lm dio -ngl 999 -ncmoe 8 --no-op-offload -dev ROCm0,ROCm1 -sm tensor -ts 1,1 -fa on -b 1024 -ub 512 -c 100096 -ctk q8_0 -ctv q8_0 --temp 0 --top-k 1 --seed 42 -f /home/raistlin/infer/mx-llama.cpp/flake.nix -n 128 -st --no-display-prompt --simple-io --log-verbosity 4 -t 8 -tb 8
+
+No MTP/speculative options or draft model/sidecar are used. The only difference between runs 2 and 3 is `--no-op-offload`.

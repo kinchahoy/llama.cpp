@@ -1,0 +1,34 @@
+Agent 1: span 3883 ms busy 2259 ms kernels 2510
+   43.7%   1698.0 ms n=  493 mmq_gemm_repacked
+    5.3%    206.5 ms n=   48 gated_delta_net_chunked_cuda
+    1.8%     71.0 ms n=   48 concat_non_cont
+    1.7%     65.6 ms n=  493 quantize_mmq_q8_1
+    1.3%     49.0 ms n=  304 rms_norm_f32
+    1.1%     44.6 ms n=   16 flash_attn_tile
+    0.7%     27.3 ms n=  224 k_bin_bcast
+    0.7%     25.9 ms n=  127 unary_gated_op_kernel
+    0.6%     22.1 ms n=  127 ggml_cuda_ar_add_kernel
+    0.4%     15.3 ms n=   48 ssm_conv_long_token_f32
+    0.3%      9.9 ms n=  127 convert_unary_cont_vec4
+    0.1%      5.6 ms n=    1 ggml_cuda_ar_kernel
+    0.1%      5.4 ms n=   16 flash_attn_combine_results
+    0.1%      4.5 ms n=   64 cpy_scalar
+    0.1%      3.9 ms n=   32 rope_multi
+    0.0%      1.1 ms n=    1 mul_mat_vec_q
+Agent 2: span 3883 ms busy 2625 ms kernels 2510
+   52.0%   2017.7 ms n=  493 mmq_gemm_repacked
+    6.3%    243.4 ms n=   48 gated_delta_net_chunked_cuda
+    1.9%     74.6 ms n=   48 concat_non_cont
+    1.7%     67.2 ms n=  493 quantize_mmq_q8_1
+    1.3%     50.8 ms n=   16 flash_attn_tile
+    1.2%     47.3 ms n=  304 rms_norm_f32
+    0.7%     28.2 ms n=  127 unary_gated_op_kernel
+    0.7%     27.1 ms n=  224 k_bin_bcast
+    0.6%     22.9 ms n=  127 ggml_cuda_ar_add_kernel
+    0.4%     16.2 ms n=   48 ssm_conv_long_token_f32
+    0.3%      9.9 ms n=  127 convert_unary_cont_vec4
+    0.1%      5.5 ms n=   16 flash_attn_combine_results
+    0.1%      5.2 ms n=   64 cpy_scalar
+    0.1%      4.6 ms n=   32 rope_multi
+    0.0%      1.1 ms n=    1 mul_mat_vec_q
+    0.0%      0.8 ms n=   32 k_set_rows

@@ -1,0 +1,304 @@
+[  0%] Building CXX object vendor/hash/CMakeFiles/vendor-hash.dir/hash.cpp.o
+[  0%] Building C object vendor/hash/CMakeFiles/vendor-hash.dir/xxhash/xxhash.c.o
+[  1%] Building CXX object vendor/cpp-httplib/CMakeFiles/cpp-httplib.dir/httplib.cpp.o
+[  1%] Building C object vendor/hash/CMakeFiles/vendor-hash.dir/sha256/sha256.c.o
+[  1%] Building CXX object vendor/hash/CMakeFiles/vendor-hash.dir/sha1/sha1.c.o
+[  1%] Building C object ggml/src/CMakeFiles/ggml-base.dir/ggml.c.o
+[  1%] Building CXX object common/CMakeFiles/llama-common-base.dir/build-info.cpp.o
+[  1%] Provisioning UI assets
+-- UI: downloading from b12002: https://huggingface.co/buckets/ggml-org/llama-ui/resolve/b12002/dist.tar.gz
+-- UI: download dist.tar.gz.sha256 from b12002 failed: "Could not resolve hostname"
+-- UI: downloading from latest: https://huggingface.co/buckets/ggml-org/llama-ui/resolve/latest/dist.tar.gz
+-- UI: download dist.tar.gz.sha256 from latest failed: "Could not resolve hostname"
+-- UI: HF download failed
+CMake Warning at /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/scripts/ui-assets.cmake:584 (message):
+  UI: no assets available - building without an embedded UI.  In a
+  disconnected environment, download the pre-built UI from a llama.cpp
+  release at https://github.com/ggml-org/llama.cpp/releases and extract to
+  tools/ui/dist.
+
+
+-- UI: assets unchanged, skipping embedding
+[  1%] Built target llama-ui-assets
+[  3%] Building CXX object ggml/src/CMakeFiles/ggml-base.dir/ggml.cpp.o
+[  3%] Building C object ggml/src/CMakeFiles/ggml-base.dir/ggml-alloc.c.o
+[  3%] Building CXX object ggml/src/CMakeFiles/ggml-base.dir/ggml-backend.cpp.o
+[  3%] Linking CXX static library libllama-common-base.a
+[  3%] Building CXX object tools/ui/CMakeFiles/llama-ui.dir/ui.cpp.o
+[  3%] Building CXX object ggml/src/CMakeFiles/ggml-base.dir/ggml-backend-meta.cpp.o
+[  3%] Built target llama-common-base
+[  3%] Building CXX object ggml/src/CMakeFiles/ggml-base.dir/ggml-opt.cpp.o
+[  4%] Linking CXX static library libllama-ui.a
+[  4%] Built target llama-ui
+[  4%] Building CXX object ggml/src/CMakeFiles/ggml-base.dir/ggml-threading.cpp.o
+[  6%] Building C object ggml/src/CMakeFiles/ggml-base.dir/ggml-quants.c.o
+[  6%] Linking CXX static library libvendor-hash.a
+[  6%] Built target vendor-hash
+[  6%] Building CXX object ggml/src/CMakeFiles/ggml-base.dir/gguf.cpp.o
+[  6%] Linking CXX shared library ../../bin/libggml-base.so
+[  6%] Built target ggml-base
+[  6%] Building C object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/ggml-cpu.c.o
+[  6%] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/ggml-cpu.cpp.o
+[  6%] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/repack.cpp.o
+[  8%] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/hbm.cpp.o
+[  8%] Building C object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/quants.c.o
+[  8%] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/traits.cpp.o
+[  8%] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/amx/amx.cpp.o
+[  8%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/acc.cu.o
+[  8%] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/amx/mmq.cpp.o
+[  8%] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/tiled/tiled.cpp.o
+[  9%] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/tiled/tiled-kernel.cpp.o
+[  9%] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/binary-ops.cpp.o
+[  9%] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/unary-ops.cpp.o
+[  9%] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/vec.cpp.o
+[  9%] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/ops.cpp.o
+[  9%] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/llamafile/sgemm.cpp.o
+[  9%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/add-id.cu.o
+[ 11%] Building C object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/arch/x86/quants.c.o
+[ 11%] Building CXX object ggml/src/CMakeFiles/ggml-cpu.dir/ggml-cpu/arch/x86/repack.cpp.o
+[ 11%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/allreduce.cu.o
+[ 12%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/arange.cu.o
+[ 12%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/argmax.cu.o
+[ 12%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/argsort.cu.o
+[ 12%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/binbcast.cu.o
+[ 12%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/clamp.cu.o
+[ 12%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/col2im-1d.cu.o
+[ 12%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/concat.cu.o
+[ 14%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/conv-transpose-1d.cu.o
+[ 14%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/conv2d-dw.cu.o
+[ 14%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/conv2d-transpose.cu.o
+[ 14%] Linking CXX static library libcpp-httplib.a
+[ 14%] Built target cpp-httplib
+[ 14%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/conv2d.cu.o
+[ 14%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/conv3d.cu.o
+[ 14%] Linking CXX shared library ../../bin/libggml-cpu.so
+[ 14%] Built target ggml-cpu
+[ 14%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/convert.cu.o
+[ 16%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/count-equal.cu.o
+[ 16%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/cpy.cu.o
+[ 16%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/cross-entropy-loss.cu.o
+[ 16%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/cumsum.cu.o
+[ 16%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/diag.cu.o
+[ 16%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/diagmask.cu.o
+[ 17%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/dsv4-hc.cu.o
+[ 17%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/fattn-tile.cu.o
+[ 17%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/fattn.cu.o
+[ 17%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/fill.cu.o
+[ 17%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/fwht.cu.o
+[ 17%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/gated-delta-net-mma.cu.o
+[ 19%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/gated_delta_net.cu.o
+[ 19%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/gated_delta_net_chunk.cu.o
+[ 19%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/getrows.cu.o
+[ 19%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/ggml-cuda.cu.o
+[ 19%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/gla.cu.o
+[ 19%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/im2col.cu.o
+[ 20%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/lightning-indexer.cu.o
+[ 20%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/mean.cu.o
+[ 20%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/mmf.cu.o
+[ 20%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/mmid.cu.o
+[ 20%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/mmq.cu.o
+[ 20%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/mmvf.cu.o
+[ 22%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/mmvq.cu.o
+[ 22%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/moe-weighted-reduction.cu.o
+[ 22%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/norm.cu.o
+[ 22%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/opt-step-adamw.cu.o
+[ 22%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/opt-step-sgd.cu.o
+[ 22%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/out-prod.cu.o
+[ 22%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/pad.cu.o
+[ 24%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/pad_reflect_1d.cu.o
+[ 24%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/pool1d.cu.o
+[ 24%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/pool2d.cu.o
+[ 24%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/q8_repack/buffer.cu.o
+[ 24%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/q8_repack/mul-mat-id.cu.o
+[ 24%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/q8_repack/mul-mat.cu.o
+[ 25%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/q8_repack/repack-common.cu.o
+[ 25%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/quantize.cu.o
+[ 25%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/roll.cu.o
+[ 25%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/rope.cu.o
+[ 25%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/scale.cu.o
+[ 25%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/set-rows.cu.o
+[ 27%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/set.cu.o
+ld.lld: warning: <unknown>:0:0: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL17mmq_gemm_repackedILb1ELi2ELi4EL9ggml_type7EEvPKhPK10block_q8_1PfjjjPKiS8_S8_S8_PK16repack_tile_metajmj': desired occupancy was 2, final occupancy is 1
+ld.lld: warning: <unknown>:0:0: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL17mmq_gemm_repackedILb1ELi2ELi4EL9ggml_type13EEvPKhPK10block_q8_1PfjjjPKiS8_S8_S8_PK16repack_tile_metajmj': desired occupancy was 2, final occupancy is 1
+ld.lld: warning: <unknown>:0:0: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL17mmq_gemm_repackedILb1ELi2ELi4EL9ggml_type12EEvPKhPK10block_q8_1PfjjjPKiS8_S8_S8_PK16repack_tile_metajmj': desired occupancy was 2, final occupancy is 1
+[ 27%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/snake.cu.o
+[ 27%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/softcap.cu.o
+[ 27%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/softmax.cu.o
+[ 27%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/solve_tri.cu.o
+[ 27%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/ssm-conv.cu.o
+ld.lld: warning: <unknown>:0:0: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering
+ld.lld: warning: <unknown>:0:0: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering
+ld.lld: warning: <unknown>:0:0: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering
+ld.lld: warning: <unknown>:0:0: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering
+ld.lld: warning: <unknown>:0:0: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering
+ld.lld: warning: <unknown>:0:0: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering
+ld.lld: warning: <unknown>:0:0: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering
+ld.lld: warning: <unknown>:0:0: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering
+ld.lld: warning: <unknown>:0:0: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering
+ld.lld: warning: <unknown>:0:0: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering
+ld.lld: warning: <unknown>:0:0: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering
+ld.lld: warning: <unknown>:0:0: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering
+[ 29%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/ssm-scan.cu.o
+[ 29%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/sum.cu.o
+[ 29%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/sumrows.cu.o
+ld.lld: warning: <unknown>:0:0: loop not unrolled: the optimizer was unable to perform the requested transformation; the transformation might be disabled or specified as part of an unsupported transformation ordering
+[ 29%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/top-k-mask.cu.o
+[ 29%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/top-k.cu.o
+[ 29%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/topk-moe.cu.o
+[ 30%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/tp-allreduce.cu.o
+[ 30%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/tri.cu.o
+[ 30%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/tsembd.cu.o
+[ 30%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/unary.cu.o
+[ 30%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/upscale.cu.o
+[ 30%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/wkv.cu.o
+[ 32%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-tile-instance-dkq112-dv112.cu.o
+[ 32%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-tile-instance-dkq128-dv128.cu.o
+[ 32%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-tile-instance-dkq192-dv128.cu.o
+[ 32%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-tile-instance-dkq256-dv256.cu.o
+[ 32%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-tile-instance-dkq320-dv256.cu.o
+[ 32%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-tile-instance-dkq40-dv40.cu.o
+[ 32%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-tile-instance-dkq512-dv512.cu.o
+[ 33%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-tile-instance-dkq576-dv512.cu.o
+[ 33%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-tile-instance-dkq64-dv64.cu.o
+[ 33%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-tile-instance-dkq72-dv72.cu.o
+[ 33%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-tile-instance-dkq80-dv80.cu.o
+ld.lld: warning: <unknown>:0:0: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL17mmq_gemm_repackedILb0ELi2ELi4EL9ggml_type13EEvPKhPK10block_q8_1PfjjjPKiS8_S8_S8_PK16repack_tile_metajmj': desired occupancy was 2, final occupancy is 1
+ld.lld: warning: <unknown>:0:0: failed to meet occupancy target given by 'amdgpu-waves-per-eu' in '_ZL17mmq_gemm_repackedILb0ELi2ELi4EL9ggml_type12EEvPKhPK10block_q8_1PfjjjPKiS8_S8_S8_PK16repack_tile_metajmj': desired occupancy was 2, final occupancy is 1
+[ 33%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-tile-instance-dkq96-dv96.cu.o
+[ 33%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_1-ncols2_16.cu.o
+[ 35%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_1-ncols2_32.cu.o
+[ 35%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_1-ncols2_8.cu.o
+[ 35%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_16-ncols2_1.cu.o
+[ 35%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_16-ncols2_2.cu.o
+[ 35%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_16-ncols2_4.cu.o
+[ 35%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_2-ncols2_16.cu.o
+[ 37%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_2-ncols2_32.cu.o
+[ 37%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_2-ncols2_4.cu.o
+[ 37%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_2-ncols2_8.cu.o
+[ 37%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_32-ncols2_1.cu.o
+[ 37%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_32-ncols2_2.cu.o
+[ 37%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_4-ncols2_16.cu.o
+[ 38%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_4-ncols2_2.cu.o
+[ 38%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_4-ncols2_4.cu.o
+[ 38%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_4-ncols2_8.cu.o
+[ 38%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_64-ncols2_1.cu.o
+[ 38%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_8-ncols2_1.cu.o
+[ 38%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_8-ncols2_2.cu.o
+[ 40%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_8-ncols2_4.cu.o
+[ 40%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-mma-f16-instance-ncols1_8-ncols2_8.cu.o
+[ 40%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-iq1_s.cu.o
+[ 40%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-iq2_s.cu.o
+[ 40%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-iq2_xs.cu.o
+[ 40%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-iq2_xxs.cu.o
+[ 41%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-iq3_s.cu.o
+[ 41%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-iq3_xxs.cu.o
+[ 41%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-iq4_nl.cu.o
+[ 41%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-iq4_xs.cu.o
+[ 41%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-mxfp4.cu.o
+[ 41%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-nvfp4.cu.o
+[ 43%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-q1_0.cu.o
+[ 43%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-q2_0.cu.o
+[ 43%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-q2_k.cu.o
+[ 43%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-q3_k.cu.o
+[ 43%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-q4_0.cu.o
+[ 43%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-q4_1.cu.o
+[ 43%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-q4_k.cu.o
+[ 45%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-q5_0.cu.o
+[ 45%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-q5_1.cu.o
+[ 45%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-q5_k.cu.o
+[ 45%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-q6_k.cu.o
+[ 45%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmq-instance-q8_0.cu.o
+[ 45%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_1.cu.o
+[ 46%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_10.cu.o
+[ 46%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_11.cu.o
+[ 46%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_12.cu.o
+[ 46%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_13.cu.o
+[ 46%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_14.cu.o
+[ 46%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_15.cu.o
+[ 48%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_16.cu.o
+[ 48%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_2.cu.o
+[ 48%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_3.cu.o
+[ 48%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_4.cu.o
+[ 48%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_5.cu.o
+[ 48%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_6.cu.o
+[ 50%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_7.cu.o
+[ 50%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_8.cu.o
+[ 50%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/mmf-instance-ncols_9.cu.o
+[ 50%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-vec-instance-f16-f16.cu.o
+[ 50%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-vec-instance-q4_0-q4_0.cu.o
+[ 50%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-vec-instance-q8_0-q8_0.cu.o
+[ 51%] Building HIP object ggml/src/ggml-hip/CMakeFiles/ggml-hip.dir/__/ggml-cuda/template-instances/fattn-vec-instance-bf16-bf16.cu.o
+[ 51%] Linking HIP shared library ../../../bin/libggml-hip.so
+[ 51%] Built target ggml-hip
+[ 51%] Building CXX object ggml/src/CMakeFiles/ggml.dir/ggml-backend-dl.cpp.o
+[ 51%] Building CXX object ggml/src/CMakeFiles/ggml.dir/ggml-backend-reg.cpp.o
+[ 51%] Linking CXX shared library ../../bin/libggml.so
+[ 51%] Built target ggml
+[ 51%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_10_cxx.cxx.o
+[ 53%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_8_cxx.cxx.o
+[ 53%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_9_cxx.cxx.o
+[ 53%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_7_cxx.cxx.o
+[ 53%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_6_cxx.cxx.o
+[ 53%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_5_cxx.cxx.o
+[ 53%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_4_cxx.cxx.o
+[ 53%] Building CXX object src/CMakeFiles/llama.dir/Unity/unity_3_cxx.cxx.o
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/build-catchup/src/CMakeFiles/llama.dir/Unity/unity_10_cxx.cxx:4:
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/spark2-5.cpp:1:
+/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/models.h:1387:9: error: unknown type name 'hc_mixes'
+ 1387 |         hc_mixes build_hc_mixes(
+      |         ^
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/build-catchup/src/CMakeFiles/llama.dir/Unity/unity_8_cxx.cxx:4:
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/phi2.cpp:1:
+/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/models.h:1387:9: error: unknown type name 'hc_mixes'
+ 1387 |         hc_mixes build_hc_mixes(
+      |         ^
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/build-catchup/src/CMakeFiles/llama.dir/Unity/unity_3_cxx.cxx:4:
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/gemma2.cpp:1:
+/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/models.h:1387:9: error: unknown type name 'hc_mixes'
+ 1387 |         hc_mixes build_hc_mixes(
+      |         ^
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/build-catchup/src/CMakeFiles/llama.dir/Unity/unity_5_cxx.cxx:4:
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/kimi-linear.cpp:1:
+/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/models.h:1387:9: error: unknown type name 'hc_mixes'
+ 1387 |         hIn file included from c_m/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/build-catchup/src/CMakeFiles/llama.dir/Unity/unity_4_cxx.cxxi:x4es:
+ In file included from b/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/grok.cppu:i1l:
+d_hc_mixes(/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/models.h
+:      1387| :        ^9
+: error: unknown type name 'hc_mixes'
+ 1387 |         hc_mixes build_hc_mixes(
+      |         ^
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/build-catchup/src/CMakeFiles/llama.dir/Unity/unity_7_cxx.cxx:4:
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/muse-spark.cpp:1:
+/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/models.h:1387:9: error: unknown type name 'hc_mixes'
+ 1387 |         hc_mixes build_hc_mixes(
+      |         ^
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/build-catchup/src/CMakeFiles/llama.dir/Unity/unity_9_cxx.cxx:4:
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/qwen3next.cpp:1:
+/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/models.h:1387:9: error: unknown type name 'hc_mixes'
+ 1387 |         hc_mixes build_hc_mixes(
+      |         ^
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/build-catchup/src/CMakeFiles/llama.dir/Unity/unity_6_cxx.cxx:4:
+In file included from /home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/mamba.cpp:1:
+/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/src/models/models.h:1387:9: error: unknown type name 'hc_mixes'
+ 1387 |         hc_mixes build_hc_mixes(
+      |         ^
+1 error generated.
+gmake[3]: *** [src/CMakeFiles/llama.dir/build.make:79: src/CMakeFiles/llama.dir/Unity/unity_10_cxx.cxx.o] Error 1
+gmake[3]: *** Waiting for unfinished jobs....
+1 error generated.
+gmake[3]: *** [src/CMakeFiles/llama.dir/build.make:121: src/CMakeFiles/llama.dir/Unity/unity_7_cxx.cxx.o] Error 1
+1 error generated.
+gmake[3]: *** [src/CMakeFiles/llama.dir/build.make:107: src/CMakeFiles/llama.dir/Unity/unity_8_cxx.cxx.o] Error 1
+1 error generated.
+gmake[3]: *** [src/CMakeFiles/llama.dir/build.make:163: src/CMakeFiles/llama.dir/Unity/unity_4_cxx.cxx.o] Error 1
+1 error generated.
+gmake[3]: *** [src/CMakeFiles/llama.dir/build.make:149: src/CMakeFiles/llama.dir/Unity/unity_5_cxx.cxx.o] Error 1
+1 error generated.
+gmake[3]: *** [src/CMakeFiles/llama.dir/build.make:135: src/CMakeFiles/llama.dir/Unity/unity_6_cxx.cxx.o] Error 1
+1 error generated.
+gmake[3]: *** [src/CMakeFiles/llama.dir/build.make:93: src/CMakeFiles/llama.dir/Unity/unity_9_cxx.cxx.o] Error 1
+1 error generated.
+gmake[3]: *** [src/CMakeFiles/llama.dir/build.make:177: src/CMakeFiles/llama.dir/Unity/unity_3_cxx.cxx.o] Error 1
+gmake[2]: *** [CMakeFiles/Makefile2:2664: src/CMakeFiles/llama.dir/all] Error 2
+gmake[1]: *** [CMakeFiles/Makefile2:6476: tools/cli/CMakeFiles/llama-cli.dir/rule] Error 2
+gmake: *** [Makefile:1921: llama-cli] Error 2

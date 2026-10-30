@@ -1,0 +1,31 @@
+dict_keys(['Kind', 'Agent_Id', 'Queue_Id', 'Stream_Id', 'Thread_Id', 'Dispatch_Id', 'Kernel_Id', 'Kernel_Name', 'Correlation_Id', 'Start_Timestamp', 'End_Timestamp', 'LDS_Block_Size', 'Scratch_Size', 'VGPR_Count', 'Accum_VGPR_Count', 'SGPR_Count', 'Workgroup_Size_X', 'Workgroup_Size_Y', 'Workgroup_Size_Z', 'Grid_Size_X', 'Grid_Size_Y', 'Grid_Size_Z'])
+agent Agent 1: kernels 121615 span 2695.1 ms busy 2040.4 ms (76%)
+    46.5%   1252.52 ms  n= 28080  avg=   44.6us  void mul_mat_vec_q8_0_repacked
+     9.8%    264.58 ms  n=  8320  avg=   31.8us  void ggml_cuda_ar_kernel
+     4.7%    126.20 ms  n= 19825  avg=    6.4us  void rms_norm_f32
+     2.6%     70.49 ms  n= 16705  avg=    4.2us  void quantize_q8_1
+     2.3%     62.02 ms  n=    65  avg=  954.2us  void mul_mat_vec_q
+     1.8%     49.06 ms  n= 11440  avg=    4.3us  void k_bin_bcast
+     1.1%     30.15 ms  n=  7280  avg=    4.1us  void unary_gated_op_kernel
+     1.0%     26.96 ms  n=  3120  avg=    8.6us  void gated_delta_net_cuda
+     0.9%     24.18 ms  n=  1040  avg=   23.3us  void flash_attn_tile
+     0.9%     23.77 ms  n=  3120  avg=    7.6us  void k_get_rows_float_vec
+     0.7%     19.89 ms  n=  4160  avg=    4.8us  void cpy_scalar
+     0.7%     17.84 ms  n=  2080  avg=    8.6us  void rope_multi
+     0.6%     16.73 ms  n=  3250  avg=    5.1us  void k_get_rows_float
+     0.5%     13.25 ms  n=  3120  avg=    4.2us  void ssm_conv_f32
+agent Agent 2: kernels 121614 span 2673.3 ms busy 2020.5 ms (76%)
+    48.6%   1298.74 ms  n= 28080  avg=   46.3us  void mul_mat_vec_q8_0_repacked
+     5.5%    147.82 ms  n= 19825  avg=    7.5us  void rms_norm_f32
+     4.1%    110.78 ms  n=  8320  avg=   13.3us  void ggml_cuda_ar_kernel
+     3.0%     80.32 ms  n= 16705  avg=    4.8us  void quantize_q8_1
+     2.4%     63.76 ms  n=    65  avg=  980.9us  void mul_mat_vec_q
+     2.4%     63.47 ms  n= 11440  avg=    5.5us  void k_bin_bcast
+     1.4%     36.11 ms  n=  7280  avg=    5.0us  void unary_gated_op_kernel
+     1.2%     31.25 ms  n=  3120  avg=   10.0us  void gated_delta_net_cuda
+     1.1%     28.48 ms  n=  3120  avg=    9.1us  void k_get_rows_float_vec
+     0.9%     24.61 ms  n=  4160  avg=    5.9us  void cpy_scalar
+     0.9%     24.42 ms  n=  1040  avg=   23.5us  void flash_attn_tile
+     0.8%     22.12 ms  n=  3250  avg=    6.8us  void k_get_rows_float
+     0.7%     18.74 ms  n=  2080  avg=    9.0us  void rope_multi
+     0.6%     15.94 ms  n=  3120  avg=    5.1us  void ssm_conv_f32

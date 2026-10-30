@@ -1,0 +1,93 @@
+diff --git a/ggml/src/ggml-cuda/common.cuh b/ggml/src/ggml-cuda/common.cuh
+index acd812cc4..c35d57c9c 100644
+--- a/ggml/src/ggml-cuda/common.cuh
++++ b/ggml/src/ggml-cuda/common.cuh
+@@ -1460,6 +1460,7 @@ struct ggml_cuda_tp_overlap_state {
+     bool        enabled       = false;
+     bool        active        = false;
+     void *      dst           = nullptr;
++    int64_t     compute_slab_cols = 1024;
+     int64_t     slab_elements = 0;
+     cudaEvent_t fork          = nullptr;
+     cudaEvent_t ready[2]      = {};
+diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
+index b05acaa96..208824cf5 100644
+--- a/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -1513,11 +1513,23 @@ static void ggml_backend_cuda_comm_init_internal(ggml_backend_cuda_comm_context
+ #ifdef GGML_USE_HIP
+         const char * overlap = getenv("GGML_CUDA_TP_OVERLAP");
+         if (overlap != nullptr && strcmp(overlap, "1") == 0) {
++            int64_t compute_slab_cols = 1024;
++            const char * slab_cols = getenv("GGML_CUDA_TP_OVERLAP_SLAB_COLS");
++            if (slab_cols != nullptr) {
++                const int64_t value = strtoll(slab_cols, nullptr, 10);
++                if (value == 256 || value == 512 || value == 1024 || value == 2048) {
++                    compute_slab_cols = value;
++                } else {
++                    GGML_LOG_WARN("%s: ignoring invalid GGML_CUDA_TP_OVERLAP_SLAB_COLS=%s\n", __func__, slab_cols);
++                }
++            }
+             for (ggml_backend_t backend : ret->backends) {
+                 auto * cuda_ctx = static_cast<ggml_backend_cuda_context *>(backend->context);
+                 cuda_ctx->tp_overlap.enabled = true;
++                cuda_ctx->tp_overlap.compute_slab_cols = compute_slab_cols;
+             }
+-            GGML_LOG_INFO("%s: enabled exact Q8 two-slab TP overlap\n", __func__);
++            GGML_LOG_INFO("%s: enabled exact Q8 two-half TP overlap with %lld-column compute slabs\n",
++                          __func__, (long long) compute_slab_cols);
+         }
+ #endif
+         return;
+diff --git a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
+index 25f8e9fc5..b5b652f55 100644
+--- a/ggml/src/ggml-cuda/mmq.cu
++++ b/ggml/src/ggml-cuda/mmq.cu
+@@ -153,8 +153,10 @@ void ggml_cuda_mul_mat_q(
+             ne2 == 1 && ne3 == 1;
+ 
+         if (tp_overlap) {
+-            constexpr int64_t slab_cols = 1024;
+-            constexpr int     stream_no = 1;
++            constexpr int64_t owner_cols = 1024;
++            constexpr int     stream_no  = 1;
++            const int64_t     slab_cols  = ctx.tp_overlap.compute_slab_cols;
++            const int         n_slabs    = 2048 / slab_cols;
+ 
+             ggml_cuda_tp_overlap_state & overlap = ctx.tp_overlap;
+             if (overlap.fork == nullptr) {
+@@ -170,9 +172,9 @@ void ggml_cuda_mul_mat_q(
+             CUDA_CHECK(cudaStreamWaitEvent(compute_stream, overlap.fork, 0));
+ 
+             const size_t nbytes_slab_q8_1 = workspace_nbytes(slab_cols);
+-            ggml_cuda_pool_alloc<char> slab_q8_1[2];
+-            for (ggml_cuda_pool_alloc<char> & allocation : slab_q8_1) {
+-                allocation.alloc(ctx.pool(), nbytes_slab_q8_1);
++            ggml_cuda_pool_alloc<char> slab_q8_1[8];
++            for (int slab = 0; slab < n_slabs; ++slab) {
++                slab_q8_1[slab].alloc(ctx.pool(), nbytes_slab_q8_1);
+             }
+ 
+             const int64_t s11 = src1->nb[1] / ts_src1;
+@@ -192,13 +194,19 @@ void ggml_cuda_mul_mat_q(
+                     1, 1, s03, 0, s3,
+                     slab_cols};
+                 ggml_cuda_mul_mat_q_switch_type(ctx, args, compute_stream);
+-                CUDA_CHECK(cudaEventRecord(overlap.ready[slab], compute_stream));
++                const int64_t col1 = col0 + slab_cols;
++                if (col0 < owner_cols && col1 >= owner_cols) {
++                    CUDA_CHECK(cudaEventRecord(overlap.ready[0], compute_stream));
++                }
++                if (col1 == 2 * owner_cols) {
++                    CUDA_CHECK(cudaEventRecord(overlap.ready[1], compute_stream));
++                }
+             }
+ 
+             ctx.curr_stream_no    = 0;
+             overlap.active        = true;
+             overlap.dst           = dst_d;
+-            overlap.slab_elements = ne0 * slab_cols;
++            overlap.slab_elements = ne0 * owner_cols;
+             return;
+         }
+ #endif

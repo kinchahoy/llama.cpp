@@ -1,0 +1,7 @@
+source /home/raistlin/amd-clean/env/therock.sh
+GGML_CUDA_FLASHNEXT_MOE=1
+LLAMA_QWEN4_MTP_DEVICE=0 (no MTP/speculation flags or sidecar loaded)
+GGML_CUDA_TP_OVERLAP unset
+LLAMA_PLE_SHARD unset (default host PLE placement)
+taskset -c 0-7; -t 8 -tb 8 (same P-core affinity and worker counts as IQ3 control)
+Only benchmark setting changed from IQ3 control: -sm tensor -> -sm layer.

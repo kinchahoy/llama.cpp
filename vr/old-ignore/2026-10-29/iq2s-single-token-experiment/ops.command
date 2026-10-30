@@ -1,0 +1,1 @@
+/home/raistlin/infer/mx-llama.cpp/.worktrees/experiment/catchup-418f905a4/build-catchup/bin/test-backend-ops test -b ROCm0 -o MUL_MAT_ID\,MUL_MAT_VEC_FUSION -p type_a=iq2_s.\*n=1\,k=256\,\|type=iq2_s.\*m=1\,n=32\,k=256\,use_id=1 

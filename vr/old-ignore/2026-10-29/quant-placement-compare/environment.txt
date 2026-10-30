@@ -1,0 +1,7 @@
+source /home/raistlin/amd-clean/env/therock.sh
+GGML_CUDA_FLASHNEXT_MOE=1
+LLAMA_QWEN4_MTP_DEVICE=0 (explicitly off)
+GGML_CUDA_TP_OVERLAP unset
+OMP_NUM_THREADS unset
+--threads 8 --threads-batch 8; each process taskset to CPUs 0-7 (verified performance-core CPUs)
+All three runs use log verbosity 4, identical target prompt, context, KV, batch, sampler, seed, GPU selection and thread affinity. No MTP/speculative flags or sidecar are used.
