@@ -3,7 +3,7 @@
 // Small tiled F32 GEMM for skinny src0 (HC inject, ssm alpha/beta: M < 128): dst[m, n] = sum_k src0[m, k] * src1[n, k]
 // Both inputs are contiguous along k. Each thread makes a 4x4 output tile.
 // Split-K gives enough waves for 512x512 outputs. rocBLAS is slow for these shapes.
-// Opt-in (GGML_CUDA_SGEMM_F32=1): the sum order differs from rocBLAS and the model routing is sensitive to it.
+// GCN only. The sum order differs from rocBLAS; Flash Next KLD stays at its noise floor. GGML_CUDA_SGEMM_F32=0 disables.
 
 #define SGEMM_BK 16
 #define SGEMM_PAD 4
@@ -98,9 +98,9 @@ static __global__ void sgemm_f32_reduce(const float * __restrict__ P, float * __
 bool ggml_cuda_should_use_sgemm_f32(const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * dst) {
     static const bool enabled = [] {
         const char * e = getenv("GGML_CUDA_SGEMM_F32");
-        return e != nullptr && atoi(e) != 0;
+        return e == nullptr || atoi(e) != 0;
     }();
-    return enabled
+    return enabled && GGML_CUDA_CC_IS_GCN(ggml_cuda_info().devices[ggml_cuda_get_device()].cc)
         && src0->type == GGML_TYPE_F32 && src1->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32
         && src0->ne[2] == 1 && src0->ne[3] == 1 && src1->ne[2] == 1 && src1->ne[3] == 1
         && src0->nb[0] == sizeof(float) && src1->nb[0] == sizeof(float)
