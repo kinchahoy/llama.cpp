@@ -27,6 +27,17 @@ Use the source map above and this table to decide what needs attention each week
 | Speculative replay and state | Draft repack, split KV, per-sequence taps, rollback snapshots and output stride; rounded ubatch 2048 can need 2049 tap rows | Targeted MTP/DFlash output and rollback checks, with approval; plain generation does not cover this | [Rebuild](old-ignore/2026-10-29/rebuild/README.md), [scripts](scripts/README.md); retire fixes when upstream preserves these invariants |
 | Model integration | Host PLE placement, shared/tied output split and MTP mirrors; reconcile loader, graph and memory callers | Generation for affected cached models; report unavailable coverage | [Removed and changed](#2026-10-29-rebuild-removed-and-changed); prefer upstream model implementations and do not restore removed fork-only models |
 
+### Silent merge traps (found on the 4b77dee05 merge, 2026-11-05)
+
+These merged or compiled cleanly but were wrong. Check them first on each merge.
+
+- MMQ MoE now uses the linear `tile_spec` layout from the ids helper (upstream #31047). The kernel J must equal the `J_best` that built `tile_spec`, so J is selected once, in `ggml_cuda_mmq_get_J_best` (it also holds the gfx906 J > 64 cap). Do not add a second J selection in `mul_mat_q_switch_J`.
+- The repack and grouped-MoE paths still read per-expert `expert_bounds`. The `ggml_cuda_launch_mm_ids_helper` overload in `mmid.cu` that writes bounds instead of tiles serves them.
+- Upstream `build_conv_state_store` writes only `min(n_tokens, K)` rollback slots. Non-ring rollback is therefore bounded by `cell.rs_max`; ring mode keeps `valid_depth`. The fork keeps its `s_write` (delta-net) and `s_write_conv` (qwen4exp) ring branches.
+- Upstream `layer_inp_dev` is the DFlash device feature buffer. The fork per-layer persistent taps are `layer_inp_tap`; keep the names apart.
+- The upstream DFlash device feature path is opt-in (`LLAMA_DFLASH_DEV=1`), so the fork tap and accum pipeline stays the default. A DFlash draft with its own head does not set `ctx_other`, to keep it single-GPU.
+- K/V rotations are per-layer constants (`inp->self_k_rot[il]`), not graph inputs. Local MTP KV-only code must index them by layer and use `build_rope`.
+
 Update a row when its dispatch, dependencies or validation needs change. Record new evidence once and link it here. DFlash vision remains unvalidated. The [catch-up guide](how-to-catchup.md#one-final-validation-pass) defines the common final pass and approval limits; feature-specific checks join that pass rather than becoming repeated intermediate suites.
 
 The [repack README](../ggml/src/ggml-cuda/q8_repack/README.md) explains its layout and integration. Preserve upload, allocation, dispatch, and consumers together; canonical kernels cannot read repacked weights. For HIP AllReduce, keep the first `#if !defined(GGML_USE_MUSA)` branch in `allreduce.cu` available to HIP. The normal configuration must not depend on an environment switch.

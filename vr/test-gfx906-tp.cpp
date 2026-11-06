@@ -76,7 +76,7 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
-    ggml_backend_dev_t meta_dev = ggml_backend_meta_device(devices, 2, 2, get_split_state, nullptr);
+    ggml_backend_dev_t meta_dev = ggml_backend_meta_device(devices, 2, get_split_state, nullptr);
     ggml_backend_ptr backend(ggml_backend_dev_init(meta_dev, nullptr));
     if (!backend) {
         fprintf(stderr, "failed to initialize the two-ROCm meta backend\n");

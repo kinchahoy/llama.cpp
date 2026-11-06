@@ -39,6 +39,10 @@ If the merge stops, review reused resolutions and resolve the remaining conflict
 
 The worktree-based `catchup-script.sh` remains an optional alternative; it is not required for this routine.
 
+A background agent session cannot write to the normal checkout. Create a worktree from the reviewed HEAD under `.claude/worktrees/catchup-<upstream-short>` on a branch of the same name, and run the merge there. Keep `BASE` and `CAND` as absolute paths under the main repository root, so the builds survive when the worktree is removed. The human commits the merge from that branch.
+
+Haiku-class agents are fine for triage and additive hunks. MMQ launch, recurrent rollback and DFlash/MTP state need a stronger model.
+
 Preserve these connected paths:
 
 - Repack upload/layout, dispatch, fused consumers, gfx906 MMQ/MMVQ tuning, existing supported quants, and opt-in grouped MoE weight reuse for narrow IQ2_S/IQ4_NL batches.
@@ -70,9 +74,11 @@ cmake -S . -B "$CAND" \
   -DCMAKE_CXX_FLAGS="-O3 -Wno-unused-command-line-argument" \
   > "$OUT/configure.log" 2>&1
 # Continue only if configuration succeeds.
-cmake --build "$CAND" --target llama-cli llama-server llama-bench vr-test-gfx906-tp -j 8 \
+cmake --build "$CAND" --target llama-cli llama-completion llama-server llama-bench vr-test-gfx906-tp -j 8 \
   > "$OUT/build.log" 2>&1
 ```
+
+The binaries find their libraries through a RUNPATH set to the build directory at build time. `build-ilp` was built as `/home/raistlin/infer/mx-llama.cpp/build-ilp`, and that directory no longer exists. Run its binaries with `LD_LIBRARY_PATH="$BASE/bin"`; this loads the libraries stored with that build. Do not move or rename later builds, so they do not need this.
 
 Continue only after a successful build. Record the resolved source and build settings:
 
@@ -97,7 +103,8 @@ The two TP checks share the existing two-minute runtime budget (110 seconds plus
 After approval, run one short Qwen3.8-27B Q8_0 generation and matched PP2048/TG128 benchmarks. Both builds must resolve `-hf` to the same cached model files; keep the cache unchanged between runs. `--offline` prevents downloads. Use the same environment and no competing GPU workload.
 
 ```bash
-timeout --kill-after=5s 110s "$CAND/bin/llama-cli" \
+# llama-cli is chat-only and rejects -no-cnv; plain completion is llama-completion.
+timeout --kill-after=5s 110s "$CAND/bin/llama-completion" \
   -hf unsloth/Qwen3.8-27B-GGUF:Q8_0 --offline \
   -ngl 999 -dev ROCm0,ROCm1 -sm tensor -ts 1,1 -fa on \
   -b 2048 -ub 2048 -c 4096 -t 20 -tb 20 \

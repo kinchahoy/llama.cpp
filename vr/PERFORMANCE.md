@@ -102,6 +102,8 @@ Ceilings are per-token estimates from profiles, not forecasts. Ids from older re
 | A3 | Raise ROCm1's power cap to its 178 W maximum | both | Oct 12 hardware note | small | config |
 | A4 | Move ROCm1 to CPU-attached PCIe lanes, then test the peer-write AR (`GGML_CUDA_PEER_AR=1`) and RCCL | both | AR, post-AR gaps and peer wait are 4-7 of 27 ms/token on 27B | largest single lever | hardware |
 | - | `mmq-config-gfx906.cuh` is never selected (the `GCN` table wins in `mmq.cuh`) | neither target | 27B uses the repacked GEMM; Flash Next IQ types are not in that table | none for the targets | low priority |
+| M1 | DFlash decode steps read target features from the device: use the upstream device-row path (`LLAMA_DFLASH_DEV=1`, upstream #31506) for generation and verify chunks, and keep the fork accum replay for prompt chunks | 27B DFlash | Each fork decode step does a full `llama_synchronize(ctx_tgt)`, a D2H tap copy, a host gather into `features_buf` and an H2D inject. The upstream path writes the taps to one device buffer on `dev_output()` (the single-GPU draft's device) and the draft reads rows directly, ordered by events, with no host sync. This targets part of the open about 10 ms host gap per DFlash step. Upstream's path alone bypasses the deferred prompt replay, which measured +22% TTFT when eager | DFlash5 about 70 t/s if the gap closes (Oct 12 estimate); this removes only the feature copy part | S to try, M to combine; first `LLAMA_DFLASH_DEV=1` alone (generation t/s, acceptance, TTFT), then route only non-prompt chunks to it. Needs the draft without its own head, so `ctx_other` is set |
+| M2 | Build the repacked MoE GEMM tile list from the upstream `tile_spec` instead of `repack_tile_off<<<1, 1>>>` | Flash Next PP, other repacked MoE (Q8_0, MXFP4, IQ4_NL) | `repack_tile_off` is one GPU thread that walks all experts in order (512 for Flash Next) for each repacked `MUL_MAT_ID` launch with more than one token. Its loads depend on each other, so it is latency-bound and the GEMM waits for it. The ids helper already runs one block per expert and, since #31047, writes the same per-tile `{expert, col_low, col_high}` list when given a tile width (`BN_ID` or `BN_W32`). Using it removes one serial launch per MoE matmul and part of the fork's `expert_bounds` overload in `mmid.cu` | unknown; get the `repack_tile_off` time per ubatch from a PP2048 kernel trace first (fits with A6) | S-M; outputs must match bit for bit, since tile order and contents are the same |
 
 Upstream-only candidate: GCN Q8_0 MMQ rows 256 -> 512 threads (discussion 23881: +19% Q8_0 pp512, -6.9% Q4_K, so Q8_0 only). It helps plain upstream, not this fork's repacked path.
 
@@ -155,6 +157,17 @@ With 10 uniform picks, the busier GPU averages 6.23 whole experts against today'
 ## Dated records
 
 Newest first. Full commands, identities and raw data are in the linked [old-ignore](old-ignore/README.md) folders.
+
+### 2026-11-05 catch-up to official 4b77dee05 (regression screen)
+
+Final validation pass from the [catch-up guide](how-to-catchup.md#one-final-validation-pass), one repeat each, 27B Q8_0, same cached GGUF (`4ca720788d1e`), `-sm tensor`, 50/50, FA on, batch/ubatch 2048. Baseline `build-ilp` reports `build_commit e04bc2e38` (old master, stage A of the rebuild) and was run with `LD_LIBRARY_PATH` set to its own `bin`. The candidate is the staged merge on branch `catchup-4b77dee05` over `42410a3db`. Logs and JSON: `build-catchup-20261105-213622/validation/`.
+
+| Build | PP2048 | TG128 |
+| --- | ---: | ---: |
+| Baseline `build-ilp` | 697.55 | 37.75 |
+| Candidate | 696.88 (-0.10%) | 37.90 (+0.39%) |
+
+TP smoke checks passed at n=1 and n=2048. A 32-token greedy generation (`llama-completion`) was coherent at 36.7 t/s. This is a regression screen, not repeatability evidence. Not run: Flash Next, MoE PP after the MMQ tile layout change (#31047, J now picked from tokens per expert), MTP, DFlash and grouped MoE.
 
 ### 2026-10-29 A1 config sweep (TG)
 
