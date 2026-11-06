@@ -74,7 +74,9 @@ Rules: change is `(candidate / baseline - 1) * 100` on the same row type. Write 
 
 ## Idea ledger
 
-Ceilings are per-token estimates from profiles, not forecasts. Ids from older records are kept: A = fork audit, N = further code ideas, S = Strata review, L = optimization-lab review, P = Flash Next priorities.
+Ceilings are per-token estimates from profiles, not forecasts. Ids from older records are kept: A = fork audit, N = further code ideas, S = Strata review, L = optimization-lab review, P = Flash Next priorities, M = merge follow-ups, D = long-context depth.
+
+Priority: ideas that raise plain PP or TG come first, because every mode gains from them. Work that only helps MTP or DFlash comes after those run out, and then only for large gains.
 
 ### Landed
 
@@ -83,7 +85,7 @@ Ceilings are per-token estimates from profiles, not forecasts. Ids from older re
 | - | AllReduce slab overlap, `GGML_CUDA_AR_SLABS=4` | Oct 12: 27B PP2048 651 (off) -> 682 (4), text identical. TG neutral in the 2026-10-29 A1 sweep | PP not re-measured on the rebuild tree |
 | - | Parallel lane dispatch, `GGML_META_PARALLEL_DISPATCH=1` | A1 sweep: off costs about 1.5 t/s TG on both models against neighbouring baselines | One repeat per run, but both models agree and the drop is above 27B noise |
 | - | Whole-token HIP graph replay | 2026-10-29 trace: two `hipGraphLaunch` per token, no per-kernel launches, both models | - |
-| - | MTP2 with `--spec-draft-backend-sampling` as the speculative default | 27B +68% vs plain, Flash Next +33% (one run each, 2026-10-29) | Best depth: MTP2 beat MTP3 on Oct 12 and 2026-10-29, MTP3 won on Oct 25; all single runs |
+| - | MTP2 with `--spec-draft-backend-sampling` as the speculative default | 27B +68% vs plain, Flash Next +33% (one run each, 2026-10-29) | Best depth: MTP2 beat MTP3 on Oct 12 and 2026-10-29, MTP3 won on Oct 25; all single runs. On 2026-11-05 DFlash5 beat MTP2 on 27B at a 2K prompt (67.7 vs 63.9) but lost at 32K (39.9 vs 42.7), see [record](#2026-11-05-27b-config-sweep-and-32k-depth) |
 | - | gfx906 two-row IQ2_S one-token expert path | +2.37% TG in one matched pair, output matched, 3 CPU-reference cases | One pair; not repeatability evidence |
 | - | Grouped MoE for 2-8 token verify, opt-in with `GGML_CUDA_FLASHNEXT_MOE=1` | Oct 25: about 5.9% mean TG on Flash Next MTP2, two runs per variant, same output and acceptance | Off by default; the 2026-10-29 MTP runs and scripts do not enable it. Not re-measured on the rebuild tree |
 
@@ -96,6 +98,7 @@ Ceilings are per-token estimates from profiles, not forecasts. Ids from older re
 | - | `-sm layer` instead of tensor split on Flash Next | 30.99 vs 38.94 TG, -20%; one run, but far outside the noise |
 | N2a | Overlap the two lanes' graph launches | 27B 36.63 -> 36.67, one pair, inside 27B noise; the trace shows the launch stagger is not on the critical path |
 | N2b | Stage the remaining small F32 inputs asynchronously (`GGML_SCHED_INPUT_STAGING_F32_MAX=1048576`) | r3 alternating, both models, no change |
+| - | `-b/-ub 4096` for 27B PP | 2026-11-05 llama-bench PP4096 r3: 606.3 +- 3.2 vs 684.1 +- 1.6 at ub 2048, -11.4%. [Record](#2026-11-05-27b-config-sweep-and-32k-depth) |
 | - | Content-keyed meta token graph cache for the draft (Oct 12) | Wrong output: draft acceptance length fell from 2.95 to 1.1-1.6 |
 | - | Multi-row planar Q8_1 producer (Oct 12) | Halved quantize launches but made the norm kernel slower by the same amount |
 | - | Oct 12 smaller items: MTP fused catch-up (already overlapped with sampling), nc unroll 2, `GGML_RP_NC_FUSION`, MTP `p-min` (TG 55 -> 29-31), DFlash mirrored output head | Each measured in the [Oct 12 work log](old-ignore/2026-10-12/notes/2026-10-12-work-status.md) |
@@ -129,11 +132,13 @@ Ceilings are per-token estimates from profiles, not forecasts. Ids from older re
 | A7 | GCN occupancy tuning (more warps, wider J tiles) in the repacked Q8_0 GEMM | 27B | Upstream discussion 23881: +19% Q8_0 pp512 on GCN with a different kernel | +10-15% PP if GEMM is still the main cost | M; after A6 |
 | N3 | Pipeline prefill AllReduce across two half-ubatches so one half's AR overlaps the other's GEMM | 27B, Flash Next PP | Oct 12: 0.78 s of a 3.9 s ubatch in AR copies before overlap; slabs cannot hide the last slab and the reduce | +5-15% PP if A6 shows exposed AR above 10% | M; after A6 |
 | L1 | Skip K/V work in `fattn-vec` for wavefronts whose KV rows are all masked; output unchanged | both | +13% decode at 85K context on NVIDIA (optimization lab); nothing at short context | long context only | S; count the masked fraction first |
-| A3 | Raise ROCm1's power cap to its 178 W maximum | both | Oct 12 hardware note | small | config |
+| D1 | Faster long-context attention on gfx906. With F16 KV and no MFMA/WMMA, `ggml_cuda_get_best_fattn_kernel` picks `VEC` for one-token decode and the generic `TILE` kernel for the 3-token MTP2 and 6-token DFlash5 verify batches. Profile both at 32K, then tune or add a small-batch vec path (several query columns per KV pass) | both, all modes | 27B plain TG 36.8 -> 29.4 from a 2K to a 32K prompt: about +6.8 ms/token, most of it attention over the KV cache. MTP2 drops 33% and DFlash5 41%, so the verify batches look worse than decode. [Record](#2026-11-05-27b-config-sweep-and-32k-depth) | up to the 6.8 ms/token depth cost for plain; more for speculative verify | M; rocprofv3 at 32K first, plain and DFlash5 |
 | A4 | Move ROCm1 to CPU-attached PCIe lanes, then test the peer-write AR (`GGML_CUDA_PEER_AR=1`) and RCCL | both | AR, post-AR gaps and peer wait are 4-7 of 27 ms/token on 27B | largest single lever | hardware |
 | - | `mmq-config-gfx906.cuh` is never selected (the `GCN` table wins in `mmq.cuh`) | neither target | 27B uses the repacked GEMM; Flash Next IQ types are not in that table | none for the targets | low priority |
 | M1 | DFlash decode steps read target features from the device: use the upstream device-row path (`LLAMA_DFLASH_DEV=1`, upstream #31506) for generation and verify chunks, and keep the fork accum replay for prompt chunks | 27B DFlash | Each fork decode step does a full `llama_synchronize(ctx_tgt)`, a D2H tap copy, a host gather into `features_buf` and an H2D inject. The upstream path writes the taps to one device buffer on `dev_output()` (the single-GPU draft's device) and the draft reads rows directly, ordered by events, with no host sync. This targets part of the open about 10 ms host gap per DFlash step. Upstream's path alone bypasses the deferred prompt replay, which measured +22% TTFT when eager | DFlash5 about 70 t/s if the gap closes (Oct 12 estimate); this removes only the feature copy part | S to try, M to combine; first `LLAMA_DFLASH_DEV=1` alone (generation t/s, acceptance, TTFT), then route only non-prompt chunks to it. Needs the draft without its own head, so `ctx_other` is set |
 | M2 | Build the repacked MoE GEMM tile list from the upstream `tile_spec` instead of `repack_tile_off<<<1, 1>>>` | Flash Next PP, other repacked MoE (Q8_0, MXFP4, IQ4_NL) | `repack_tile_off` is one GPU thread that walks all experts in order (512 for Flash Next) for each repacked `MUL_MAT_ID` launch with more than one token. Its loads depend on each other, so it is latency-bound and the GEMM waits for it. The ids helper already runs one block per expert and, since #31047, writes the same per-tile `{expert, col_low, col_high}` list when given a tile width (`BN_ID` or `BN_W32`). Using it removes one serial launch per MoE matmul and part of the fork's `expert_bounds` overload in `mmid.cu` | unknown; get the `repack_tile_off` time per ubatch from a PP2048 kernel trace first (fits with A6) | S-M; outputs must match bit for bit, since tile order and contents are the same |
+
+A3 (raise ROCm1's power cap) is already in place: sysfs shows ROCm1 (card2) at 178 W, its maximum and default, and ROCm0 at its 225 W maximum (2026-11-05).
 
 Upstream-only candidate: GCN Q8_0 MMQ rows 256 -> 512 threads (discussion 23881: +19% Q8_0 pp512, -6.9% Q4_K, so Q8_0 only). It helps plain upstream, not this fork's repacked path.
 
@@ -187,6 +192,29 @@ With 10 uniform picks, the busier GPU averages 6.23 whole experts against today'
 ## Dated records
 
 Newest first. Full commands, identities and raw data are in the linked [old-ignore](old-ignore/README.md) folders.
+
+### 2026-11-05 27B config sweep and 32K depth
+
+Find the best 27B speculative mode, test a larger ubatch, and check speed at a 32K prompt. Kind: A/B experiment.
+
+- Source: `bc0ce9691` (merge of official `4b77dee05`), build `build-catchup-20261105-213622`.
+- Model: 27B Q8_0 rev `4ca720788d1e`; DFlash draft `z-lab/Qwen3.8-27B-DFlash2` Q8_0 rev `2d9571f8ce46`.
+- Settings: standard 27B. 32K runs use ctx 40960. The ubatch test is llama-bench PP4096 with `-b 4096 -ub 2048,4096`.
+- Workload: speculative runs are standard, one run each. The 32K prompt is the first 116,000 bytes of `src/llama-context.cpp` at `bc0ce9691` plus a request to explain it (about 32K tokens at 3.66 bytes/token). ubatch r3.
+
+| Build | Mode | PP t/s | TG t/s | Change | Accept | Output |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| candidate | plain, 2K | 587.4 | 36.8 | - | - | - |
+| candidate | MTP2, 2K (two runs) | 584.5 / 582.1 | 64.1 / 63.9 | - | - | `dd228997b103` both |
+| candidate | MTP3, 2K | 579.0 | 61.5 | -3.8% vs MTP2 | - | `39f8c45d0e87` |
+| candidate | DFlash5, 2K (two runs) | 574.4 / 570.6 | 67.4 / 67.7 | +5.9% vs MTP2 | - | `9f2493efdd9b` both |
+| candidate | DFlash7, 2K | 570.7 | 62.5 | -7.7% vs DFlash5 | - | same as DFlash5 |
+| candidate | plain, 32K | 541.2 | 29.4 | -20% vs 2K | - | `b94840dcade5` |
+| candidate | MTP2, 32K | 512.3 | 42.7 | -33% vs 2K | - | `c8ae52851843` |
+| candidate | DFlash5, 32K | 512.0 | 39.9 | -41% vs 2K | - | same as plain |
+| candidate | PP4096, ub 2048 / 4096 | 684.1 / 606.3 | - | -11.4% | - | - |
+
+Verdict: DFlash5 is the fastest 27B mode at a 2K prompt and MTP2 at 32K; the crossover was not measured. Deeper drafts (MTP3, DFlash7) are slower. ubatch 4096 is validated wrong for 27B PP. Plain TG loses 20% at 32K, which motivates D1. Repeats at 2K varied by 0.2-0.3 t/s TG; noise at 32K was not measured. DFlash output matches plain greedy at 32K. Not covered: Flash Next, acceptance rates (`--simple-io` prints none), the crossover depth. Raw, including generated text: [config-sweep](old-ignore/2026-11-05/config-sweep/), [depth32k](old-ignore/2026-11-05/depth32k/).
 
 ### 2026-11-05 catch-up to official 4b77dee05
 

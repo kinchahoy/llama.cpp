@@ -1,0 +1,76 @@
+
+
+Loading model... 
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b12007-42410a3db
+model      : /home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-27B-GGUF/snapshots/4ca720788d1e01f1bff70c033e0d0028fd02e502/Qwen3.8-27B-Q8_0.gguf
+ftype      : Q8_0
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+
+> #include "llama-context.h"
+
+#include "ggml.h"
+#include "gguf.h"
+#include "llama-arch.h"
+#include "llama-graph.h"
+#include "llama-impl.h"
+#include "llama-batch.h"
+#include "llama-io.h"
+#include "llama-memory.h"
+#include "llama-mmap.h"
+#include "llama-model.h"
+#include "llama-moe-cache.h"
+#include "llama-ext.h"
+#include "llama-sampler.h"
+#include "llama.h"
+
+#include "../ggml/src/ggml-backend-sched-impl.h"
+
+#include <algorithm>
+#include <cinttypes>
+#include <cmath>
+#include <cstring>
+#include <limi ... (truncated)
+
+[Start thinking]
+
+We need answer user's request: "Explain in a few paragraphs what this C++ file does and how its main pieces fit together." They provided a large C++ file (llama-context.cpp likely from llama.cpp). Need produce explanation in few paragraphs. Need analyze code and summarize. Need final only. Need be accurate.
+
+We need understand file: It's implementation of llama_context, central runtime object in llama.cpp. It manages model inference context: parameters, backends, scheduler, memory/KV cache, graph building/reservation, batch processing, output extraction, sampling, adapters, embeddings, layer inputs, fused ops, pipeline parallelism, etc.
+
+Need explain main pieces fit together:
+- Includes and helper: llama_verify_hadamard_graph checks graph for Hadamard rotations/inverses, MoE cache, latent tables; ensures transforms applied.
+- ctx_type_to_graph_type maps context type to graph type.
+- fused op probes: static probes for flash attention, kv rows, GDN, Lightning Indexer, DeepSeek V4 HC, top-k mask. Used by resolve_fused_ops to test if fused ops can run on devices.
+- llama_context constructor: takes model and params, initializes cparams, batch allocator, adapters, backends, memory module, scheduler, output buffer, samplers, fused ops, pipeline parallelism, MoE cache, graph reservation. Handles special architectures (Gemma4Assistant, EAGLE3/DFLASH, Qwen4exp rollback, etc.), RoPE/YARN scaling, context sizes, KV unified, n_ctx padding, backend init, abort callback, output reserve, memory init, sched_reserve.
+- Destructor: synchronize, free events, check compute buffer sizes.
+- resolve_fused_ops: for each auto fused op, reserve a probe graph, inspect fused nodes' assigned backend/device vs layer device, accept sibling devices if same type and supports op, else disable. Sets cparams flags.
+- graph input tensor debug function.
+- sched_new/sched_reserve: create ggml backend scheduler, reserve worst-case graphs for prompt processing and token generation, resolve fused ops, allocate persistent tap tensors, compute buffer sizes, log nodes/splits/inputs.
+- synchronize: sync scheduler, update perf stats, load time.
+- getters: model, cparams, sched, n_ctx, etc.
+- memory_update: update memory module (KV cache) and re-reserve graph if needed.
+- output accessors:
+
+[ Prompt: 512.0 t/s | Generation: 39.9 t/s ]
+
+> 
+
+Exiting...
