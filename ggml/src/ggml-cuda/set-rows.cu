@@ -176,6 +176,81 @@ static __global__ void k_set_rows(const src_t * src0_ptr,
     GGML_UNUSED(ne13);
 }
 
+// F32 -> F32 with float4 copies; all row strides and ne00 are multiples of 4
+template <typename idx_t>
+static __global__ void k_set_rows_f4(const float4 * GGML_CUDA_RESTRICT src0,
+                                     const idx_t  * GGML_CUDA_RESTRICT src1,
+                                     float4       * GGML_CUDA_RESTRICT dst,
+                                     const int64_t ne_total,
+                                     const int64_t s01, const int64_t s02, const int64_t s03,
+                                     const int64_t s10, const int64_t s11, const int64_t s12,
+                                     const int64_t s1,  const int64_t s2,  const int64_t s3,
+                                     const uint3 ne00, const uint3 ne01, const uint3 ne02,
+                                     const uint3 ne11_fd, const uint3 ne12_fd) {
+    const int64_t i = int64_t(blockDim.x) * blockIdx.x + threadIdx.x;
+    if (i >= ne_total) {
+        return;
+    }
+
+    uint32_t tmp = (uint32_t) i;
+    uint2    div_mod;
+
+    div_mod           = fast_div_modulo(tmp, ne00);
+    const int64_t i00 = div_mod.y;
+    tmp               = div_mod.x;
+
+    div_mod           = fast_div_modulo(tmp, ne01);
+    const int64_t i01 = div_mod.y;
+    tmp               = div_mod.x;
+
+    div_mod           = fast_div_modulo(tmp, ne02);
+    const int64_t i02 = div_mod.y;
+    const int64_t i03 = div_mod.x;
+
+    const int64_t i12 = fastmodulo((uint32_t) i03, ne12_fd);
+    const int64_t i11 = fastmodulo((uint32_t) i02, ne11_fd);
+
+    ggml_cuda_pdl_sync();
+    const int64_t dst_row = *(src1 + i01*s10 + i11*s11 + i12*s12);
+    ggml_cuda_pdl_lc();
+
+    dst[dst_row*s1 + i02*s2 + i03*s3 + i00] = src0[i01*s01 + i02*s02 + i03*s03 + i00];
+}
+
+template<typename idx_t>
+static bool set_rows_cuda_f4(
+        const float * src0_d, const idx_t * src1_d, float * dst_d,
+        const int64_t ne00, const int64_t ne01, const int64_t ne02, const int64_t ne03,
+        const int64_t ne11, const int64_t ne12,
+        const size_t nb01, const size_t nb02, const size_t nb03,
+        const size_t nb10, const size_t nb11, const size_t nb12,
+        const size_t nb1, const size_t nb2, const size_t nb3,
+        cudaStream_t stream) {
+    static const bool enabled = []() { const char * e = getenv("GGML_K1_SET_ROWS_VEC"); return !e || atoi(e) != 0; }();
+    const size_t bytes16 = 4*sizeof(float);
+    if (!enabled || ne00 % 4 != 0 || nb01 % bytes16 || nb02 % bytes16 || nb03 % bytes16 ||
+        nb1 % bytes16 || nb2 % bytes16 || nb3 % bytes16 ||
+        ((uintptr_t) src0_d | (uintptr_t) dst_d) % bytes16 ||
+        ne00 <= 0 || ne01 <= 0 || ne02 <= 0 || ne03 <= 0 || ne11 <= 0 || ne12 <= 0) {
+        return false;
+    }
+
+    const int64_t ne_total = ne00/4 * ne01 * ne02 * ne03;
+    const int num_blocks = (ne_total + CUDA_SET_ROWS_BLOCK_SIZE - 1) / CUDA_SET_ROWS_BLOCK_SIZE;
+    const dim3 block_size(CUDA_SET_ROWS_BLOCK_SIZE);
+    const dim3 grid_size(num_blocks);
+
+    const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params(grid_size, block_size, 0, stream);
+    ggml_cuda_kernel_launch(k_set_rows_f4<idx_t>, launch_params,
+        (const float4 *) src0_d, src1_d, (float4 *) dst_d, ne_total,
+        (int64_t) (nb01/bytes16), (int64_t) (nb02/bytes16), (int64_t) (nb03/bytes16),
+        (int64_t) (nb10/sizeof(idx_t)), (int64_t) (nb11/sizeof(idx_t)), (int64_t) (nb12/sizeof(idx_t)),
+        (int64_t) (nb1/bytes16), (int64_t) (nb2/bytes16), (int64_t) (nb3/bytes16),
+        init_fastdiv_values((uint32_t) (ne00/4)), init_fastdiv_values((uint32_t) ne01), init_fastdiv_values((uint32_t) ne02),
+        init_fastdiv_values((uint32_t) ne11), init_fastdiv_values((uint32_t) ne12));
+    return true;
+}
+
 template<typename src_t, typename idx_t, typename dst_t>
 static void set_rows_cuda(
         const src_t * src0_d, const idx_t * src1_d, dst_t * dst_d,
@@ -228,6 +303,12 @@ static void set_rows_cuda(ggml_backend_cuda_context & ctx, const ggml_tensor * s
 
 
     if (dst->type == GGML_TYPE_F32) {
+        if constexpr (std::is_same_v<src_t, float>) {
+            if (set_rows_cuda_f4(src0_d, src1_d, (float *) dst->data, ne00, ne01, ne02, ne03, ne11, ne12,
+                    nb01, nb02, nb03, nb10, nb11, nb12, nb1, nb2, nb3, stream)) {
+                return;
+            }
+        }
         set_rows_cuda(
             src0_d, src1_d, (float*)dst->data,
             ne00, ne01, ne02, ne03,

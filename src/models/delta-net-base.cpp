@@ -475,6 +475,22 @@ ggml_tensor * llm_build_delta_net_base::build_conv_state(
         GGML_ASSERT(inp->n_snap == n_written);
         GGML_ASSERT((int64_t) inp->s_write_slices.size() == n_written);
 
+        static const bool fuse_store = []() { const char * e = getenv("GGML_K1_STATE_STORE"); return !e || atoi(e) != 0; }();
+
+        if (fuse_store && inp->s_write_conv != nullptr && n_written == inp->n_snap) {
+            // windows ordered oldest first: the same order as s_write_conv
+            const size_t es = ggml_element_size(conv_input);
+            ggml_tensor * windows = ggml_view_4d(ctx0, conv_input,
+                    conv_kernel_size - 1, n_written, conv_channels, n_seqs,
+                    es, conv_input->nb[1], conv_input->nb[2],
+                    es * (n_new - n_written + 1));
+            windows = ggml_cont(ctx0, ggml_permute(ctx0, windows, 0, 2, 1, 3));
+            ggml_build_forward_expand(gf,
+                    ggml_set_rows(ctx0, conv_states_all,
+                        ggml_reshape_2d(ctx0, windows, row_count, n_seqs * n_written), inp->s_write_conv));
+            return conv_input;
+        }
+
         for (int64_t snap = 0; snap < n_written; ++snap) {
             ggml_tensor * window = ggml_view_3d(ctx0, conv_input,
                     conv_kernel_size - 1, conv_channels, n_seqs,
@@ -565,8 +581,9 @@ ggml_tensor * llm_build_delta_net_base::build_recurrent_attn(
 
     if (inp->s_write != nullptr) {
         GGML_ASSERT(inp->n_snap == n_written);
+        static const bool fuse_store = []() { const char * e = getenv("GGML_K1_STATE_STORE"); return !e || atoi(e) != 0; }();
         ggml_tensor * rows = ggml_reshape_2d(
-                ctx0, ggml_cont(ctx0, src), D, n_seqs * n_written);
+                ctx0, (fuse_store && ggml_is_contiguous(src)) ? src : ggml_cont(ctx0, src), D, n_seqs * n_written);
         ggml_build_forward_expand(gf,
                 ggml_set_rows(ctx0, ssm_states_all, rows, inp->s_write));
     } else {
