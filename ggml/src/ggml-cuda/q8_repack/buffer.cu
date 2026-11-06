@@ -320,6 +320,60 @@ static __global__ void repack_q51_kernel(
     }
 }
 
+// Device-side Q5_0 repack into the Q5_1 planes, one thread per 32-value block: {d, m} = {d, -16 d}.
+static __global__ void repack_q50_kernel(
+        const uint8_t * __restrict__ src, uint8_t * __restrict__ dst,
+        const int64_t ne1, const int64_t n_sub, const int64_t qs_str,
+        const int64_t hoff, const int64_t doff,
+        const int64_t src_stride, const int64_t dst_stride, const int64_t total) {
+    for (int64_t i = (int64_t) blockIdx.x * blockDim.x + threadIdx.x;
+         i < total; i += (int64_t) gridDim.x * blockDim.x) {
+        const int64_t sb  = i % n_sub;
+        const int64_t row = (i / n_sub) % ne1;
+        const int64_t e   = i / (n_sub * ne1);
+        const block_q5_0 * b = reinterpret_cast<const block_q5_0 *>(src + e * src_stride) + row * n_sub + sb;
+        uint8_t * base = dst + e * dst_stride;
+        const int64_t wi = row * n_sub + sb;
+        uint8_t * lows = base + row * qs_str + sb * 16;
+#pragma unroll
+        for (int j = 0; j < 16; j++) {
+            lows[j] = b->qs[j];
+        }
+#pragma unroll
+        for (int j = 0; j < 4; j++) {
+            base[hoff + wi * 4 + j] = b->qh[j];
+        }
+        half * dm = reinterpret_cast<half *>(base + doff + wi * 4);
+        dm[0] = b->d;
+        dm[1] = __float2half_rn(-16.0f * __half2float(b->d));
+    }
+}
+
+// Device-side IQ4_XS repack into the IQ4_NL planes, one thread per 32-value sub-block: nibble bytes and the f16 scale d*(ls - 32).
+static __global__ void repack_iq4xs_kernel(
+        const uint8_t * __restrict__ src, uint8_t * __restrict__ dst,
+        const int64_t ne1, const int64_t n_blocks, const int64_t qs_str,
+        const int64_t qs_len, const int64_t src_stride, const int64_t dst_stride,
+        const int64_t total) {
+    for (int64_t i = (int64_t) blockIdx.x * blockDim.x + threadIdx.x;
+         i < total; i += (int64_t) gridDim.x * blockDim.x) {
+        const int64_t blk = i % n_blocks;
+        const int64_t row = (i / n_blocks) % ne1;
+        const int64_t e   = i / (n_blocks * ne1);
+        const block_iq4_xs * b = reinterpret_cast<const block_iq4_xs *>(src + e * src_stride) + row * (n_blocks / 8) + blk / 8;
+        const int ib = (int) (blk % 8);
+        const int ls = ((b->scales_l[ib / 2] >> 4 * (ib % 2)) & 0xf) | (((b->scales_h >> 2 * ib) & 3) << 4);
+
+        uint8_t * d_qs = dst + e * dst_stride + row * qs_str + blk * 16;
+#pragma unroll
+        for (int k = 0; k < 16; k++) {
+            d_qs[k] = b->qs[16 * ib + k];
+        }
+        *reinterpret_cast<half *>(dst + e * dst_stride + qs_len + (row * n_blocks + blk) * 2) =
+            __float2half_rn(__half2float(b->d) * (ls - 32));
+    }
+}
+
 // Device-side Q5_K repack, one thread per 32-value sub-block: Q4_K's nibble pick plus the fifth-bit word gathered from qh, the scale record and {d, dmin} by k == 0.
 static __global__ void repack_q5k_kernel(
         const uint8_t * __restrict__ src, uint8_t * __restrict__ dst,
@@ -462,6 +516,18 @@ void ggml_cuda_repack_set_tensor_async(int device, cudaStream_t stream,
                     st.scratch, (uint8_t *) tensor->data, ne1, n_blocks, qs_str,
                     hoff, doff, (int64_t) src_str, (int64_t) dst_str, n_out);
             } break;
+            case GGML_TYPE_Q5_0: {
+                const int64_t hoff = ne1 * qs_str;
+                const int64_t doff = hoff + ne1 * n_blocks * 4;
+                repack_q50_kernel<<<grid, block, 0, stream>>>(
+                    st.scratch, (uint8_t *) tensor->data, ne1, n_blocks, qs_str,
+                    hoff, doff, (int64_t) src_str, (int64_t) dst_str, n_out);
+            } break;
+            case GGML_TYPE_IQ4_XS:
+                repack_iq4xs_kernel<<<grid, block, 0, stream>>>(
+                    st.scratch, (uint8_t *) tensor->data, ne1, n_blocks, qs_str,
+                    ne1 * qs_str, (int64_t) src_str, (int64_t) dst_str, n_out);
+                break;
             default:
                 GGML_ABORT("unsupported repack type for async upload");
         }

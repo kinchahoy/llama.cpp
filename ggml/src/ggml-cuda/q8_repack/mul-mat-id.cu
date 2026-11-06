@@ -11,6 +11,7 @@
 void ggml_cuda_mul_mat_id_repacked(ggml_backend_cuda_context & ctx,
         const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids,
         ggml_tensor * dst) {
+    const ggml_type wtype = ggml_cuda_repack_store_type(src0->type);
     GGML_ASSERT(src1->type == GGML_TYPE_F32);
     GGML_ASSERT(dst->type  == GGML_TYPE_F32);
     GGML_ASSERT(ids->type  == GGML_TYPE_I32);
@@ -39,7 +40,7 @@ void ggml_cuda_mul_mat_id_repacked(ggml_backend_cuda_context & ctx,
         w = (const uint8_t *) src0->data;
     }
     float * dst_d = (float *) dst->data;
-    const size_t expert_stride = repack_gcn_nbytes(src0->type, ne00, ne01);
+    const size_t expert_stride = repack_gcn_nbytes(wtype, ne00, ne01);
     const uint32_t dst_s1 = dst->nb[1] / sizeof(float);
 
     ggml_cuda_pool_alloc<int32_t> ids_src1(ctx.pool(), n_assign);
@@ -85,7 +86,7 @@ void ggml_cuda_mul_mat_id_repacked(ggml_backend_cuda_context & ctx,
         // Four rows per block, two waves. Five geometries were measured at
         // the verify widths and all landed within five percent; this was best.
         const dim3 grid((ne01 + 3) / 4, (unsigned) n_assign, 1);
-        switch (src0->type) {
+        switch (wtype) {
             case GGML_TYPE_Q8_0:
                 mul_mat_vec_repacked_id1<4, 2, 2><<<grid, 128, 0, stream>>>(
                     w, src1_q8_1_d, dst_d, (uint32_t) ne00, (uint32_t) ne01,
@@ -140,7 +141,7 @@ void ggml_cuda_mul_mat_id_repacked(ggml_backend_cuda_context & ctx,
             (size_t) (n_cols * x_stride), src1_q8_1_own, stream);
         const uint32_t nchannels_y = (uint32_t) src1->ne[1];
         const uint32_t xs_id       = (uint32_t) x_stride;
-        switch (src0->type) {
+        switch (wtype) {
             case GGML_TYPE_Q8_0: {
                 const dim3 grid((ne01 + 63) / 64, n_assign, 1);
                 mul_mat_vec_q8_0_repacked<64, 16, true, 16><<<grid, 1024, 0, stream>>>(
@@ -202,7 +203,7 @@ void ggml_cuda_mul_mat_id_repacked(ggml_backend_cuda_context & ctx,
         (size_t) n_cols * n_groups * sizeof(block_q8_1_mmq_h));
     {
         quantize_mmq_q8_1_cuda((const float *) src1->data, nullptr, src1_q8_1.get(),
-            src0->type, ne10, s11, s11 * n_cols, s11 * n_cols, ne10_padded,
+            wtype, ne10, s11, s11 * n_cols, s11 * n_cols, ne10_padded,
             n_cols, 1, 1, stream);
     }
     const block_q8_1 * xq = (const block_q8_1 *) src1_q8_1.get();
@@ -216,10 +217,10 @@ void ggml_cuda_mul_mat_id_repacked(ggml_backend_cuda_context & ctx,
     // per ubatch, which is why the crossover moves with the expert count.
     const bool use_w32 = n_assign < 2 * BN_ID * ne02;
 
-    switch (src0->type) {
+    switch (wtype) {
         case GGML_TYPE_Q8_0:
         case GGML_TYPE_MXFP4: {
-            const bool is_mx = src0->type == GGML_TYPE_MXFP4;
+            const bool is_mx = wtype == GGML_TYPE_MXFP4;
             if (use_w32) {
                 const int64_t max_tiles_w32 = n_assign / BN_W32 + ne02;
                 ggml_cuda_pool_alloc<int32_t>          tile_off_w32 (ctx.pool(), ne02 + 1);
@@ -462,6 +463,7 @@ void ggml_cuda_mul_mat_id_repacked(ggml_backend_cuda_context & ctx,
 void ggml_cuda_mul_mat_id_vec_repacked_fused(ggml_backend_cuda_context & ctx,
         const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids,
         ggml_tensor * dst, const ggml_cuda_mm_fusion_args_host * fusion) {
+    const ggml_type wtype = ggml_cuda_repack_store_type(src0->type);
     GGML_ASSERT(src1->type == GGML_TYPE_F32);
     GGML_ASSERT(dst->type  == GGML_TYPE_F32);
     GGML_ASSERT(ids->type  == GGML_TYPE_I32);
@@ -470,10 +472,10 @@ void ggml_cuda_mul_mat_id_vec_repacked_fused(ggml_backend_cuda_context & ctx,
     GGML_ASSERT(dst->nb[1]  == (size_t) dst->ne[0] * sizeof(float));
     GGML_ASSERT(dst->ne[3] == 1);
     // Narrow batches take the per-assignment mat-vec; wider ones never reach here.
-    GGML_ASSERT(ggml_cuda_repack_mmv_fusion_width_ok(ids->ne[1], true, src0->type));
+    GGML_ASSERT(ggml_cuda_repack_mmv_fusion_width_ok(ids->ne[1], true, wtype));
     GGML_ASSERT(fusion != nullptr && fusion->gate != nullptr);
     GGML_ASSERT(fusion->gate->type == src0->type &&
-                (src0->type == GGML_TYPE_Q8_0 || src0->type == GGML_TYPE_MXFP4 || src0->type == GGML_TYPE_IQ4_NL || src0->type == GGML_TYPE_Q6_K || src0->type == GGML_TYPE_Q4_K || src0->type == GGML_TYPE_Q5_K));
+                (wtype == GGML_TYPE_Q8_0 || wtype == GGML_TYPE_MXFP4 || wtype == GGML_TYPE_IQ4_NL || wtype == GGML_TYPE_Q6_K || wtype == GGML_TYPE_Q4_K || wtype == GGML_TYPE_Q5_K));
 
     const int64_t ne00 = src0->ne[0];
     const int64_t ne01 = src0->ne[1];
@@ -505,7 +507,7 @@ void ggml_cuda_mul_mat_id_vec_repacked_fused(ggml_backend_cuda_context & ctx,
     const float * x_bias    = fusion->x_bias    ? (const float *) fusion->x_bias->data    : nullptr;
     const float * gate_bias = fusion->gate_bias ? (const float *) fusion->gate_bias->data : nullptr;
 
-    const size_t   expert_stride = repack_gcn_nbytes(src0->type, ne00, ne01);
+    const size_t   expert_stride = repack_gcn_nbytes(wtype, ne00, ne01);
     const uint32_t dst_s1        = dst->nb[1] / sizeof(float);
     const int64_t  ne10_padded   = GGML_PAD(ne10, MATRIX_ROW_PADDING);
     const int64_t  x_stride      = ne10_padded / QK8_1;
@@ -540,7 +542,7 @@ void ggml_cuda_mul_mat_id_vec_repacked_fused(ggml_backend_cuda_context & ctx,
         const dim3 grid_nc((ne01 + 3) / 4, (unsigned) n_assign, 1);
         // One row per lane, four waves. Two rows per lane costs a spill and
         // drops occupancy from 6 to 4 once the gate matrix shares the loop.
-        switch (src0->type) {
+        switch (wtype) {
             case GGML_TYPE_Q8_0:
                 mul_mat_vec_repacked_id1_fused<4, 4, 1><<<grid_nc, 256, 0, stream>>>(
                     w, src1_q8_1_d, (float *) dst->data, (uint32_t) ne00, (uint32_t) ne01,
@@ -589,35 +591,35 @@ void ggml_cuda_mul_mat_id_vec_repacked_fused(ggml_backend_cuda_context & ctx,
     }
 
     const dim3 grid((ne01 + 7) / 8, (unsigned) n_assign, 1);
-    if (src0->type == GGML_TYPE_MXFP4) {
+    if (wtype == GGML_TYPE_MXFP4) {
         mul_mat_vec_rp<GGML_TYPE_MXFP4, 8, 4, true, 32, true><<<grid, 256, 0, stream>>>(
             w, src1_q8_1_d, (float *) dst->data, (uint32_t) ne00, (uint32_t) ne01,
             (const int32_t *) ids->data, (uint32_t) src1->ne[1], expert_stride,
             (uint32_t) x_stride, dst_s1, w_gate, x_bias, gate_bias, fusion->glu_op);
         return;
     }
-    if (src0->type == GGML_TYPE_IQ4_NL) {
+    if (wtype == GGML_TYPE_IQ4_NL) {
         mul_mat_vec_rp<GGML_TYPE_IQ4_NL, 8, 4, true, 32, true><<<grid, 256, 0, stream>>>(
             w, src1_q8_1_d, (float *) dst->data, (uint32_t) ne00, (uint32_t) ne01,
             (const int32_t *) ids->data, (uint32_t) src1->ne[1], expert_stride,
             (uint32_t) x_stride, dst_s1, w_gate, x_bias, gate_bias, fusion->glu_op);
         return;
     }
-    if (src0->type == GGML_TYPE_Q5_K) {
+    if (wtype == GGML_TYPE_Q5_K) {
         mul_mat_vec_rp<GGML_TYPE_Q5_K, 8, 4, true, 32, true><<<grid, 256, 0, stream>>>(
             w, src1_q8_1_d, (float *) dst->data, (uint32_t) ne00, (uint32_t) ne01,
             (const int32_t *) ids->data, (uint32_t) src1->ne[1], expert_stride,
             (uint32_t) x_stride, dst_s1, w_gate, x_bias, gate_bias, fusion->glu_op);
         return;
     }
-    if (src0->type == GGML_TYPE_Q4_K) {
+    if (wtype == GGML_TYPE_Q4_K) {
         mul_mat_vec_rp<GGML_TYPE_Q4_K, 8, 4, true, 32, true><<<grid, 256, 0, stream>>>(
             w, src1_q8_1_d, (float *) dst->data, (uint32_t) ne00, (uint32_t) ne01,
             (const int32_t *) ids->data, (uint32_t) src1->ne[1], expert_stride,
             (uint32_t) x_stride, dst_s1, w_gate, x_bias, gate_bias, fusion->glu_op);
         return;
     }
-    if (src0->type == GGML_TYPE_Q6_K) {
+    if (wtype == GGML_TYPE_Q6_K) {
         mul_mat_vec_rp<GGML_TYPE_Q6_K, 8, 4, true, 32, true><<<grid, 256, 0, stream>>>(
             w, src1_q8_1_d, (float *) dst->data, (uint32_t) ne00, (uint32_t) ne01,
             (const int32_t *) ids->data, (uint32_t) src1->ne[1], expert_stride,

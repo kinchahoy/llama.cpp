@@ -56,6 +56,7 @@ static bool rp_nc_planar() {
 
 void ggml_cuda_mul_mat_repacked(ggml_backend_cuda_context & ctx,
         const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst) {
+    const ggml_type wtype = ggml_cuda_repack_store_type(src0->type);
     GGML_ASSERT(src1->type == GGML_TYPE_F32);
     GGML_ASSERT(dst->type  == GGML_TYPE_F32);
     GGML_ASSERT(src1->nb[0] == sizeof(float));
@@ -89,7 +90,7 @@ void ggml_cuda_mul_mat_repacked(ggml_backend_cuda_context & ctx,
         ggml_cuda_pool_alloc<block_q8_1> src1_q8_1_own;
         ggml_cuda_pool_alloc<char> src1_planar_own;
         block_q8_1 * src1_q8_1_d;
-        const bool planar = ne11 > 1 && src0->type == GGML_TYPE_Q8_0 && rp_nc_planar();
+        const bool planar = ne11 > 1 && wtype == GGML_TYPE_Q8_0 && rp_nc_planar();
         {
             const int64_t s11 = src1->nb[1] / sizeof(float);
             const int64_t s12 = src1->nb[2] / sizeof(float);
@@ -109,7 +110,7 @@ void ggml_cuda_mul_mat_repacked(ggml_backend_cuda_context & ctx,
                     } else {
                         ggml_cuda_pool_alloc<block_q8_1> tmp(ctx.pool(), nblk);
                         quantize_row_q8_1_cuda((const float *) src1->data, nullptr, tmp.get(),
-                            src0->type, ne10, s11, s12, s13, ne10_padded, ne11, ne12, ne13, stream);
+                            wtype, ne10, s11, s12, s13, ne10_padded, ne11, ne12, ne13, stream);
                         rp_q8_1_to_planar<<<(nblk + 255) / 256, 256, 0, stream>>>(tmp.get(), buf, x_stride, (int64_t) nblk);
                     }
                 }
@@ -129,7 +130,7 @@ void ggml_cuda_mul_mat_repacked(ggml_backend_cuda_context & ctx,
                 ggml_cuda_mul_mat_repacked_slice(ctx, src0, w, xq, dst_d,
                     ne00, ne01, ne11, stream);
             } else {
-                switch (src0->type) {
+                switch (wtype) {
                     case GGML_TYPE_Q8_0:
                         if (planar) {
                             ggml_cuda_mul_mat_repacked_nc_t<GGML_TYPE_Q8_0, true>(w, xq, dst_d,
@@ -220,7 +221,7 @@ void ggml_cuda_mul_mat_repacked(ggml_backend_cuda_context & ctx,
     for (int64_t col = 0; col < ne11; col += chunk_ne11) {
         const int64_t iter_ne11 = std::min(chunk_ne11, ne11 - col);
         quantize_mmq_q8_1_cuda((const float *) src1->data + col*s11, nullptr, src1_q8_1.get(),
-            src0->type, ne10, s11, s12, s13, ne10_padded, iter_ne11, ne12, ne13, stream);
+            wtype, ne10, s11, s12, s13, ne10_padded, iter_ne11, ne12, ne13, stream);
 
         for (int64_t i3 = 0; i3 < ne13; i3++) {
         for (int64_t i2 = 0; i2 < ne12; i2++) {
@@ -367,8 +368,9 @@ static void ggml_cuda_mul_mat_repacked_slice(ggml_backend_cuda_context & ctx,
         const ggml_tensor * src0, const uint8_t * w, const block_q8_1 * xq,
         float * dst_d, const int64_t ne00, const int64_t ne01, const int64_t ne11,
         cudaStream_t stream) {
+    const ggml_type wtype = ggml_cuda_repack_store_type(src0->type);
     if (ne11 == 1) {
-        switch (src0->type) {
+        switch (wtype) {
             case GGML_TYPE_Q8_0: {
                 rp_q8_0_mmv_launch<false>(w, xq, dst_d, ne00, ne01, nullptr, nullptr, nullptr, GGML_GLU_OP_REGLU, stream);
             } break;
@@ -420,7 +422,7 @@ static void ggml_cuda_mul_mat_repacked_slice(ggml_backend_cuda_context & ctx,
         const int bn = 64 * MMQ_RP_Q8_TN;
         const dim3 grid((ne01 + mmq_bm - 1) / mmq_bm,
                         (ne11 + bn - 1) / bn, 1);
-        switch (src0->type) {
+        switch (wtype) {
             case GGML_TYPE_Q8_0:
                 mmq_gemm_repacked<false, MMQ_RP_Q8_TN, nrl, GGML_TYPE_Q8_0><<<grid, dim3(64, nrl), 0, stream>>>(
                     w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, (uint32_t) ne11,
@@ -462,7 +464,7 @@ static void ggml_cuda_mul_mat_repacked_slice(ggml_backend_cuda_context & ctx,
         const int bn = 32;
         const dim3 grid((ne01 + mmq_bm - 1) / mmq_bm,
                         (ne11 + bn - 1) / bn, 1);
-        switch (src0->type) {
+        switch (wtype) {
             case GGML_TYPE_Q8_0:
                 mmq_gemm_repacked_w32<false, 1, nrl*2, GGML_TYPE_Q8_0><<<grid, dim3(32, nrl*2), 0, stream>>>(
                     w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, (uint32_t) ne11,
@@ -510,6 +512,7 @@ static void ggml_cuda_mul_mat_repacked_slice(ggml_backend_cuda_context & ctx,
 void ggml_cuda_mul_mat_vec_repacked_fused(ggml_backend_cuda_context & ctx,
         const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst,
         const ggml_cuda_mm_fusion_args_host * fusion) {
+    const ggml_type wtype = ggml_cuda_repack_store_type(src0->type);
     GGML_ASSERT(src1->type == GGML_TYPE_F32);
     GGML_ASSERT(dst->type  == GGML_TYPE_F32);
     GGML_ASSERT(src1->nb[0] == sizeof(float));
@@ -569,7 +572,7 @@ void ggml_cuda_mul_mat_vec_repacked_fused(ggml_backend_cuda_context & ctx,
         const float * gate_bias_s = gate_bias ? gate_bias + (i3 * ne12 + i2) * ne01 : nullptr;
 
         const dim3 grid((ne01 + 15) / 16, 1, 1);
-        if (src0->type == GGML_TYPE_MXFP4) {
+        if (wtype == GGML_TYPE_MXFP4) {
             mul_mat_vec_rp<GGML_TYPE_MXFP4, 16, 16, false, 64, true><<<grid, 1024, 0, stream>>>(
                 w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01,
                 nullptr, 1, 0, 0, 0,

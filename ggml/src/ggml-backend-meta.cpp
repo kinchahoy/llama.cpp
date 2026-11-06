@@ -241,6 +241,15 @@ static bool ggml_backend_meta_device_supports_op(ggml_backend_dev_t dev, const g
             case GGML_TYPE_Q5_K:
             case GGML_TYPE_Q5_1:
                 break;
+            // converted at upload into the Q5_1 / IQ4_NL layouts; GGML_CUDA_REPACK_CONVERT=0 keeps them canonical
+            case GGML_TYPE_Q5_0:
+            case GGML_TYPE_IQ4_XS: {
+                static const bool convert = [] {
+                    const char * env = getenv("GGML_CUDA_REPACK_CONVERT");
+                    return env == nullptr || atoi(env) != 0;
+                }();
+                if (!convert) return false;
+            } break;
             default:
                 return false;
         }

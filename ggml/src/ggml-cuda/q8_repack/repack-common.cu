@@ -9,6 +9,15 @@
 #include <map>
 #include <mutex>
 
+// GGML_CUDA_REPACK_CONVERT=0 keeps Q5_0 and IQ4_XS on the canonical kernels.
+static bool repack_convert_enabled() {
+    static const bool on = [] {
+        const char * env = getenv("GGML_CUDA_REPACK_CONVERT");
+        return env == nullptr || atoi(env) != 0;
+    }();
+    return on;
+}
+
 bool ggml_cuda_repack_tensor_supported(const ggml_tensor * t) {
     // Views are never in repacked layout (the scale-plane offset needs the FULL ne1).
     if (t->view_src != nullptr) return false;
@@ -30,6 +39,12 @@ bool ggml_cuda_repack_tensor_supported(const ggml_tensor * t) {
         case GGML_TYPE_Q5_1: {
             // 32-value blocks, multi-plane like the K-quants, so no view splice either
             return t->ne[0] % 32 == 0 && t->view_src == nullptr;
+        }
+        case GGML_TYPE_Q5_0: {
+            return t->ne[0] % 32 == 0 && repack_convert_enabled();
+        }
+        case GGML_TYPE_IQ4_XS: {
+            return t->ne[0] % 256 == 0 && repack_convert_enabled();
         }
         default:             return false;
     }
@@ -63,7 +78,8 @@ bool ggml_cuda_repack_mul_mat_should_fire(const ggml_tensor * src0) {
 // Dense fused mat-vec: Q8_0 and MXFP4 only, no other type has a dense fused kernel.
 bool ggml_cuda_repack_mmv_fusion_supported(const ggml_tensor * src0) {
     const ggml_tensor * t = src0->view_src != nullptr ? src0->view_src : src0;
-    return (t->type == GGML_TYPE_Q8_0 || t->type == GGML_TYPE_MXFP4) &&
+    const ggml_type wt = ggml_cuda_repack_store_type(t->type);
+    return (wt == GGML_TYPE_Q8_0 || wt == GGML_TYPE_MXFP4) &&
            ggml_cuda_repack_mul_mat_should_fire(src0);
 }
 
@@ -76,9 +92,10 @@ bool ggml_cuda_repack_mmv_id_fusion_supported(const ggml_tensor * src0) {
         return env == nullptr || atoi(env) != 0;
     }();
     const ggml_tensor * t = src0->view_src != nullptr ? src0->view_src : src0;
-    const bool base = t->type == GGML_TYPE_Q8_0 || t->type == GGML_TYPE_MXFP4;
+    const ggml_type wt = ggml_cuda_repack_store_type(t->type);
+    const bool base = wt == GGML_TYPE_Q8_0 || wt == GGML_TYPE_MXFP4;
     // Each of these four types has been gated on a real MoE model: deterministic, unfused path unchanged, width-1 PPL within the repack's own spread.
-    const bool kq   = t->type == GGML_TYPE_Q4_K || t->type == GGML_TYPE_Q5_K || t->type == GGML_TYPE_Q6_K || t->type == GGML_TYPE_IQ4_NL;
+    const bool kq   = wt == GGML_TYPE_Q4_K || wt == GGML_TYPE_Q5_K || wt == GGML_TYPE_Q6_K || wt == GGML_TYPE_IQ4_NL;
     return (base || (kquant && kq)) && ggml_cuda_repack_mul_mat_should_fire(src0);
 }
 
@@ -300,6 +317,50 @@ void repack_q51_host(const block_q5_1 * blocks, uint8_t * dst, const int64_t ne0
     }
 }
 
+// Host repack of one Q5_0 matrix into the Q5_1 planes: {d, m} = {d, -16 d} gives the same values, and -16 d is exact in f16.
+void repack_q50_host(const block_q5_0 * blocks, uint8_t * dst, const int64_t ne0, const int64_t ne1) {
+    GGML_ASSERT(ne0 % 32 == 0);
+    const int64_t n_sub  = ne0 / 32;
+    const int64_t qs_str = repack_qs_row_stride(GGML_TYPE_Q5_1, ne0);
+    const size_t  hoff   = (size_t) ne1 * qs_str;
+    const size_t  doff   = hoff + (size_t) ne1 * n_sub * 4;
+
+    memset(dst, 0, doff + (size_t) ne1 * n_sub * 4);
+
+    for (int64_t row = 0; row < ne1; row++) {
+        const block_q5_0 * brow = blocks + row * n_sub;
+        for (int64_t sb = 0; sb < n_sub; sb++) {
+            const block_q5_0 * b = &brow[sb];
+            const size_t wi = (size_t) row * n_sub + sb;
+            const half dm[2] = { b->d, __float2half_rn(-16.0f * __half2float(b->d)) };
+            memcpy(dst + (size_t) row * qs_str + (size_t) sb * 16, b->qs, 16);
+            memcpy(dst + hoff + wi * 4, b->qh, 4);
+            memcpy(dst + doff + wi * 4, dm, 4);
+        }
+    }
+}
+
+// Host repack of one IQ4_XS matrix into the IQ4_NL planes: each 32-value sub-block keeps its nibble bytes and gets the f16 scale d*(ls - 32).
+void repack_iq4xs_host(const block_iq4_xs * blocks, uint8_t * dst, const int64_t ne0, const int64_t ne1) {
+    GGML_ASSERT(ne0 % QK_K == 0);
+    const int64_t n_blocks = ne0 / 32;
+    const int64_t qs_str   = repack_qs_row_stride(GGML_TYPE_IQ4_NL, ne0);
+    const size_t  qs_len   = (size_t) ne1 * qs_str;
+
+    memset(dst, 0, qs_len + (size_t) ne1 * n_blocks * 2);
+
+    for (int64_t row = 0; row < ne1; row++) {
+        for (int64_t blk = 0; blk < n_blocks; blk++) {
+            const block_iq4_xs * b = &blocks[row * (n_blocks / 8) + blk / 8];
+            const int ib = (int) (blk % 8);
+            const int ls = ((b->scales_l[ib / 2] >> 4 * (ib % 2)) & 0xf) | (((b->scales_h >> 2 * ib) & 3) << 4);
+            const half d = __float2half_rn(__half2float(b->d) * (ls - 32));
+            memcpy(dst + (size_t) row * qs_str + (size_t) blk * 16, b->qs + 16 * ib, 16);
+            memcpy(dst + qs_len + (size_t)(row * n_blocks + blk) * 2, &d, 2);
+        }
+    }
+}
+
 void repack_host(ggml_type type, const void * blocks, uint8_t * dst, const int64_t ne0, const int64_t ne1) {
     switch (type) {
         case GGML_TYPE_Q8_0:
@@ -322,6 +383,12 @@ void repack_host(ggml_type type, const void * blocks, uint8_t * dst, const int64
             break;
         case GGML_TYPE_Q5_1:
             repack_q51_host((const block_q5_1 *) blocks, dst, ne0, ne1);
+            break;
+        case GGML_TYPE_Q5_0:
+            repack_q50_host((const block_q5_0 *) blocks, dst, ne0, ne1);
+            break;
+        case GGML_TYPE_IQ4_XS:
+            repack_iq4xs_host((const block_iq4_xs *) blocks, dst, ne0, ne1);
             break;
         default:
             GGML_ABORT("unsupported repack type");
@@ -358,6 +425,8 @@ const uint8_t * repack_view_get_cached(
         cudaStream_t stream) {
     // the K-quant multi-plane layouts have no view splice: supports() refuses their views
     GGML_ASSERT(base->type != GGML_TYPE_Q6_K && base->type != GGML_TYPE_Q4_K && base->type != GGML_TYPE_Q5_K && base->type != GGML_TYPE_Q5_1 && "repack: multi-plane views are not spliced");
+    // canonical view offsets do not map onto a converted layout
+    GGML_ASSERT(ggml_cuda_repack_store_type(base->type) == base->type && "repack: converted Q5_0/IQ4_XS views are not spliced");
     const int64_t ne0_v = view->ne[0];
     const int64_t ne1_v = view->ne[1];
     const int64_t ne2_v = view->ne[2];

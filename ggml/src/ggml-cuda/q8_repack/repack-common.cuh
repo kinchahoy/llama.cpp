@@ -40,18 +40,25 @@ static __host__ __device__ inline T repack_qs_stride(const T ne0) {
 // Per-type qs row stride and scale row bytes: Q8_0 rows carry ne0 payload
 // bytes and 2 B f16 scales per sub-block, MXFP4 rows carry packed nibbles
 // (ne0/2 B) and 1 B e8m0 scales per sub-block. Both share the de-alias bump.
+// Q5_0 and IQ4_XS are converted at upload into the Q5_1 and IQ4_NL layouts; sizes and kernels use the stored type.
+static __host__ __device__ inline ggml_type ggml_cuda_repack_store_type(const ggml_type type) {
+    return type == GGML_TYPE_Q5_0 ? GGML_TYPE_Q5_1 : type == GGML_TYPE_IQ4_XS ? GGML_TYPE_IQ4_NL : type;
+}
+
 template <typename T>
-static __host__ __device__ inline T repack_qs_row_stride(const ggml_type type, const T ne0) {
+static __host__ __device__ inline T repack_qs_row_stride(ggml_type type, const T ne0) {
+    type = ggml_cuda_repack_store_type(type);
     return repack_qs_stride((type == GGML_TYPE_MXFP4 || type == GGML_TYPE_IQ4_NL || type == GGML_TYPE_Q6_K || type == GGML_TYPE_Q4_K || type == GGML_TYPE_Q5_K || type == GGML_TYPE_Q5_1) ? ne0 / 2 : ne0);
 }
 template <typename T>
-static __host__ __device__ inline T repack_scale_row_bytes(const ggml_type type, const T ne0) {
+static __host__ __device__ inline T repack_scale_row_bytes(ggml_type type, const T ne0) {
+    type = ggml_cuda_repack_store_type(type);
     return (ne0 / 32) * (type == GGML_TYPE_MXFP4 ? 1 : 2);
 }
 
 static inline size_t repack_gcn_nbytes(const ggml_type type, const int64_t ne0, const int64_t ne1) {
     GGML_ASSERT(ne0 % 32 == 0);
-    switch (type) {
+    switch (ggml_cuda_repack_store_type(type)) {
         case GGML_TYPE_Q8_0:
             return (size_t) ne1 * ((size_t) repack_qs_stride(ne0) + (size_t)(ne0 / 32) * 2);
         // nibble plane row [ne0/2 B, de-aliased like the Q8_0 qs rows] + 1-byte
@@ -592,6 +599,8 @@ void repack_q6k_host(const block_q6_K * blocks, uint8_t * dst, const int64_t ne0
 void repack_q4k_host(const block_q4_K * blocks, uint8_t * dst, const int64_t ne0, const int64_t ne1);
 void repack_q5k_host(const block_q5_K * blocks, uint8_t * dst, const int64_t ne0, const int64_t ne1);
 void repack_q51_host(const block_q5_1 * blocks, uint8_t * dst, const int64_t ne0, const int64_t ne1);
+void repack_q50_host(const block_q5_0 * blocks, uint8_t * dst, const int64_t ne0, const int64_t ne1);
+void repack_iq4xs_host(const block_iq4_xs * blocks, uint8_t * dst, const int64_t ne0, const int64_t ne1);
 void repack_host(ggml_type type, const void * blocks, uint8_t * dst, const int64_t ne0, const int64_t ne1);
 
 const uint8_t * repack_view_get_cached(
@@ -633,7 +642,7 @@ static inline block_q8_1 * repack_quantize_src1_q8_1(
     }
     if (!hit) {
         quantize_row_q8_1_cuda((const float *) src1->data, nullptr, dstq,
-            src0->type, ne10, s11, s12, s13, ne10_padded, nrows, ne2, ne3, stream);
+            ggml_cuda_repack_store_type(src0->type), ne10, s11, s12, s13, ne10_padded, nrows, ne2, ne3, stream);
     }
     return dstq;
 }
