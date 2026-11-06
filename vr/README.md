@@ -6,7 +6,7 @@ Local enhancements for two 32 GiB gfx906 GPUs (MI50/MI60), primarily tested with
 | --- | --- |
 | [Improvements](IMPROVEMENTS.md) | What changed, why it helps, and what to revisit |
 | [Performance](PERFORMANCE.md) | Representative measurements and their limits |
-| [Catch up](how-to-catchup.md) | Merge upstream, validate briefly, and refresh patches |
+| [Catch up](how-to-catchup.md) | Merge upstream and run one final validation pass; patch export is optional |
 | [Current patch kit](patches/llama-head-36a0e2ffc/README.md) | Replayable overlay for the `36a0e2ffc` base |
 | [Rebuild record, 2026-10-29](old-ignore/2026-10-29/rebuild/README.md) | Stages A-D, cumulative patches, results, status log and what was dropped |
 | [Benchmark scripts](scripts/README.md) | Build flags, llama-bench, output and MTP checks used for the rebuild |
@@ -61,6 +61,8 @@ Keep HIP graphs enabled and RCCL off for the current mixed PCIe-lane topology. H
 
 ## Validation
 
-The focused TP harness is built with `-DLLAMA_BUILD_VR_EXPERIMENTS=ON`, target `vr-test-gfx906-tp`. Follow the catch-up guide's combined two-minute runtime-check budget after a build. Longer checks and performance comparisons require explicit user OK. `catchup-script.sh bench` previews its command unless approved execution is requested.
+For weekly updates, first have the human commit and push the reviewed current state, then fetch and merge upstream in the normal checkout with rerere enabled. Resolve and review the merge, build once in a new directory, and run one final validation pass. The human commits and pushes the accepted merge after the checks pass. Keep the last two successful build directories, including their libraries, for comparisons. Git merges are the primary update mechanism; export a patch kit only when a portable snapshot or release checkpoint is useful. Kits describe their recorded base and target and may lag behind the branch. See [the catch-up routine](how-to-catchup.md).
+
+The focused TP harness is built with `-DLLAMA_BUILD_VR_EXPERIMENTS=ON`, target `vr-test-gfx906-tp`. The two TP checks share the catch-up guide's two-minute runtime budget after the final build. Longer checks and performance comparisons require explicit user OK. The final report includes TP results and baseline/candidate PP2048 and TG128 side by side. The worktree-based `catchup-script.sh` is optional.
 
 `master` is the final branch. Use `experiment/topic` for unfinished work and `archive/YYYY-MM-DD/topic` for retained historical branches; see the [cleanup record](old-ignore/2026-10-29/cleanup.md).

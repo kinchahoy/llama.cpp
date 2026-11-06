@@ -23,6 +23,8 @@ Against official llama.cpp with the same build flags: +53% 27B PP, +12% 27B TG, 
 
 ## How to test, and what the status words mean
 
+For weekly merges, use the [single final validation pass](how-to-catchup.md#one-final-validation-pass). Its one-repeat PP/TG pair screens for regressions; it does not validate or reject an optimization idea. The stronger evidence requirements below apply to optimization experiments.
+
 Every idea below has one status:
 
 - **Landed**: in master, with the evidence named.

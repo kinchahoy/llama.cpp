@@ -1,6 +1,6 @@
 # Catch up with official llama.cpp
 
-Keep upstream interfaces and the smallest local delta that preserves the gfx906 improvements. Read [the current setup](README.md), [improvements](IMPROVEMENTS.md), `AGENTS.md`, and `skills/code-review/SKILL.md` first. Historical workflows under [old-ignore](old-ignore/README.md) are reference material, not instructions.
+Keep upstream interfaces and the smallest local delta that preserves the gfx906 improvements. Read [the current setup](README.md), the [feature index](IMPROVEMENTS.md#merge-maintenance-index), `AGENTS.md`, and `skills/code-review/SKILL.md` first. Read detailed evidence only for affected features; do not load archived investigations on every merge. Historical workflows under [old-ignore](old-ignore/README.md) are reference material, not instructions.
 
 Keep the separate `play-qwen-off` output-style project out of this performance patch chain. The accepted grouped-MoE subset from `flashnext-fast` belongs in this patch chain, including its tests and dispatch/fallback guards. Its separate GPU-feedback experiment does not. Model priorities are listed in [the current guide](README.md#priorities-and-separate-work).
 
@@ -10,18 +10,34 @@ The rebuild removed multi-stage TP (`-tps`) and the fork-only DeepSeek V4/V4.1, 
 
 ## Prepare and merge
 
-Start from a reviewed, clean tracked HEAD. The helper fetches official master, records both SHAs, creates detached `upstream` and `port` worktrees, and saves diffs in a new session directory. Untracked loose files stay untouched. Preserve the original build and its libraries for any approved baseline comparison.
+Use the normal checkout. The human first commits and pushes the reviewed current state to the personal fork, including any local work that must be kept. Confirm the push succeeded and start with a clean tracked working tree. Agents do not commit or push. Keep unrelated untracked files untouched.
+
+Keep the previous successful build in its original directory with all its shared libraries. Do not rebuild it, copy only its executable, or rename it: build paths can be embedded in library lookup. Set `BASE` to that build; on the first run it is `build-ilp`. Build each candidate in a new directory and keep the last two successful builds for quick comparisons. After acceptance, that candidate becomes the next merge's baseline. Record its path and source identity with the results.
+
+Run from the repository root in Bash, keeping these variables for the later steps:
 
 ```bash
-vr/catchup-script.sh prepare /tmp/mx-catchup-session
-# Preview only; use an existing local model.
-vr/catchup-script.sh bench /tmp/mx-catchup-session /absolute/path/model.gguf
-vr/catchup-script.sh merge /tmp/mx-catchup-session
-# Resolve conflicts manually, then refresh reports.
-vr/catchup-script.sh diff /tmp/mx-catchup-session
+# One-time repository setup. Git invokes rerere automatically during merges.
+git config rerere.enabled true
+git config rerere.autoupdate false
+
+OLD_HEAD=$(git rev-parse HEAD)
+BASE="$PWD/build-ilp" # On later merges, use the last accepted candidate build.
+CAND="$PWD/build-catchup-$(date +%Y%m%d-%H%M%S)"
+OUT="$CAND/validation"
+mkdir -p "$OUT"
+printf '%s\n' "$OLD_HEAD" > "$OUT/baseline-source.txt"
+printf '%s\n' "$BASE" > "$OUT/baseline-build.txt"
+
+git fetch upstream
+UPSTREAM_HEAD=$(git rev-parse upstream/master)
+printf '%s\n' "$UPSTREAM_HEAD" > "$OUT/upstream-source.txt"
+git merge --no-commit --no-ff "$UPSTREAM_HEAD"
 ```
 
-During this merge, ours is MX and theirs is new official upstream. Inspect both sides and automatically merged callers; do not choose whole files blindly. Prefer an upstream equivalent over retaining an obsolete local implementation. Check the saved `old-overlay.patch`, `upstream.patch`, `overlay.patch`, and `merge-changes.patch` to explain additions and removals.
+If the merge stops, review reused resolutions and resolve the remaining conflicts. Run `git rerere` to record the resolutions, then `git add` only the resolved paths and required new files. Review automatically merged callers too; rerere cannot detect semantic errors. Prefer upstream equivalents over obsolete local code and take new model support from upstream. Do not choose whole files blindly.
+
+The worktree-based `catchup-script.sh` remains an optional alternative; it is not required for this routine.
 
 Preserve these connected paths:
 
@@ -34,26 +50,83 @@ Preserve these connected paths:
 
 Reconcile loader/converter/tensor identifiers and graph/memory callers together. DFlash vision remains unvalidated. Ask before a large redesign or unclear tradeoff. Keep RCCL off for the current CPU-lane/motherboard-lane topology; revisit after the hardware changes. The unreachable legacy HIP overlap-only branch has been removed from `allreduce.cu`; do not restore it.
 
-## Build and quick validation
+## One final validation pass
 
-All conflicts and interfaces must be resolved before building. Check both staged and unstaged source diffs with `git diff --check` and `git diff --cached --check`, excluding generated patch files and archived records. Inspect `git ls-files -u` and search runtime source for conflict markers.
+Finish the merge and fixes before building. Run one final pass; repeat only affected checks if something fails or subsequent code changes affect the result. Intermediate checks are for diagnosing a specific problem.
 
-In the port worktree, use the existing TheRock toolchain and the [README build command](README.md), replacing `build-ilp` with `build-catchup` and adding `-DLLAMA_BUILD_VR_EXPERIMENTS=ON`. Keep its `CMAKE_HIP_FLAGS` and `CMAKE_CXX_FLAGS`; without them 27B was 2-3% slower. Preserve relevant old cache options, including `GGML_HIP_NO_VMM=ON` and `GGML_HIP_MMQ_MFMA=ON`. Build only:
+Check staged and unstaged source diffs with `git diff --check` and `git diff --cached --check`, excluding generated patches and archives. Require no entries from `git ls-files -u` and inspect runtime source for conflict markers. Confirm HIP still compiles the default host-staged AllReduce path without an environment switch.
+
+Configure and build once with the existing comparison flags. Leave `BASE` untouched.
 
 ```bash
-cmake --build build-catchup --target llama-cli llama-bench llama-server vr-test-gfx906-tp -j 8
-# One shared runtime budget; build time is separate.
-timeout --kill-after=5s 110s bash -eu -c '
-  unset GGML_CUDA_PEER_AR
-  ./build-catchup/bin/llama-cli --version
-  ./build-catchup/bin/vr-test-gfx906-tp --n 1 --check
-  ./build-catchup/bin/vr-test-gfx906-tp --n 2048 --check
-'
+source /home/raistlin/amd-clean/env/therock.sh
+cmake -S . -B "$CAND" \
+  -DGGML_HIP=ON -DGGML_HIP_GRAPHS=ON -DGGML_HIP_RCCL=OFF \
+  -DGGML_HIP_NO_VMM=ON -DGGML_HIP_MMQ_MFMA=ON \
+  -DLLAMA_OPENSSL=ON -DLLAMA_BUILD_VR_EXPERIMENTS=ON \
+  -DAMDGPU_TARGETS=gfx906 -DCMAKE_BUILD_TYPE=Release \
+  -DHIP_COMPILER=clang -DCMAKE_PREFIX_PATH="$(rocm-sdk path --cmake)" \
+  -DCMAKE_HIP_FLAGS="-mllvm -amdgpu-sched-strategy=max-ilp" \
+  -DCMAKE_CXX_FLAGS="-O3 -Wno-unused-command-line-argument" \
+  > "$OUT/configure.log" 2>&1
+# Continue only if configuration succeeds.
+cmake --build "$CAND" --target llama-cli llama-server llama-bench vr-test-gfx906-tp -j 8 \
+  > "$OUT/build.log" 2>&1
 ```
 
-Require successful exits and `check=pass` for both widths. Timeout or missing GPUs means incomplete validation. These checks sample TP matmul/reduction output; they do not prove model quality, speculative correctness, or unchanged performance. Runtime checks have a combined two-minute budget. Ask before longer checks or retries; do not run full suites or download models.
+Continue only after a successful build. Record the resolved source and build settings:
 
-## Refresh the patch chain
+```bash
+git diff --binary HEAD > "$OUT/candidate-changes.patch"
+cp "$CAND/CMakeCache.txt" "$OUT/CMakeCache.txt"
+sha256sum "$BASE/bin/llama-bench" "$CAND/bin/llama-bench" > "$OUT/binaries.sha256"
+ldd "$BASE/bin/llama-bench" > "$OUT/baseline-libraries.txt"
+ldd "$CAND/bin/llama-bench" > "$OUT/candidate-libraries.txt"
+unset GGML_CUDA_PEER_AR GGML_CUDA_TP_OVERLAP
+
+timeout --kill-after=5s 110s bash -eu -c '
+  "$1/bin/vr-test-gfx906-tp" --n 1 --check
+  "$1/bin/vr-test-gfx906-tp" --n 2048 --check
+' bash "$CAND" > "$OUT/tp.log" 2>&1
+```
+
+Require exit zero and `check=pass` at both widths. These synthetic tests need no model or `-hf`: Q8 weights and F32 activations contain ones, the dot-product dimension is split across ROCm0/ROCm1, and the reduced output should be 17408. The harness executes the graph twice and checks only the first 16 output values of the final result, within an absolute tolerance of 2. It is a narrow matmul/reduction smoke test, not full model or speculative correctness coverage. Its `time_us` is not model PP/TG performance.
+
+The two TP checks share the existing two-minute runtime budget (110 seconds plus termination allowance). Timeout, missing GPUs or missing pass output means incomplete validation. Generation and benchmarks below require explicit user OK for the exact commands and combined time limit; no standing budget has been agreed. Do not download models or run full suites. Ask before longer checks or retries.
+
+After approval, run one short Qwen3.8-27B Q8_0 generation and matched PP2048/TG128 benchmarks. Both builds must resolve `-hf` to the same cached model files; keep the cache unchanged between runs. `--offline` prevents downloads. Use the same environment and no competing GPU workload.
+
+```bash
+timeout --kill-after=5s 110s "$CAND/bin/llama-cli" \
+  -hf unsloth/Qwen3.8-27B-GGUF:Q8_0 --offline \
+  -ngl 999 -dev ROCm0,ROCm1 -sm tensor -ts 1,1 -fa on \
+  -b 2048 -ub 2048 -c 4096 -t 20 -tb 20 \
+  --temp 0 --top-k 1 -s 42 -n 32 -no-cnv --simple-io --no-display-prompt \
+  -p 'The history of the printing press begins in' \
+  < /dev/null > "$OUT/generation.txt" 2> "$OUT/generation.log"
+# Continue only if generation succeeds; inspect the saved text.
+for label in baseline candidate; do
+  if [ "$label" = baseline ]; then BUILD="$BASE"; else BUILD="$CAND"; fi
+  timeout --kill-after=5s 110s "$BUILD/bin/llama-bench" \
+    -hf unsloth/Qwen3.8-27B-GGUF:Q8_0 --offline \
+    -ngl 999 -dev ROCm0/ROCm1 -sm tensor -ts 1/1 -fa on \
+    -b 2048 -ub 2048 -t 20 -p 2048 -n 128 -d 0 -r 1 -o json \
+    > "$OUT/$label.json" 2> "$OUT/$label.log" || {
+      BENCH_STATUS=$?
+      printf '%s\n' "$BENCH_STATUS" > "$OUT/$label.exit"
+      exit "$BENCH_STATUS"
+    }
+  printf '0\n' > "$OUT/$label.exit"
+done
+```
+
+These are three separate runtime invocations, each capped at 110 seconds plus 5 seconds to terminate; this is not a claim they fit the TP checks' two-minute budget. The benchmarks use warmup and one repetition. Require successful exits and complete JSON for both builds. One pair is a quick regression screen, not repeatability evidence. Add other models or targeted speculative/MoE checks only when the affected feature needs them and the user approves their budget.
+
+Report baseline and candidate PP2048 and TG128 in one table, with tokens/second and percentage change `(candidate / baseline - 1) * 100`. Keep the JSON, stderr, generation text, TP pass/fail and source/build identities in `OUT`. Compare measured results from this session; historical numbers are context, not a matched baseline. Mark skipped checks as not run and performance as not measured if either benchmark fails. Diagnose regressions before tuning; no automatic regression threshold has been agreed.
+
+## Optional patch kit export
+
+Git merges are the primary update mechanism. Skip this section during routine weekly merges. Export a kit when a portable snapshot or release checkpoint is needed; export and replay are not required before accepting a validated merge. A kit describes its recorded base and target, and can lag behind the branch. Record the new upstream base in the merge handoff even when no kit is exported.
 
 Keep one current kit under `vr/patches/`; move superseded kits into a dated `vr/old-ignore/` campaign when the replacement is verified. Do not alter old patch payloads.
 
@@ -61,13 +134,11 @@ Stage the reviewed resolution, including required new files. The following expor
 
 ```bash
 set -euo pipefail
-SESSION_DIR=/tmp/mx-catchup-session
-REPO=$(cat "$SESSION_DIR/source-repo")
-PORT_DIR="$SESSION_DIR/port"
-UPSTREAM_HEAD=$(cat "$SESSION_DIR/upstream-sha")
-UPSTREAM_SHORT=$(git -C "$PORT_DIR" rev-parse --short=9 "$UPSTREAM_HEAD")
+REPO=$(git rev-parse --show-toplevel)
+# UPSTREAM_HEAD is the pinned SHA from the merge step.
+UPSTREAM_SHORT=$(git rev-parse --short=9 "$UPSTREAM_HEAD")
 KIT="$REPO/vr/patches/llama-head-36a0e2ffc"
-cd "$PORT_DIR"
+cd "$REPO"
 test -z "$(git ls-files -u)"
 git diff --exit-code
 RESOLVED_TREE=$(git write-tree)
@@ -83,7 +154,7 @@ SNAP_SUFFIX="$UPSTREAM_HEAD-$RESOLVED_TREE"
 for entry in "target:$RESOLVED_TREE" "mid:$MID_TREE"; do
     git update-ref "refs/port-snapshots/gfx906-$SNAP_SUFFIX-${entry%%:*}" "${entry#*:}" ''
 done
-NEXT_KIT="$PORT_DIR/vr/patches/llama-head-$UPSTREAM_SHORT"
+NEXT_KIT="$REPO/vr/patches/llama-head-$UPSTREAM_SHORT"
 if test -e "$NEXT_KIT"; then NEXT_KIT="${NEXT_KIT}-refresh"; fi
 test ! -e "$NEXT_KIT"
 mkdir -p "$NEXT_KIT"
@@ -108,10 +179,8 @@ Review the full upstream-to-target file list against `MANIFEST.tsv` and `EXCLUDE
 
 Document the new base, intermediate/target tree IDs and refs, build/check results, and limitations in its README. Update the active kit links here and in `vr/README.md`. The patches must replay without local snapshot refs; those refs are needed to retain the trees for regeneration. Offline export/replay is separate from the GPU runtime budget.
 
-## Performance and handoff
+## Handoff and human push
 
-Benchmarks require explicit user OK for the exact baseline/candidate commands and combined time limit. The helper's `bench` command previews PP2048/TG128 at depth 0, batch/ubatch 2048, full offload, flash attention, 50/50 TP, warmup and one repetition. Only after approval add `--run-approved`. Pass the candidate binary as the optional third positional argument for the post-merge run. Each invocation has a 110-second timeout plus 5 seconds to terminate. For this host, the requested common CPU-thread setting is `-t 20 -tb 20`; it is a comparison setting, not a claim that 20 threads are optimal.
+Report the old and new upstream bases, meaningful overlay changes, candidate and baseline build paths, TP results, generation result, side-by-side PP/TG table, patch replay results if exported (otherwise say export skipped), log directory, and untested behavior. Keep this short; link detailed logs instead of pasting them. Do not claim preserved performance without measurements.
 
-Use the same immutable model files, GPUs, environment and settings. The helper records commands, binary hash, library paths, cache and output, but cannot prove a binary matches a source tree. Check build identity and keep each binary with its own libraries. Do not compare different context depths or workloads as if matched. Diagnose a regression before proposing tuning.
-
-Leave the merge and kit uncommitted. Report worktree path, official SHA, meaningful delta changes, build/smoke/replay results, and untested behavior. Do not claim preserved performance without measurements. Do not commit, push, or publish without the user's separate instruction.
+Leave agent work uncommitted. After reviewing the passing final checks, the human commits and pushes the merge to the personal fork. Record that accepted commit with the candidate's validation logs. Retain this build and the previous successful build in their original directories for quick comparisons; use this candidate as `BASE` next week. Never rebuild the retained baseline during the next merge. Agents do not commit, push, or publish.
