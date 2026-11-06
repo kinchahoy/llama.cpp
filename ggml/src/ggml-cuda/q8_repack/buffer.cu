@@ -320,7 +320,7 @@ static __global__ void repack_q51_kernel(
     }
 }
 
-// Device-side Q5_0 repack into the Q5_1 planes, one thread per 32-value block: {d, m} = {d, -16 d}.
+// Device-side Q5_0 repack, one thread per 32-value block: nibble bytes, fifth-bit word and f16 d into their planes.
 static __global__ void repack_q50_kernel(
         const uint8_t * __restrict__ src, uint8_t * __restrict__ dst,
         const int64_t ne1, const int64_t n_sub, const int64_t qs_str,
@@ -343,9 +343,7 @@ static __global__ void repack_q50_kernel(
         for (int j = 0; j < 4; j++) {
             base[hoff + wi * 4 + j] = b->qh[j];
         }
-        half * dm = reinterpret_cast<half *>(base + doff + wi * 4);
-        dm[0] = b->d;
-        dm[1] = __float2half_rn(-16.0f * __half2float(b->d));
+        *reinterpret_cast<half *>(base + doff + wi * 2) = b->d;
     }
 }
 

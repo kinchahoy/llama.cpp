@@ -317,25 +317,24 @@ void repack_q51_host(const block_q5_1 * blocks, uint8_t * dst, const int64_t ne0
     }
 }
 
-// Host repack of one Q5_0 matrix into the Q5_1 planes: {d, m} = {d, -16 d} gives the same values, and -16 d is exact in f16.
+// Host repack of one Q5_0 matrix: Q5_1's nibble rows and fifth-bit plane, then an f16 d plane.
 void repack_q50_host(const block_q5_0 * blocks, uint8_t * dst, const int64_t ne0, const int64_t ne1) {
     GGML_ASSERT(ne0 % 32 == 0);
     const int64_t n_sub  = ne0 / 32;
-    const int64_t qs_str = repack_qs_row_stride(GGML_TYPE_Q5_1, ne0);
+    const int64_t qs_str = repack_qs_row_stride(GGML_TYPE_Q5_0, ne0);
     const size_t  hoff   = (size_t) ne1 * qs_str;
     const size_t  doff   = hoff + (size_t) ne1 * n_sub * 4;
 
-    memset(dst, 0, doff + (size_t) ne1 * n_sub * 4);
+    memset(dst, 0, doff + (size_t) ne1 * n_sub * 2);
 
     for (int64_t row = 0; row < ne1; row++) {
         const block_q5_0 * brow = blocks + row * n_sub;
         for (int64_t sb = 0; sb < n_sub; sb++) {
             const block_q5_0 * b = &brow[sb];
             const size_t wi = (size_t) row * n_sub + sb;
-            const half dm[2] = { b->d, __float2half_rn(-16.0f * __half2float(b->d)) };
             memcpy(dst + (size_t) row * qs_str + (size_t) sb * 16, b->qs, 16);
             memcpy(dst + hoff + wi * 4, b->qh, 4);
-            memcpy(dst + doff + wi * 4, dm, 4);
+            memcpy(dst + doff + wi * 2, &b->d, 2);
         }
     }
 }
@@ -424,9 +423,9 @@ const uint8_t * repack_view_get_cached(
         const ggml_tensor * view, const ggml_tensor * base,
         cudaStream_t stream) {
     // the K-quant multi-plane layouts have no view splice: supports() refuses their views
-    GGML_ASSERT(base->type != GGML_TYPE_Q6_K && base->type != GGML_TYPE_Q4_K && base->type != GGML_TYPE_Q5_K && base->type != GGML_TYPE_Q5_1 && "repack: multi-plane views are not spliced");
+    GGML_ASSERT(base->type != GGML_TYPE_Q6_K && base->type != GGML_TYPE_Q4_K && base->type != GGML_TYPE_Q5_K && base->type != GGML_TYPE_Q5_1 && base->type != GGML_TYPE_Q5_0 && "repack: multi-plane views are not spliced");
     // canonical view offsets do not map onto a converted layout
-    GGML_ASSERT(ggml_cuda_repack_store_type(base->type) == base->type && "repack: converted Q5_0/IQ4_XS views are not spliced");
+    GGML_ASSERT(ggml_cuda_repack_store_type(base->type) == base->type && "repack: converted IQ4_XS views are not spliced");
     const int64_t ne0_v = view->ne[0];
     const int64_t ne1_v = view->ne[1];
     const int64_t ne2_v = view->ne[2];
