@@ -1,0 +1,16 @@
+ggml_cuda_init: found 2 ROCm devices (Total VRAM: 65504 MiB):
+  Device 0: AMD Radeon Graphics, gfx906:sramecc+:xnack- (0x906), VMM: no, Wave Size: 64, VRAM: 32752 MiB
+  Device 1: AMD Radeon Graphics, gfx906:sramecc+:xnack- (0x906), VMM: no, Wave Size: 64, VRAM: 32752 MiB
+TP custom AR: disabled, set GGML_CUDA_PEER_AR=1 to enable peer access AllReduce
+ggml_cuda_ar_pipeline_init: initialized AllReduce pipeline: 2 GPUs, 1024 KB chunked kernel staging + 32 MB copy-engine staging per GPU
+ROCm q8_1 cache[0]: 0 hits, 2 misses, 1 entries at peak
+ROCm q8_1 cache[1]: 0 hits, 2 misses, 1 entries at peak
+gfx906_tp_down n=1 time_us=2172 result_bytes=20480 allreduce=default overlap=off wire=f32 output_usage=compute check=pass
+ggml_cuda_init: found 2 ROCm devices (Total VRAM: 65504 MiB):
+  Device 0: AMD Radeon Graphics, gfx906:sramecc+:xnack- (0x906), VMM: no, Wave Size: 64, VRAM: 32752 MiB
+  Device 1: AMD Radeon Graphics, gfx906:sramecc+:xnack- (0x906), VMM: no, Wave Size: 64, VRAM: 32752 MiB
+TP custom AR: disabled, set GGML_CUDA_PEER_AR=1 to enable peer access AllReduce
+ggml_cuda_ar_pipeline_init: initialized AllReduce pipeline: 2 GPUs, 1024 KB chunked kernel staging + 32 MB copy-engine staging per GPU
+ROCm q8_1 cache[0]: 0 hits, 8 misses, 2 entries at peak
+ROCm q8_1 cache[1]: 0 hits, 8 misses, 2 entries at peak
+gfx906_tp_down n=2048 time_us=13367 result_bytes=41943040 allreduce=default overlap=off wire=f32 output_usage=compute check=pass

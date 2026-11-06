@@ -2,24 +2,25 @@
 
 ## Current numbers
 
-Measured source: runtime tree `3875d3850b45825cc12d5aecb22487b7377ad598` (official `36a0e2ffc` plus the [current kit](patches/llama-head-36a0e2ffc/README.md)), which is the runtime content of master commit `f5031e739`. Build: `scripts/configure_stage.sh` flags, TheRock ROCm on two gfx906 (MI60 + MI50).
+Build: [catch-up guide](how-to-catchup.md#one-final-validation-pass) flags, TheRock ROCm on two gfx906 (MI60 + MI50). Settings: [standard](#record-format) unless noted. The source column says which tree each row measured.
 
-| Model | Mode | PP2048 | TG | Measured (PDT) | Source |
-| --- | --- | ---: | ---: | --- | --- |
-| Qwen3.8-27B Q8_0 | plain, llama-bench | 685.3 | 36.7 | 2026-10-29 20:01 | [rebuild table](#2026-10-29-rebuild-on-official-36a0e2ffc) |
-| Qwen3.8-27B Q8_0 | MTP2, llama-cli | - | 60.7 | 2026-10-29 20:29 | [speculative runs](#speculative-decoding-on-d-one-run-each) |
-| Qwen3.8 Flash Next IQ3_XXS | plain, llama-bench | 527.6 | 39.1 | 2026-10-29 20:01 | [rebuild table](#2026-10-29-rebuild-on-official-36a0e2ffc) |
-| Qwen3.8 Flash Next IQ3_XXS | MTP2, llama-cli | - | 49.6 | 2026-10-29 20:29 | [speculative runs](#speculative-decoding-on-d-one-run-each) |
+| Model | Mode | PP2048 | TG | Measured (PDT) | Source tree | Record |
+| --- | --- | ---: | ---: | --- | --- | --- |
+| Qwen3.8-27B Q8_0 | plain, llama-bench | 696.9 | 37.9 | 2026-11-05 | `bc0ce9691` | [catch-up](#2026-11-05-catch-up-to-official-4b77dee05) |
+| Qwen3.8-27B Q8_0 | MTP2, llama-cli | - | 64.1 | 2026-11-05 | `bc0ce9691` | [catch-up](#2026-11-05-catch-up-to-official-4b77dee05) |
+| Qwen3.8-27B Q8_0 | DFlash5, llama-cli | - | 67.4 | 2026-11-05 | `bc0ce9691` | [catch-up](#2026-11-05-catch-up-to-official-4b77dee05) |
+| Qwen3.8 Flash Next IQ3_XXS | plain, llama-bench | 527.6 | 39.1 | 2026-10-29 20:01 | `f5031e739`, not re-measured | [rebuild table](#2026-10-29-rebuild-on-official-36a0e2ffc) |
+| Qwen3.8 Flash Next IQ3_XXS | MTP2, llama-cli | - | 49.6 | 2026-10-29 20:29 | `f5031e739`, not re-measured | [speculative runs](#speculative-decoding-on-d-one-run-each) |
 
-These numbers are out of date once the runtime source changes. Check with:
+A row is out of date once the runtime source changes after its source tree. Check with (replace the commit with the row's tree):
 
 ```sh
-git diff --quiet 3875d3850b45825cc12d5aecb22487b7377ad598 HEAD -- . ':!vr' ':!AGENTS.md' ':!CLAUDE.md' ':!README.md' && echo current || echo stale
+git diff --quiet bc0ce9691 HEAD -- . ':!vr' ':!AGENTS.md' ':!CLAUDE.md' ':!README.md' && echo current || echo stale
 ```
 
-A new toolchain, driver or model revision also makes them stale, even if the check prints `current`. When re-measuring, update the tree id, commit, dates and rows here and add the full run as a new dated record below.
+A new toolchain, driver or model revision also makes a row stale, even if the check prints `current`. The Flash Next rows used the IQ3_XXS file from rev `c8b5954a88c2`; unsloth replaced it on 2026-11-04. When re-measuring, update the row and add the full run as a new dated record below.
 
-Against official llama.cpp with the same build flags: +53% 27B PP, +12% 27B TG, +74% Flash Next PP, no Flash Next plain TG gain.
+Against official llama.cpp with the same build flags (2026-10-29, `36a0e2ffc`): +53% 27B PP, +12% 27B TG, +74% Flash Next PP, no Flash Next plain TG gain.
 
 ## How to test, and what the status words mean
 
@@ -27,7 +28,7 @@ For weekly merges, use the [single final validation pass](how-to-catchup.md#one-
 
 Every idea below has one status:
 
-- **Landed**: in master, with the evidence named.
+- **Landed**: in main, with the evidence named.
 - **Validated wrong**: a test that could show the effect was run, and the effect was not there. The test is named. Do not retry without a new reason.
 - **Not shown**: something was run, but the test could not show the effect (change did not fire, wrong metric, one run inside the noise). Not a reason to drop the idea; the row says what a proper test needs.
 - **Open**: not tested.
@@ -41,6 +42,35 @@ A test can mark an idea validated wrong only if it does all of these:
 4. Compares output: greedy text hash against the baseline. Speculative runs diverge from plain after about 1500-2000 bytes (batched verify flips near-tie tokens), so compare speculative runs to speculative runs.
 
 Keep the 50/50 split for A/B work. Ask for explicit OK before performance runs. Use `rocprofv3` timings only for attribution: profiled TG was 21-45% slower than unprofiled. Scripts: [scripts](scripts/README.md).
+
+## Record format
+
+Add each run as a dated record (newest first) in this shape. Keep it short; put raw files, including the generated text for quality checks, in `vr/old-ignore/<date>/<name>/` and link them.
+
+Standard settings, so records only name what differs. Both GPUs, all layers offloaded, `-sm tensor -ts 1/1 -fa on`, build flags from the [catch-up guide](how-to-catchup.md#one-final-validation-pass), no env knobs:
+
+- 27B: `-b/-ub 2048/2048 -t 20`, F16 KV. llama-bench PP2048/TG128; llama-cli `flake.nix` prompt (~2K tokens), 512 tokens, greedy, ctx 16384.
+- Flash Next: `-b/-ub 1024/512`, Q8_0 KV, same workloads.
+
+```markdown
+### YYYY-MM-DD short title
+
+Purpose in one sentence. Kind: regression screen | A/B experiment | profile.
+
+- Source: `<commit>` (what it contains); baseline `<commit or build_commit>`.
+- Model: `<quant>` rev `<12 chars>`; draft `<file>` if any.
+- Settings: standard 27B | standard Flash Next, plus only what differs (e.g. `-ts 0.52/0.48`, `GGML_CUDA_FLASHNEXT_MOE=1`, ctx 100K).
+- Workload: standard, or what differs; repeats and order (e.g. r3 alternating).
+
+| Build | Mode | PP t/s | TG t/s | Change | Accept | Output |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| baseline | MTP2 | 514.0 | 60.7 | - | 2.6/3 | sha `ab12...` |
+| candidate | MTP2 | 516.2 | 61.0 | +0.5% | 2.6/3 | same |
+
+Verdict: one sentence, and the status word if it judges an idea. Not covered: what was not run. Raw: [link](old-ignore/...).
+```
+
+Rules: change is `(candidate / baseline - 1) * 100` on the same row type. Write `-` for not measured, never leave a cell blank. Output is the sha (first 12 hex) of the generated text only, without the CLI banner (it contains the build id), or "same"/"differs after N bytes". Accept is mean accepted tokens per draft step over draft size; `llama-cli --simple-io` does not print it, so write `-`. Update [Current numbers](#current-numbers) only from a record that used the current source.
 
 ## Idea ledger
 
@@ -158,16 +188,25 @@ With 10 uniform picks, the busier GPU averages 6.23 whole experts against today'
 
 Newest first. Full commands, identities and raw data are in the linked [old-ignore](old-ignore/README.md) folders.
 
-### 2026-11-05 catch-up to official 4b77dee05 (regression screen)
+### 2026-11-05 catch-up to official 4b77dee05
 
-Final validation pass from the [catch-up guide](how-to-catchup.md#one-final-validation-pass), one repeat each, 27B Q8_0, same cached GGUF (`4ca720788d1e`), `-sm tensor`, 50/50, FA on, batch/ubatch 2048. Baseline `build-ilp` reports `build_commit e04bc2e38` (old master, stage A of the rebuild) and was run with `LD_LIBRARY_PATH` set to its own `bin`. The candidate is the staged merge on branch `catchup-4b77dee05` over `42410a3db`. Logs and JSON: `build-catchup-20261105-213622/validation/`.
+Check that the merge keeps 27B speed and output. Kind: regression screen.
 
-| Build | PP2048 | TG128 |
-| --- | ---: | ---: |
-| Baseline `build-ilp` | 697.55 | 37.75 |
-| Candidate | 696.88 (-0.10%) | 37.90 (+0.39%) |
+- Source: `bc0ce9691` (merge of official `4b77dee05`; build made before the doc-only commits); baseline `build-ilp`, `build_commit e04bc2e38` (old master, stage A of the rebuild), run with `LD_LIBRARY_PATH=build-ilp/bin`.
+- Model: 27B Q8_0 rev `4ca720788d1e`; DFlash draft `z-lab/Qwen3.8-27B-DFlash2` Q8_0 rev `2d9571f8ce46`.
+- Settings: standard 27B. MTP2 adds `--spec-draft-backend-sampling`.
+- Workload: standard, one run each, baseline then candidate per mode.
 
-TP smoke checks passed at n=1 and n=2048. A 32-token greedy generation (`llama-completion`) was coherent at 36.7 t/s. This is a regression screen, not repeatability evidence. Not run: Flash Next, MoE PP after the MMQ tile layout change (#31047, J now picked from tokens per expert), MTP, DFlash and grouped MoE.
+| Build | Mode | PP t/s | TG t/s | Change | Accept | Output |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| baseline | plain, llama-bench | 697.55 | 37.75 | - | - | - |
+| candidate | plain, llama-bench | 696.88 | 37.90 | -0.1% / +0.4% | - | - |
+| baseline | MTP2 | 598.0 | 64.0 | - | - | sha `dd228997b103` |
+| candidate | MTP2 | 584.5 | 64.1 | -2.3% / +0.2% | - | same |
+| baseline | DFlash5 | 584.0 | 66.8 | - | - | sha `9f2493efdd9b` |
+| candidate | DFlash5 | 574.4 | 67.4 | -1.6% / +0.9% | - | same |
+
+Verdict: no regression; speculative output is byte-identical between builds. The CLI prompt rate varies more than llama-bench PP (see below), so the -2% is not a signal. TP smoke checks passed at n=1 and n=2048; a 32-token `llama-completion` generation was coherent. Not covered: Flash Next (MoE PP after the MMQ tile layout change #31047), grouped MoE, multi-slot server. Raw, including generated text: [catchup-4b77dee05](old-ignore/2026-11-05/catchup-4b77dee05/).
 
 ### 2026-10-29 A1 config sweep (TG)
 
