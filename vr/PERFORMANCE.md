@@ -87,6 +87,7 @@ Priority: ideas that raise plain PP or TG come first, because every mode gains f
 | - | Whole-token HIP graph replay | 2026-10-29 trace: two `hipGraphLaunch` per token, no per-kernel launches, both models | - |
 | - | MTP2 with `--spec-draft-backend-sampling` as the speculative default | 27B +68% vs plain, Flash Next +33% (one run each, 2026-10-29) | Best depth: MTP2 beat MTP3 on Oct 12 and 2026-10-29, MTP3 won on Oct 25; all single runs. On 2026-11-05 DFlash5 beat MTP2 on 27B at a 2K prompt (67.7 vs 63.9) but lost at 32K (39.9 vs 42.7), see [record](#2026-11-05-27b-config-sweep-and-32k-depth) |
 | - | gfx906 two-row IQ2_S one-token expert path | +2.37% TG in one matched pair, output matched, 3 CPU-reference cases | One pair; not repeatability evidence |
+| S2 | Cheaper IQ sign apply on gfx906 (`iq_apply_signs`) in the IQ2_S mat-vec and the IQ2_S/IQ3_XXS MMQ tile loads; bit-exact | Flash Next r5 alternating: +5.1% TG, +3.1% PP, same output ([record](#2026-11-06-s2-cheaper-iq-sign-handling-on-gfx906)) | Measured on the old UD-IQ3_XXS upload only |
 | - | Grouped MoE for 2-8 token verify, opt-in with `GGML_CUDA_FLASHNEXT_MOE=1` | Oct 25: about 5.9% mean TG on Flash Next MTP2, two runs per variant, same output and acceptance | Off by default; the 2026-10-29 MTP runs and scripts do not enable it. Not re-measured on the rebuild tree |
 
 ### Validated wrong
@@ -125,7 +126,6 @@ Priority: ideas that raise plain PP or TG come first, because every mode gains f
 | P3 | Find the late rank before each AllReduce and speed up its preceding work | both | ROCm0 waits in AR 5.19 vs 1.03 ms/token (Flash Next), 4.1 vs 1.7 (27B, Oct 12) | part of the 5.3 ms AR | M |
 | A5 | Expert parallelism: whole experts per GPU instead of 320-row halves | Flash Next | Needs one 640-row expert to run more than 1.25x faster than two halves. [Assessment](#expert-parallelism-a5) | 1-2 ms/token TG; better for PP | L; go/no-go microbenchmark first |
 | S1 | Stage the IQ codebook grid and the q8_1 activations in LDS in the grouped expert gate/up kernel | Flash Next | Strata found this kernel compute-bound at 110-130 GB/s; ours reach about 150 GB/s useful | part of the 4.7 ms expert union | M |
-| S2 | IQ sign handling as `dp4a(g ^ m, u) - dp4a(m, u)` instead of `__vcmpne4` + `__vsub4` in `vecdotq.cuh`; bit-exact | Flash Next | gfx906 emulates each byte op in about 6 word ops (`vendors/hip.h`); saves about 8 ALU ops per sign group | modest | S; test with `test-backend-ops` and `cmp` |
 | S5 | Router top-k in one 64-lane wavefront, no barriers | Flash Next | Strata measured block top-k barrier-bound at 43 us/token; ours is inside the 2.41 ms routing plus MoE reduction | needs our kernel time | S |
 | - | Find the about 10 ms host gap per DFlash step (inject/generate gap, sampling and accept, readbacks) | 27B DFlash | Oct 12 profile; not the draft rebuild (N1) | DFlash5 about 70 t/s if closed (Oct 12 estimate) | trace first |
 | A6 | Re-profile 27B PP on the current tree | 27B | Oct 12 profile predates duplex copies and slabs | decides A7 vs N3 | S |
@@ -192,6 +192,22 @@ With 10 uniform picks, the busier GPU averages 6.23 whole experts against today'
 ## Dated records
 
 Newest first. Full commands, identities and raw data are in the linked [old-ignore](old-ignore/README.md) folders.
+
+### 2026-11-06 S2: cheaper IQ sign handling on gfx906
+
+Replace the emulated byte ops `__vcmpne4` + `__vsub4` with `sign_mask4` and `iq_apply_signs` (`(g ^ m) + (m & 0x01010101)`) in the IQ2_S mat-vec and the IQ2_S and IQ3_XXS MMQ tile loads. Kind: A/B experiment.
+
+- Source: branch `s2-iq-signs` on `02980eb3d`; baseline `bc0ce9691` (build `build-catchup-20261105-213622`).
+- Model: Flash Next UD-IQ3_XXS rev `c8b5954a88c2` (the pre-2026-11-04 upload).
+- Settings: standard Flash Next.
+- Workload: llama-bench PP2048/TG128, r5 alternating; one 96-token greedy `llama-completion` per build.
+
+| Build | Mode | PP t/s | TG t/s | Change | Accept | Output |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| baseline | plain | 541.45 +- 1.84 | 41.17 +- 0.11 | - | - | sha `d9c2f5346efc` |
+| candidate | plain | 557.97 +- 1.09 | 43.27 +- 0.15 | +3.05% / +5.11% | - | same |
+
+Verdict: landed. The ranges do not overlap, and output is byte-identical. Correctness: an exhaustive host check of all IQ2_S grid words x 256 sign bytes and IQ3_XXS cases found 0 mismatches (grid bytes are 0x01..0x3e, so the +1 never carries), and `test-backend-ops` passed all 115 IQ2_S/IQ3_XXS `MUL_MAT`/`MUL_MAT_ID` cases on ROCm0 (n = 1..64). Not covered: the new Flash Next upload, MTP, grouped MoE. The merge build's Flash Next numbers here (541 / 41.2) are above the 2026-10-29 rows (527.6 / 39.1), but that is not a matched comparison. Raw: [s2-iq-signs](old-ignore/2026-11-06/s2-iq-signs/).
 
 ### 2026-11-05 27B config sweep and 32K depth
 

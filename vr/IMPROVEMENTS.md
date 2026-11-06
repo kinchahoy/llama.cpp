@@ -13,6 +13,31 @@ The aim is a small delta from llama.cpp that keeps useful gfx906 performance. So
 | Speculative prompt replay and repacked draft weights | Reduce draft preparation cost; the single-GPU DFlash draft avoids extra TP communication | `common/speculative.cpp`, `src/llama-context.cpp` |
 | Split KV, recurrent snapshots, and per-sequence taps | Keep speculative execution and rollback correct with TP and concurrent requests | `src/llama-graph.cpp`, `llama-memory-recurrent.cpp`, `llama-context.cpp` |
 
+## Coverage by model and quant
+
+Which local paths each model and quant actually uses. "Measured" means a matched run is recorded in [PERFORMANCE.md](PERFORMANCE.md); "path" means the code fires for these tensor types but nobody has measured the gain. Tensor types come from the GGUF headers (2026-11-06).
+
+| Path | 27B Q8_0 | Gemma 4 31B Q8_0 | Gemma 4 31B Q4_K_M, UD-Q4_K_XL | Gemma 4 31B Q4_0, Q4_1 | Flash Next UD quants |
+| --- | --- | --- | --- | --- | --- |
+| Repacked weights and gfx906 GEMM/mat-vec | all weights; measured: +53% PP, +12% TG vs official | all weights; path | Q4_K/Q5_K/Q6_K weights (IQ4_XS share is not); path | none, plain upstream kernels | non-expert Q6_K/Q8_0 and IQ4_NL down experts; measured +74% PP vs official, no plain TG gain |
+| Fused GLU and bias mat-vec | yes | yes; path | no, dense fusion is Q8_0/MXFP4 only | no | MoE fusion for Q8_0, K-quants, IQ4_NL |
+| gfx906 MMQ tuning (row-first traversal, J cap) | little, repack takes most matmuls | little | IQ4_XS share only | all PP matmuls; path | IQ gate/up experts in PP |
+| TP stack (AllReduce overlap and slabs, parallel lanes, token graph replay) | yes; measured (slabs PP, lanes TG) | yes; path | yes; path | yes; path | yes; measured (lanes TG) |
+| Tied output head split | n/a, untied | yes, 262K-vocab head; path | yes; path | yes; path | n/a |
+| Shared-expert split | n/a | n/a | n/a | n/a | yes |
+| Host n-gram table placement | n/a | n/a | n/a | n/a | yes |
+| Narrow IQ2_S expert path, grouped MoE (opt-in) | n/a | n/a | n/a | n/a | IQ2_S and IQ4_NL experts; measured |
+| Cheaper IQ sign apply (S2) | n/a | n/a | n/a | n/a | IQ2_S and IQ3_XXS experts; measured +5.1% TG, +3.1% PP |
+| MTP prompt replay, KV-only prefill, backend sampling | yes; measured | upstream Gemma 4 assistant path, not the local MTP work | same | same | yes; measured |
+| DFlash | yes; measured | no draft | no | no | no |
+
+Notes:
+
+- Repack fires for whole (non-view) 2D/3D weights of type Q8_0, MXFP4, IQ4_NL (`ne0 % 32`), Q5_1, and Q4_K/Q5_K/Q6_K (`ne0 % 256`); see `ggml_cuda_repack_tensor_supported`. IQ1/IQ2/IQ3/IQ4_XS and Q4_0/Q4_1 never repack.
+- Gemma 4 31B is dense with a tied output head, so the head split reads half the vocabulary per GPU each token.
+- On this fork, prefer a K-quant over Q4_0/Q4_1 for Gemma 4 31B at 4 bits: Q4_0/Q4_1 lose repack and fusion. Not measured yet.
+- Flash Next gate/up experts (IQ3_XXS, IQ2_S, IQ4_XS) use the stock IQ kernels plus the narrow IQ2_S path; that is the main Flash Next TG area without a repack layout.
+
 ## Merge maintenance index
 
 Use the source map above and this table to decide what needs attention each week. Read detailed evidence only for affected features and their callers. These are preservation rules, not claims that the quick checks cover every case.

@@ -1,0 +1,155 @@
+ggml_cuda_init: found 2 ROCm devices (Total VRAM: 65504 MiB):
+  Device 0: AMD Radeon Graphics, gfx906:sramecc+:xnack- (0x906), VMM: no, Wave Size: 64, VRAM: 32752 MiB
+  Device 1: AMD Radeon Graphics, gfx906:sramecc+:xnack- (0x906), VMM: no, Wave Size: 64, VRAM: 32752 MiB
+Testing 3 devices
+
+Backend 1/3: ROCm0
+  Device description: AMD Radeon Graphics
+  Device memory: 32752 MB (32552 MB free)
+
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=16,n=1,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=16,n=2,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=16,n=3,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=16,n=4,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=16,n=5,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=16,n=6,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=16,n=7,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=16,n=8,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=16,n=9,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=16,n=1,k=4096,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=16,n=8,k=4096,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=16,n=1,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=16,n=2,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=16,n=3,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=16,n=4,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=16,n=5,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=16,n=6,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=16,n=7,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=16,n=8,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=16,n=9,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=16,n=1,k=4096,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=16,n=8,k=4096,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=48,n=2,k=2560,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=1000,n=2,k=1024,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=3000,n=2,k=512,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=4100,n=2,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=64,n=2,k=256,bs=[3,2],nr=[2,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=48,n=2,k=2560,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=1000,n=2,k=1024,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=3000,n=2,k=512,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=4100,n=2,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=64,n=2,k=256,bs=[3,2],nr=[2,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=48,n=3,k=2560,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=1000,n=3,k=1024,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=3000,n=3,k=512,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=4100,n=3,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=64,n=3,k=256,bs=[3,2],nr=[2,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=48,n=3,k=2560,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=1000,n=3,k=1024,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=3000,n=3,k=512,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=4100,n=3,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=64,n=3,k=256,bs=[3,2],nr=[2,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=48,n=5,k=2560,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=1000,n=5,k=1024,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=3000,n=5,k=512,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=4100,n=5,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=64,n=5,k=256,bs=[3,2],nr=[2,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=48,n=5,k=2560,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=1000,n=5,k=1024,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=3000,n=5,k=512,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=4100,n=5,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=64,n=5,k=256,bs=[3,2],nr=[2,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=48,n=8,k=2560,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=1000,n=8,k=1024,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=3000,n=8,k=512,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=4100,n=8,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=64,n=8,k=256,bs=[3,2],nr=[2,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=48,n=8,k=2560,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=1000,n=8,k=1024,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=3000,n=8,k=512,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=4100,n=8,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=64,n=8,k=256,bs=[3,2],nr=[2,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=48,n=9,k=2560,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=1000,n=9,k=1024,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=3000,n=9,k=512,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=4100,n=9,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=64,n=9,k=256,bs=[3,2],nr=[2,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=48,n=9,k=2560,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=1000,n=9,k=1024,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=3000,n=9,k=512,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=4100,n=9,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=64,n=9,k=256,bs=[3,2],nr=[2,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=48,n=13,k=2560,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=1000,n=13,k=1024,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=3000,n=13,k=512,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=4100,n=13,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=64,n=13,k=256,bs=[3,2],nr=[2,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=48,n=13,k=2560,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=1000,n=13,k=1024,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=3000,n=13,k=512,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=4100,n=13,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=64,n=13,k=256,bs=[3,2],nr=[2,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=48,n=16,k=2560,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=1000,n=16,k=1024,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=3000,n=16,k=512,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=4100,n=16,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=64,n=16,k=256,bs=[3,2],nr=[2,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=48,n=16,k=2560,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=1000,n=16,k=1024,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=3000,n=16,k=512,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=4100,n=16,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=64,n=16,k=256,bs=[3,2],nr=[2,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=16,n=1,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=16,n=1,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=16,n=10,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=16,n=10,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq2_s,type_b=f32,m=1,n=64,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT(type_a=iq3_xxs,type_b=f32,m=1,n=64,k=256,bs=[1,1],nr=[1,1],per=[0,1,2,3],k_v=0,o=1,src_overlap=0,m_v=0,pad=0): [1;32mOK[0m
+  MUL_MAT_ID(type_a=iq2_s,type_b=f32,n_mats=4,n_used=2,b=0,m=64,n=16,k=768,m_v=0,ids_offset=0,skip=0): [1;32mOK[0m
+  MUL_MAT_ID(type_a=iq3_xxs,type_b=f32,n_mats=4,n_used=2,b=0,m=64,n=16,k=768,m_v=0,ids_offset=0,skip=0): [1;32mOK[0m
+  MUL_MAT_ID(type_a=iq2_s,type_b=f32,n_mats=4,n_used=4,b=0,m=16,n=10,k=256,m_v=0,ids_offset=0,skip=0): [1;32mOK[0m
+  MUL_MAT_ID(type_a=iq3_xxs,type_b=f32,n_mats=4,n_used=4,b=0,m=16,n=10,k=256,m_v=0,ids_offset=0,skip=0): [1;32mOK[0m
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+  MUL_MAT_ID(type_a=iq2_s,type_b=f32,n_mats=4,n_used=2,b=0,m=512,n=1,k=256,m_v=0,ids_offset=0,skip=0): [1;32mOK[0m
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+  MUL_MAT_ID(type_a=iq2_s,type_b=f32,n_mats=4,n_used=2,b=0,m=512,n=32,k=256,m_v=0,ids_offset=0,skip=0): [1;32mOK[0m
+  MUL_MAT_ID(type_a=iq3_xxs,type_b=f32,n_mats=4,n_used=2,b=0,m=512,n=1,k=256,m_v=0,ids_offset=0,skip=0): [1;32mOK[0m
+  MUL_MAT_ID(type_a=iq3_xxs,type_b=f32,n_mats=4,n_used=2,b=0,m=512,n=32,k=256,m_v=0,ids_offset=0,skip=0): [1;32mOK[0m
+  MUL_MAT_ID(type_a=iq2_s,type_b=f32,n_mats=16,n_used=10,b=1,m=17,n=2,k=2560,m_v=20,ids_offset=1,skip=0): [1;32mOK[0m
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+  MUL_MAT_ID(type_a=iq2_s,type_b=f32,n_mats=16,n_used=10,b=0,m=17,n=2,k=2560,m_v=20,ids_offset=1,skip=0): [1;32mOK[0m
+  MUL_MAT_ID(type_a=iq2_s,type_b=f32,n_mats=16,n_used=10,b=0,m=17,n=2,k=2560,m_v=0,ids_offset=0,skip=0,dup=1): [1;32mOK[0m
+  MUL_MAT_ID(type_a=iq2_s,type_b=f32,n_mats=16,n_used=10,b=1,m=17,n=3,k=2560,m_v=20,ids_offset=1,skip=0): [1;32mOK[0m
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+ggml_backend_cuda_graph_compute: disabling CUDA graph for unstable entry (4 resets / 4 checks)
+  MUL_MAT_ID(type_a=iq2_s,type_b=f32,n_mats=16,n_used=10,b=0,m=17,n=3,k=2560,m_v=20,ids_offset=1,skip=0): [1;32mOK[0m
+  MUL_MAT_ID(type_a=iq2_s,type_b=f32,n_mats=16,n_used=10,b=0,m=17,n=3,k=2560,m_v=0,ids_offset=0,skip=0,dup=1): [1;32mOK[0m
+  MUL_MAT_ID(type_a=iq2_s,type_b=f32,n_mats=16,n_used=10,b=1,m=17,n=4,k=2560,m_v=20,ids_offset=1,skip=0): [1;32mOK[0m
+  MUL_MAT_ID(type_a=iq2_s,type_b=f32,n_mats=16,n_used=10,b=0,m=17,n=4,k=2560,m_v=20,ids_offset=1,skip=0): [1;32mOK[0m
+  MUL_MAT_ID(type_a=iq2_s,type_b=f32,n_mats=16,n_used=10,b=0,m=17,n=4,k=2560,m_v=0,ids_offset=0,skip=0,dup=1): [1;32mOK[0m
+ROCm q8_1 cache[0]: 0 hits, 109 misses, 1 entries at peak
+  115/115 tests passed
+  Backend ROCm0: [1;32mOK[0m
+Backend 2/3: ROCm1
+  Skipping
+Backend 3/3: CPU
+  Skipping
+3/3 backends passed
+[1;32mOK[0m
