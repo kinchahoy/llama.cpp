@@ -1,0 +1,65 @@
+0.00.020.021 W common_fit_params: failed to fit params to free device memory: llama_params_fit is not implemented for SPLIT_MODE_TENSOR, abort
+0.12.212.856 W q8_repack: repacking q8_0 tensors on device 0 (first: output_hc_down.weight, 3481600 bytes)
+0.12.217.506 W q8_repack: repacking q8_0 tensors on device 1 (first: output_hc_down.weight, 3481600 bytes)
+0.12.379.892 W q8_repack: repacking q6_K tensors on device 0 (first: output.weight, 260736000 bytes)
+0.12.649.196 W q8_repack: repacking q6_K tensors on device 1 (first: output.weight, 260736000 bytes)
+0.12.972.504 W q8_repack: repacking iq4_nl tensors on device 0 (first: blk.0.ffn_down_exps.weight, 188743680 bytes)
+0.13.407.412 W q8_repack: repacking iq4_nl tensors on device 1 (first: blk.0.ffn_down_exps.weight, 283115520 bytes)
+0.21.576.358 W q8_repack: repacking iq4_xs tensors on device 0 (first: blk.47.ffn_gate_exps.weight, 267386880 bytes)
+0.21.602.167 W q8_repack: repacking iq4_xs tensors on device 1 (first: blk.47.ffn_gate_exps.weight, 178257920 bytes)
+0.22.955.133 I cmn          init: llama threadpool init, n_threads = 20
+0.23.168.688 W [repack-moe-fusion] type=iq4_xs cols=1 fused up/gate mat-vec engaged
+0.23.191.016 I
+0.23.191.069 I system_info: n_threads = 20 (n_threads_batch = 20) / 20 | ROCm : NO_VMM = 1 | FA_QUANTS = q4_0-q4_0,q8_0-q8_0,f16-f16,bf16-bf16 | CPU : SSE3 = 1 | SSSE3 = 1 | AVX = 1 | AVX_VNNI = 1 | AVX2 = 1 | F16C = 1 | FMA = 1 | BMI2 = 1 | LLAMAFILE = 1 | OPENMP = 1 | REPACK = 1 |
+0.23.386.959 I kl_divergence: computing over 8 chunks, n_ctx=2048, batch_size=1024, n_seq=1
+0.28.493.740 I kl_divergence: 5.11 seconds per pass - ETA 0.67 minutes
+
+chunk             PPL               ln(PPL(Q)/PPL(base))          KL Divergence              Δp RMS            Same top p
+   1       1.2612 ±    0.0428       0.00000 ±    0.00000       0.00000 ±    0.00000     0.000 ±  0.000 %    100.000 ±  0.000 %
+   2       1.3303 ±    0.0342       0.00000 ±       -nan       0.00000 ±    0.00000     0.000 ±  0.000 %    100.000 ±  0.000 %
+   3       1.4611 ±    0.0363       0.00118 ±    0.00118      -0.00000 ±    0.00000     0.000 ±  0.000 %    100.000 ±  0.000 %
+   4       1.6538 ±    0.0402       0.00104 ±    0.00090       0.00000 ±    0.00000     0.000 ±  0.000 %    100.000 ±  0.000 %
+   5       1.6441 ±    0.0354       0.00083 ±    0.00072      -0.00000 ±    0.00000     0.000 ±  0.000 %    100.000 ±  0.000 %
+   6       1.6725 ±    0.0336       0.00080 ±    0.00061       0.00000 ±    0.00000     0.000 ±  0.000 %    100.000 ±  0.000 %
+   7       1.8858 ±    0.0379       0.00069 ±    0.00052       0.00000 ±    0.00000     0.000 ±  0.000 %    100.000 ±  0.000 %
+   8       1.9261 ±    0.0364       0.00062 ±    0.00046       0.00000 ±    0.00000     0.000 ±  0.000 %    100.000 ±  0.000 %
+
+====== Perplexity statistics ======
+Mean PPL(Q)                   :   1.926101 ±   0.036433
+Mean PPL(base)                :   1.924904 ±   0.036280
+Cor(ln(PPL(Q)), ln(PPL(base))):  99.97%
+Mean ln(PPL(Q)/PPL(base))     :   0.000621 ±   0.000457
+Mean PPL(Q)/PPL(base)         :   1.000621 ±   0.000457
+Mean PPL(Q)-PPL(base)         :   0.001196 ±   0.000884
+
+====== KL divergence statistics ======
+Mean    KLD:   0.000000 ±   0.000000
+Maximum KLD:   0.000054
+99.9%   KLD:   0.000046
+99.0%   KLD:   0.000030
+95.0%   KLD:   0.000014
+90.0%   KLD:   0.000005
+Median  KLD:   0.000000
+10.0%   KLD:  -0.000005
+ 5.0%   KLD:  -0.000012
+ 1.0%   KLD:  -0.000030
+ 0.1%   KLD:  -0.000046
+Minimum KLD:  -0.000055
+
+====== Token probability statistics ======
+Mean    Δp:  0.000 ± 0.000 %
+Maximum Δp:  0.005%
+99.9%   Δp:  0.004%
+99.0%   Δp:  0.002%
+95.0%   Δp:  0.000%
+90.0%   Δp:  0.000%
+75.0%   Δp:  0.000%
+Median  Δp:  0.000%
+25.0%   Δp:  0.000%
+10.0%   Δp:  0.000%
+ 5.0%   Δp: -0.000%
+ 1.0%   Δp: -0.002%
+ 0.1%   Δp: -0.003%
+Minimum Δp: -0.005%
+RMS Δp    :  0.000 ± 0.000 %
+Same top p: 100.000 ± 0.000 %

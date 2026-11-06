@@ -1,0 +1,36 @@
+== test-backend-ops
+  12/12 tests passed
+3/3 backends passed
+  40/40 tests passed
+3/3 backends passed
+== tp
+ROCm q8_1 cache[1]: 0 hits, 2 misses, 1 entries at peak
+gfx906_tp_down n=1 time_us=628 result_bytes=20480 allreduce=default overlap=off wire=f32 output_usage=compute check=pass
+ROCm q8_1 cache[1]: 0 hits, 8 misses, 2 entries at peak
+gfx906_tp_down n=2048 time_us=13225 result_bytes=41943040 allreduce=default overlap=off wire=f32 output_usage=compute check=pass
+== bench
+env=0
+4 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    |  pp2048 @ d8192 |        514.75 ± 0.04 |
+4 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    |   tg128 @ d8192 |         40.87 ± 0.06 |
+env=1
+4 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    |  pp2048 @ d8192 |        510.44 ± 5.44 |
+4 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    |   tg128 @ d8192 |         45.71 ± 0.14 |
+env=0
+4 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    |  pp2048 @ d8192 |        513.16 ± 1.25 |
+4 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    |   tg128 @ d8192 |         40.67 ± 0.16 |
+env=1
+4 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    |  pp2048 @ d8192 |        509.89 ± 6.20 |
+4 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    |   tg128 @ d8192 |         46.21 ± 0.44 |
+== mtp
+env=0
+3dd833063ecc  1895 bytes  /home/raistlin/infer/vrversion-llama.cpp/build-f2/validation/mtp_r0.out
+Generation: 51.9 t/s
+env=1
+03ead2d9c6d1  1914 bytes  /home/raistlin/infer/vrversion-llama.cpp/build-f2/validation/mtp_r1.out
+Generation: 63.0 t/s
+env=0
+3dd833063ecc  1895 bytes  /home/raistlin/infer/vrversion-llama.cpp/build-f2/validation/mtp_r0.out
+Generation: 52.4 t/s
+env=1
+03ead2d9c6d1  1914 bytes  /home/raistlin/infer/vrversion-llama.cpp/build-f2/validation/mtp_r1.out
+Generation: 65.1 t/s
