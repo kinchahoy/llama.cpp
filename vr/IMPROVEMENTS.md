@@ -28,12 +28,13 @@ Which local paths each model and quant actually uses. "Measured" means a matched
 | Host n-gram table placement | n/a | n/a | n/a | n/a | yes |
 | Narrow IQ2_S expert path, grouped MoE (opt-in) | n/a | n/a | n/a | n/a | IQ2_S and IQ4_NL experts; measured |
 | Cheaper IQ sign apply (S2) | n/a | n/a | n/a | n/a | IQ2_S and IQ3_XXS experts; measured +5.1% TG, +3.1% PP |
+| Q5_0 (native) and IQ4_XS (as IQ4_NL) repack | n/a | n/a | IQ4_XS share; path | n/a | Q5_0 down and IQ4_XS gate/up experts of UD-Q3_K_XL/UD-IQ4_XS; measured +2-3.5% TG, +6-9% PP |
 | MTP prompt replay, KV-only prefill, backend sampling | yes; measured | upstream Gemma 4 assistant path, not the local MTP work | same | same | yes; measured |
 | DFlash | yes; measured | no draft | no | no | no |
 
 Notes:
 
-- Repack fires for whole (non-view) 2D/3D weights of type Q8_0, MXFP4, IQ4_NL (`ne0 % 32`), Q5_1, and Q4_K/Q5_K/Q6_K (`ne0 % 256`); see `ggml_cuda_repack_tensor_supported`. IQ1/IQ2/IQ3/IQ4_XS and Q4_0/Q4_1 never repack.
+- Repack fires for whole (non-view) 2D/3D weights of type Q8_0, MXFP4, IQ4_NL, Q5_1, Q5_0 (`ne0 % 32`), and Q4_K/Q5_K/Q6_K/IQ4_XS (`ne0 % 256`); see `ggml_cuda_repack_tensor_supported`. IQ4_XS is stored in the IQ4_NL layout (`ggml_cuda_repack_store_type`). IQ1/IQ2/IQ3 and Q4_0/Q4_1 never repack.
 - Gemma 4 31B is dense with a tied output head, so the head split reads half the vocabulary per GPU each token.
 - On this fork, prefer a K-quant over Q4_0/Q4_1 for Gemma 4 31B at 4 bits: Q4_0/Q4_1 lose repack and fusion. Not measured yet.
 - Flash Next gate/up experts (IQ3_XXS, IQ2_S, IQ4_XS) use the stock IQ kernels plus the narrow IQ2_S path; that is the main Flash Next TG area without a repack layout.
@@ -61,6 +62,7 @@ These merged or compiled cleanly but were wrong. Check them first on each merge.
 - Upstream `build_conv_state_store` writes only `min(n_tokens, K)` rollback slots. Non-ring rollback is therefore bounded by `cell.rs_max`; ring mode keeps `valid_depth`. The fork keeps its `s_write` (delta-net) and `s_write_conv` (qwen4exp) ring branches.
 - Upstream `layer_inp_dev` is the DFlash device feature buffer. The fork per-layer persistent taps are `layer_inp_tap`; keep the names apart.
 - The upstream DFlash device feature path is opt-in (`LLAMA_DFLASH_DEV=1`), so the fork tap and accum pipeline stays the default. A DFlash draft with its own head does not set `ctx_other`, to keep it single-GPU.
+- A new repack type must also be added to the type whitelist in `ggml_backend_meta_device_supports_op` (`ggml-backend-meta.cpp`), or under `-sm tensor` its weights never reach the repack buffer and nothing fails.
 - K/V rotations are per-layer constants (`inp->self_k_rot[il]`), not graph inputs. Local MTP KV-only code must index them by layer and use `build_rope`.
 
 Update a row when its dispatch, dependencies or validation needs change. Record new evidence once and link it here. DFlash vision remains unvalidated. The [catch-up guide](how-to-catchup.md#one-final-validation-pass) defines the common final pass and approval limits; feature-specific checks join that pass rather than becoming repeated intermediate suites.

@@ -11,6 +11,8 @@ Build: [catch-up guide](how-to-catchup.md#one-final-validation-pass) flags, TheR
 | Qwen3.8-27B Q8_0 | DFlash5, llama-cli | - | 67.4 | 2026-11-05 | `bc0ce9691` | [catch-up](#2026-11-05-catch-up-to-official-4b77dee05) |
 | Qwen3.8 Flash Next IQ3_XXS | plain, llama-bench | 527.6 | 39.1 | 2026-10-29 20:01 | `f5031e739`, not re-measured | [rebuild table](#2026-10-29-rebuild-on-official-36a0e2ffc) |
 | Qwen3.8 Flash Next IQ3_XXS | MTP2, llama-cli | - | 49.6 | 2026-10-29 20:29 | `f5031e739`, not re-measured | [speculative runs](#speculative-decoding-on-d-one-run-each) |
+| Flash Next UD-Q3_K_XL + Q8_0 n-gram table | plain, llama-cli, 100K ctx, F16 KV, `-ub 256` | 409.1 (CLI) | 42.1 | 2026-11-06 | `3e19b6adc` | [big quants](#2026-11-06-flash-next-big-quants-repack-conversion-q8_0-n-gram-table-100k-and-mtp-fit) |
+| Flash Next UD-Q3_K_XL + Q8_0 n-gram table | MTP2 (Q4_0 draft on ROCm1), 32K ctx, F16 KV | 390.5 (CLI) | 51.5 | 2026-11-06 | `3e19b6adc` | [big quants](#2026-11-06-flash-next-big-quants-repack-conversion-q8_0-n-gram-table-100k-and-mtp-fit) |
 
 A row is out of date once the runtime source changes after its source tree. Check with (replace the commit with the row's tree):
 
@@ -50,7 +52,7 @@ Add each run as a dated record (newest first) in this shape. Keep it short; put 
 Standard settings, so records only name what differs. Both GPUs, all layers offloaded, `-sm tensor -ts 1/1 -fa on`, build flags from the [catch-up guide](how-to-catchup.md#one-final-validation-pass), no env knobs:
 
 - 27B: `-b/-ub 2048/2048 -t 20`, F16 KV. llama-bench PP2048/TG128; llama-cli `flake.nix` prompt (~2K tokens), 512 tokens, greedy, ctx 16384.
-- Flash Next: `-b/-ub 1024/512`, Q8_0 KV, same workloads.
+- Flash Next: `-b/-ub 1024/512`, F16 KV, same workloads. Never quantize the KV cache (user rule, 2026-11-06); records before 2026-11-06 and the 2026-11-06 8K rows used Q8_0 KV.
 
 ```markdown
 ### YYYY-MM-DD short title
@@ -87,6 +89,7 @@ Priority: ideas that raise plain PP or TG come first, because every mode gains f
 | - | Whole-token HIP graph replay | 2026-10-29 trace: two `hipGraphLaunch` per token, no per-kernel launches, both models | - |
 | - | MTP2 with `--spec-draft-backend-sampling` as the speculative default | 27B +68% vs plain, Flash Next +33% (one run each, 2026-10-29) | Best depth: MTP2 beat MTP3 on Oct 12 and 2026-10-29, MTP3 won on Oct 25; all single runs. On 2026-11-05 DFlash5 beat MTP2 on 27B at a 2K prompt (67.7 vs 63.9) but lost at 32K (39.9 vs 42.7), see [record](#2026-11-05-27b-config-sweep-and-32k-depth) |
 | - | gfx906 two-row IQ2_S one-token expert path | +2.37% TG in one matched pair, output matched, 3 CPU-reference cases | One pair; not repeatability evidence |
+| - | Repack Q5_0 (native, 22 B/32) and IQ4_XS (into the IQ4_NL layout) on gfx906, `GGML_CUDA_REPACK_CONVERT=0` disables | Flash Next UD-Q3_K_XL @8K: +2.3% TG and about +6% PP; UD-IQ4_XS: +3.5% TG, +9% PP; PPL unchanged; 132 repack-vs-CPU cases and 234 `test-backend-ops` cases pass ([record](#2026-11-06-flash-next-big-quants-repack-conversion-q8_0-n-gram-table-100k-and-mtp-fit)) | A/B measured with Q5_0 still through the Q5_1 layout; native Q5_0 is exact and memory-neutral but not separately timed |
 | S2 | Cheaper IQ sign apply on gfx906 (`iq_apply_signs`) in the IQ2_S mat-vec and the IQ2_S/IQ3_XXS MMQ tile loads; bit-exact | Flash Next r5 alternating: +5.1% TG, +3.1% PP, same output ([record](#2026-11-06-s2-cheaper-iq-sign-handling-on-gfx906)) | Measured on the old UD-IQ3_XXS upload only |
 | - | Grouped MoE for 2-8 token verify, opt-in with `GGML_CUDA_FLASHNEXT_MOE=1` | Oct 25: about 5.9% mean TG on Flash Next MTP2, two runs per variant, same output and acceptance | Off by default; the 2026-10-29 MTP runs and scripts do not enable it. Not re-measured on the rebuild tree |
 
@@ -99,6 +102,7 @@ Priority: ideas that raise plain PP or TG come first, because every mode gains f
 | - | `-sm layer` instead of tensor split on Flash Next | 30.99 vs 38.94 TG, -20%; one run, but far outside the noise |
 | N2a | Overlap the two lanes' graph launches | 27B 36.63 -> 36.67, one pair, inside 27B noise; the trace shows the launch stagger is not on the critical path |
 | N2b | Stage the remaining small F32 inputs asynchronously (`GGML_SCHED_INPUT_STAGING_F32_MAX=1048576`) | r3 alternating, both models, no change |
+| - | MTP draft with its experts on the CPU (`-cmoed`) to fit Flash Next MTP at long context | 2026-11-06, UD-Q3_K_XL 64K: MTP2 34.9 vs plain 43.8 TG. The CPU sync per draft step costs more than speculation gains. [Record](#2026-11-06-flash-next-big-quants-repack-conversion-q8_0-n-gram-table-100k-and-mtp-fit) |
 | - | `-b/-ub 4096` for 27B PP | 2026-11-05 llama-bench PP4096 r3: 606.3 +- 3.2 vs 684.1 +- 1.6 at ub 2048, -11.4%. [Record](#2026-11-05-27b-config-sweep-and-32k-depth) |
 | - | Content-keyed meta token graph cache for the draft (Oct 12) | Wrong output: draft acceptance length fell from 2.95 to 1.1-1.6 |
 | - | Multi-row planar Q8_1 producer (Oct 12) | Halved quantize launches but made the norm kernel slower by the same amount |
@@ -132,6 +136,8 @@ Priority: ideas that raise plain PP or TG come first, because every mode gains f
 | A7 | GCN occupancy tuning (more warps, wider J tiles) in the repacked Q8_0 GEMM | 27B | Upstream discussion 23881: +19% Q8_0 pp512 on GCN with a different kernel | +10-15% PP if GEMM is still the main cost | M; after A6 |
 | N3 | Pipeline prefill AllReduce across two half-ubatches so one half's AR overlaps the other's GEMM | 27B, Flash Next PP | Oct 12: 0.78 s of a 3.9 s ubatch in AR copies before overlap; slabs cannot hide the last slab and the reduce | +5-15% PP if A6 shows exposed AR above 10% | M; after A6 |
 | L1 | Skip K/V work in `fattn-vec` for wavefronts whose KV rows are all masked; output unchanged | both | +13% decode at 85K context on NVIDIA (optimization lab); nothing at short context | long context only | S; count the masked fraction first |
+| D2 | Tensor-split the MTP draft across both GPUs (today it is mirrored, or placed whole on one GPU with `-devd`), and load the unsloth "shared" drafts that borrow the target embedding and head | Flash Next | A full Q4_0 draft needs about 2.3-2.5 GiB on one GPU; split, about 1.2 GiB per GPU, and the 1.8 GiB shared draft less. That fits MTP2 at about 64K with margin (not 100K) | MTP2 was +17% TG at 32K; extends that to about 64K | M-L; meta split rules for the draft model, ctx_other head sharing |
+| E1 | Per-expert placement: keep rarely routed experts of each layer on the CPU, hot ones on the GPU | Flash Next IQ4_XS | `-ot` only places whole tensors (all 512 experts of a projection); per-layer CPU offload costs about 1 ms/token per layer in sync | lets IQ4_XS fit with most tokens never touching the CPU | L; split expert tensors, remap ids |
 | D1 | Faster long-context attention on gfx906. With F16 KV and no MFMA/WMMA, `ggml_cuda_get_best_fattn_kernel` picks `VEC` for one-token decode and the generic `TILE` kernel for the 3-token MTP2 and 6-token DFlash5 verify batches. Profile both at 32K, then tune or add a small-batch vec path (several query columns per KV pass) | both, all modes | 27B plain TG 36.8 -> 29.4 from a 2K to a 32K prompt: about +6.8 ms/token, most of it attention over the KV cache. MTP2 drops 33% and DFlash5 41%, so the verify batches look worse than decode. [Record](#2026-11-05-27b-config-sweep-and-32k-depth) | up to the 6.8 ms/token depth cost for plain; more for speculative verify | M; rocprofv3 at 32K first, plain and DFlash5 |
 | A4 | Move ROCm1 to CPU-attached PCIe lanes, then test the peer-write AR (`GGML_CUDA_PEER_AR=1`) and RCCL | both | AR, post-AR gaps and peer wait are 4-7 of 27 ms/token on 27B | largest single lever | hardware |
 | - | `mmq-config-gfx906.cuh` is never selected (the `GCN` table wins in `mmq.cuh`) | neither target | 27B uses the repacked GEMM; Flash Next IQ types are not in that table | none for the targets | low priority |
@@ -192,6 +198,39 @@ With 10 uniform picks, the busier GPU averages 6.23 whole experts against today'
 ## Dated records
 
 Newest first. Full commands, identities and raw data are in the linked [old-ignore](old-ignore/README.md) folders.
+
+### 2026-11-06 Flash Next big quants: repack conversion, Q8_0 n-gram table, 100K and MTP fit
+
+Make UD-Q3_K_XL and UD-IQ4_XS (new upload, rev `d96201194f10`) fast, with 100K context and MTP if they fit. Kind: A/B experiment and fit study.
+
+- Source: branch `s2-iq-signs`: S2, Q5_0/IQ4_XS repack (conversion `ebd76ced1`, then native Q5_0 `3e19b6adc`); build `build-conv-20261106`.
+- Model: UD-Q3_K_XL and UD-IQ4_XS; "Q8_0 table" = the unsloth `engram/` Q8_0 n-gram table swapped in as shard 4 (`~/models/flashnext/`). Drafts: unsloth `mtp-...-Q8_0` sidecar, bartowski `mtp-...-Q4_0`.
+- Settings: standard Flash Next, except where noted. The 8K and conversion rows used Q8_0 KV (before the F16-only rule); all fit and MTP rows use F16 KV.
+- Workload: llama-bench PP2048/TG128 at depth 8192 (r3, or 2 alternating rounds of r2 for the A/B); llama-cli rows are the standard `flake.nix` workload, one run each.
+
+Expert weights per quant (GGUF headers): UD-Q3_K_XL gate/up IQ3_XXS 76% / IQ4_XS 17% / IQ2_S 7%, down IQ4_NL 51% / Q5_0 48%; UD-IQ4_XS gate/up IQ3_XXS 52% / IQ4_XS 44%, down Q5_0 74% / IQ4_NL 24%. Before this change Q5_0 and IQ4_XS ran on the stock kernels.
+
+| Build | Mode | PP t/s | TG t/s | Change | Accept | Output |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| S2 | 27B Q8_0 plain @8K | 617.7 | 36.8 | reference | - | - |
+| S2 | UD-IQ3_XXS plain @8K | 524.7 | 38.4 | - | - | - |
+| S2 | UD-Q3_K_XL plain @8K | 509.0 | 39.7 | - | - | - |
+| S2 | UD-IQ4_XS `-ncmoe 2` @8K | 426.1 | 30.5 | - | - | - |
+| conv off | UD-Q3_K_XL @8K | 470.4 (one outlier) | 39.23 | - | - | PPL 1.9170 |
+| conv on | UD-Q3_K_XL @8K | 541.0 | 40.12 | +2.3% TG | - | PPL 1.9150 |
+| conv on + Q8_0 table | UD-Q3_K_XL @8K | 533.1 | 40.54 | +1% TG | - | PPL 1.9108 |
+| conv off | UD-IQ4_XS `-ncmoe 3` @8K | 398.4 | 29.56 | - | - | PPL 1.9236 |
+| conv on | UD-IQ4_XS `-ncmoe 3` @8K | 434.4 | 30.58 | +9% PP, +3.5% TG | - | PPL 1.9222 |
+| native Q5_0 | UD-Q3_K_XL + Q8_0 table, plain, 100K, `-ub 256` | 409.1 | 42.1 | - | - | - |
+| native Q5_0 | same, 64K | 416.4 | 43.8 | - | - | - |
+| native Q5_0 | same, 32K | 417.0 | 43.9 | - | - | - |
+| native Q5_0 | same, 32K, `-ub 512` | 472.6 | 41.2 | - | - | - |
+| native Q5_0 | MTP2, Q4_0 draft on ROCm1, experts on CPU, 64K, `-ts 0.505,0.495` | 382.9 | 34.9 | slower than plain | - | - |
+| native Q5_0 | **MTP2, full Q4_0 draft on ROCm1, 32K, `-ts 0.515,0.485`, `-ub 256`, `--spec-draft-n-ubatch 64`** | 390.5 | **51.5** | +17% vs plain 32K | - | - |
+
+Verdict: the conversion is landed (exact for Q5_0, IQ4_XS scale rounded to f16 at about 2^-12; same accuracy as the stock kernels against the CPU reference). UD-IQ4_XS does not fit on the GPUs: 2-3 CPU expert layers cost about 20-25% TG, mostly sync and transfer per CPU layer. MTP with the draft experts on the CPU is validated wrong (slower than plain). The best working setups are plain Q3_K_XL at 100K (42.1 TG) and MTP2 at 32K (51.5 TG, no memory margin; MTP3 and `-ub 512` ran out of memory). The PPL text is too easy to separate the quants; use the unsloth KLD table for quality.
+
+Memory per GPU at 100K, F16 KV, `-ub 256` (allocation log and sysfs peaks): weights 29.9 GiB (0.98 GiB of it mirrored: `ffn_gate_inp`, `hc_*`), main KV 1176 MiB (split by heads), QSA indexer key cache 588 MiB (one key head, so mirrored), compute 364 MiB, recurrent state 56 MiB, AllReduce staging 64 MiB; free 0.02-0.03 GiB. `llama_kv_cache` and compute buffer log lines report per-GPU sizes. A full Q4_0 draft needs about 2.3-2.5 GiB on one GPU; `-sm row` is gone upstream (`af546bb40`). The unsloth "shared" drafts lack `token_embd` and do not load in this tree. Not covered: full-length 32K prompts with MTP2, multi-slot server, acceptance rates. Raw: [flashnext-big-quants](old-ignore/2026-11-06/flashnext-big-quants/).
 
 ### 2026-11-06 S2: cheaper IQ sign handling on gfx906
 

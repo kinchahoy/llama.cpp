@@ -1,0 +1,17 @@
+0.01.589.842 I load_tensors:   CPU_Mapped model buffer size =   322.07 MiB
+0.01.589.843 I load_tensors: Meta(ROCm0,ROCm1) model buffer size = 13229.28 MiB
+0.01.589.843 I load_tensors: Meta(ROCm0_Repacked,ROCm1_Repacked) model buffer size = 16724.51 MiB
+0.01.589.843 I load_tensors:   CPU_Mapped model buffer size = 51880.13 MiB
+0.19.018.270 I llama_context:  ROCm_Host  output buffer size =     0.95 MiB
+0.19.022.611 I llama_kv_cache: Meta(ROCm0,ROCm1) KV buffer size =   624.76 MiB
+0.19.022.841 I init_rotation: Meta(ROCm0,ROCm1) rotation buffer size =     3.19 MiB
+0.19.037.563 I llama_memory_recurrent: Meta(ROCm0,ROCm1) RS buffer size =    56.46 MiB
+0.19.041.673 I llama_kv_cache: Meta(ROCm0,ROCm1) KV buffer size =   312.38 MiB
+0.19.042.096 I init_rotation: Meta(ROCm0,ROCm1) rotation buffer size =     3.00 MiB
+0.19.095.929 I sched_reserve: Meta(ROCm0,ROCm1) compute buffer size =   439.94 MiB
+0.19.095.930 I sched_reserve:  ROCm_Host compute buffer size =    82.51 MiB
+0.20.188.026 I common_memory_breakdown_print: | memory breakdown [MiB] | total   free     self   model   context   compute    unaccounted |
+0.20.188.026 I common_memory_breakdown_print: |   - Meta() (Meta())    | 65504 = 1668 + (31393 = 29953 +     999 +     439) +       32441 |
+0.20.188.026 I common_memory_breakdown_print: |   - Host               |                 52284 = 52202 +       0 +      82                |
+0.20.188.115 D ~llama_context: Meta(ROCm0,ROCm1) compute buffer size is 439.9351 MiB, matches expectation of 439.9351 MiB
+0.20.188.116 D ~llama_context:  ROCm_Host compute buffer size is  82.5051 MiB, matches expectation of  82.5051 MiB
