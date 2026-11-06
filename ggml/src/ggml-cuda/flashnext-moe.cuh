@@ -163,7 +163,7 @@ static bool flashnext_moe_launch(ggml_backend_cuda_context & ctx, ggml_type type
         int x_token_stride, int x_channel_stride, int dst_token_stride, int dst_channel_stride, int ids_stride) {
     static const bool enabled = [] {
         const char * env = std::getenv("GGML_CUDA_FLASHNEXT_MOE");
-        return env && std::strcmp(env, "1") == 0;
+        return env == nullptr || std::strcmp(env, "0") != 0;
     }();
     if (!enabled || ggml_cuda_info().devices[ctx.device].cc != GGML_CUDA_CC_VEGA20 || !ids ||
             (type != GGML_TYPE_IQ2_S && type != GGML_TYPE_IQ4_NL) || tokens < 2 || tokens > 8 || slots < 1 || slots > 10 ||

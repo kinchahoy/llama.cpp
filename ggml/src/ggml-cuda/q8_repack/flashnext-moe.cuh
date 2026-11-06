@@ -53,7 +53,7 @@ static __global__ void flashnext_iq4_repacked_grouped(
 static bool flashnext_repacked_moe_enabled() {
     static const bool enabled = [] {
         const char * env = getenv("GGML_CUDA_FLASHNEXT_MOE");
-        return env && strcmp(env, "1") == 0;
+        return env == nullptr || strcmp(env, "0") != 0;
     }();
     return enabled;
 }
