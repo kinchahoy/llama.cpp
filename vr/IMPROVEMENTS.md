@@ -26,7 +26,7 @@ Which local paths each model and quant actually uses. "Measured" means a matched
 | Tied output head split | n/a, untied | yes, 262K-vocab head; path | yes; path | yes; path | n/a |
 | Shared-expert split | n/a | n/a | n/a | n/a | yes |
 | Host n-gram table placement | n/a | n/a | n/a | n/a | yes |
-| Narrow IQ2_S expert path, grouped MoE (opt-in) | n/a | n/a | n/a | n/a | IQ2_S and IQ4_NL experts; measured |
+| Narrow IQ2_S expert path, grouped MoE (default on) | n/a | n/a | n/a | n/a | IQ2_S and IQ4_NL experts; measured |
 | Cheaper IQ sign apply (S2) | n/a | n/a | n/a | n/a | IQ2_S and IQ3_XXS experts; measured +5.1% TG, +3.1% PP |
 | Q5_0 (native) and IQ4_XS (as IQ4_NL) repack | n/a | n/a | IQ4_XS share; path | n/a | Q5_0 down and IQ4_XS gate/up experts of UD-Q3_K_XL/UD-IQ4_XS; measured +2-3.5% TG, +6-9% PP |
 | MTP prompt replay, KV-only prefill, backend sampling | yes; measured | upstream Gemma 4 assistant path, not the local MTP work | same | same | yes; measured |
@@ -49,7 +49,7 @@ Use the source map above and this table to decide what needs attention each week
 | Narrow IQ2_S expert path | Only even rows and one output column; other shapes retain fallback | Targeted CPU-reference cases and affected MoE workload, with approval | [IQ2_S record](old-ignore/2026-10-29/iq2s-single-token-experiment/README.md); retire if upstream matches it or benefit disappears |
 | AllReduce and overlap | HIP host staging by default, graph-safe counters and scheduler hooks; peer transport opt-in; RCCL off on this host | TP smoke at both widths and matched PP/TG | [Rebuild](old-ignore/2026-10-29/rebuild/README.md); remove local extensions only when upstream replaces their behavior |
 | TP lanes, token graphs and fusions | Scheduler/readback dependencies, shared-expert reduction and graph update safety; no new per-ubatch host sync | TP smoke, generation and matched PP/TG | [Rebuild](old-ignore/2026-10-29/rebuild/README.md); prefer equivalent upstream paths after validation |
-| Grouped MoE reuse | Opt-in, eligible narrow IQ2_S/IQ4_NL batches, original routing and fallback | Targeted reference and MoE output checks, with approval; dense Q8 smoke does not cover this | [Grouped-MoE record](old-ignore/2026-10-25/flashnext-fast/README.md); retire if upstream replaces it or benefit disappears |
+| Grouped MoE reuse | On by default (`GGML_CUDA_FLASHNEXT_MOE=0` disables), eligible narrow IQ2_S/IQ4_NL batches, original routing and fallback | Targeted reference and MoE output checks, with approval; dense Q8 smoke does not cover this | [Grouped-MoE record](old-ignore/2026-10-25/flashnext-fast/README.md); retire if upstream replaces it or benefit disappears |
 | Speculative replay and state | Draft repack, split KV, per-sequence taps, rollback snapshots and output stride; rounded ubatch 2048 can need 2049 tap rows | Targeted MTP/DFlash output and rollback checks, with approval; plain generation does not cover this | [Rebuild](old-ignore/2026-10-29/rebuild/README.md), [scripts](scripts/README.md); retire fixes when upstream preserves these invariants |
 | Model integration | Host PLE placement, shared/tied output split and MTP mirrors; reconcile loader, graph and memory callers | Generation for affected cached models; report unavailable coverage | [Removed and changed](#2026-10-29-rebuild-removed-and-changed); prefer upstream model implementations and do not restore removed fork-only models |
 
@@ -79,7 +79,7 @@ Correctness fixes matter as much as speed: graph reservation can round persisten
 
 For narrow MoE verification batches on gfx906, group assignments to the same expert and reuse decoded weights across up to eight entries. Expert selection, quantization and each token's output remain unchanged in intent; there is no intentional precision or quality tradeoff. Floating-point execution differences still need correctness checks.
 
-The [recorded experiment](old-ignore/2026-10-25/flashnext-fast/README.md) found about 6% higher Flash Next TG with grouped-only enabled, identical text/acceptance on the tested prompt, and passing CPU-reference cases. This accepts the weight-reuse idea, not a guarantee for every workload. Keep `GGML_CUDA_FLASHNEXT_MOE=1` opt-in for now. The separate GPU-feedback path is not included. The wider MMQ fallback remains outside this validation.
+The [recorded experiment](old-ignore/2026-10-25/flashnext-fast/README.md) found about 6% higher Flash Next TG with grouped-only enabled, identical text/acceptance on the tested prompt, and passing CPU-reference cases. This accepts the weight-reuse idea, not a guarantee for every workload. It is on by default since 2026-11-06 (`GGML_CUDA_FLASHNEXT_MOE=0` disables), after byte-identical MTP2/MTP3 output and +6-8% TG at 100K. The separate GPU-feedback path is not included. The wider MMQ fallback remains outside this validation.
 
 The active code also accepts the narrow IQ2_S single-token expert path described above. One matched 20-thread pair measured 38.08 vs 37.20 TG (+2.37%) with identical output, but this is not repeatability evidence. The code only selects for IQ2_S expert operations with one output column and even rows; it does not apply to dense Q8_0, and no Q8_0 benefit was measured. Three focused CPU-reference cases passed. See the [dated single-token report](old-ignore/2026-10-29/iq2s-single-token-experiment/README.md).
 

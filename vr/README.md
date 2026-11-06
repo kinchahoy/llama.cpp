@@ -18,7 +18,7 @@ Local enhancements for two 32 GiB gfx906 GPUs (MI50/MI60), primarily tested with
 1. Qwen3.8-27B at Q8_0 is the primary performance target.
 2. Gemma 4 at Q8 and Qwen Next at a quantization that fits the two GPUs are secondary targets.
 
-`flashnext-fast` produced the accepted grouped-MoE weight-reuse path, now included in the source and active patch set. Enable it with `GGML_CUDA_FLASHNEXT_MOE=1` for eligible gfx906 MoE verification; it remains opt-in. Its separate GPU-feedback experiment stays in the original worktree. See [the evidence](old-ignore/2026-10-25/flashnext-fast/README.md).
+`flashnext-fast` produced the accepted grouped-MoE weight-reuse path, now included in the source and active patch set. It is on by default for eligible gfx906 MoE verification since 2026-11-06; `GGML_CUDA_FLASHNEXT_MOE=0` disables it. Its separate GPU-feedback experiment stays in the original worktree. See [the evidence](old-ignore/2026-10-25/flashnext-fast/README.md).
 
 `play-qwen-off` is a separate project exploring how to reduce Qwen's wordiness. Keep its branch and worktree separate from the gfx906 performance patch chain; assess it on output behavior rather than PP/TG. Both worktrees remain in place with their local changes intact.
 

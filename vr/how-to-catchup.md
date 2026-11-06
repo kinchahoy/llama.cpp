@@ -45,7 +45,7 @@ Haiku-class agents are fine for triage and additive hunks. MMQ launch, recurrent
 
 Preserve these connected paths:
 
-- Repack upload/layout, dispatch, fused consumers, gfx906 MMQ/MMVQ tuning, existing supported quants, and opt-in grouped MoE weight reuse for narrow IQ2_S/IQ4_NL batches.
+- Repack upload/layout, dispatch, fused consumers, gfx906 MMQ/MMVQ tuning, existing supported quants, and default-on grouped MoE weight reuse for narrow IQ2_S/IQ4_NL batches.
 - Preserve gfx906 row-first MMQ traversal when reconciling upstream launch-axis changes. The first 418f port changed this traversal and showed a large PP loss; the accepted tree restores the gfx906 ordering. The active narrow IQ2_S single-token expert path is limited to one output column and even rows; odd rows retain the prior fallback.
 - Upstream HIP host-staged AllReduce plus the local graph-replay, duplex/slab overlap and scheduler integration: HIP must enter the first `#if !defined(GGML_USE_MUSA)` path in `ggml/src/ggml-cuda/allreduce.cu` with no environment switch. The peer-write AllReduce stays opt-in (`GGML_CUDA_PEER_AR=1`).
 - Parallel lanes, shared-expert reduction, token graphs, and scheduler/readback dependencies; avoid new per-ubatch host synchronization.
