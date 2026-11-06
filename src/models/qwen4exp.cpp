@@ -366,6 +366,27 @@ llama_model_qwen4exp::graph::build_hc_mix(
     const int64_t hc_dim = hc * n_embd;
     const int64_t nt     = x->ne[2];
 
+    // decode and MTP verify (nt <= 8): one fused op for norm, down+inject, silu, up, gate and stream mean
+    // Q8_0 weights see the activation as int8 per 32 values, like mul_mat; GGML_CUDA_HC_MIX_FUSED=0 restores the old graph
+    static const bool hc_mix_fused = [] {
+        const char * env = getenv("GGML_CUDA_HC_MIX_FUSED");
+        return env == nullptr || atoi(env) != 0;
+    }();
+    if (hc_mix_fused && cparams.fused_dsv4_hc_pre && il >= 0 && !w_down_inject && w_down && w_inject && hc == 4 && nt <= 8 &&
+            x->type == GGML_TYPE_F32 && w_norm->type == GGML_TYPE_F32 && w_inject->type == GGML_TYPE_F32 &&
+            (w_down->type == GGML_TYPE_F32 || w_down->type == GGML_TYPE_Q8_0) &&
+            (w_up->type == GGML_TYPE_F32 || w_up->type == GGML_TYPE_Q8_0) &&
+            ggml_is_contiguous(x) && ggml_is_contiguous(w_norm) && ggml_is_contiguous(w_down) &&
+            ggml_is_contiguous(w_inject) && ggml_is_contiguous(w_up) &&
+            n_embd % 512 == 0 && n_embd <= 4096 && w_down->ne[1] % 32 == 0 && w_down->ne[1] <= 512) {
+        ggml_tensor * out = ggml_dsv4_hc_mix(ctx0, x, w_norm, w_down, w_inject, w_up, hparams.f_norm_rms_eps);
+        ggml_tensor * mixed  = ggml_view_2d(ctx0, out, n_embd, nt, n_embd*sizeof(float), 0);
+        ggml_tensor * inject = ggml_view_2d(ctx0, out, hc, nt, hc*sizeof(float), n_embd*nt*sizeof(float));
+        cb(mixed, "hc_mixed", il);
+        cb(inject, "hc_inject", il);
+        return { mixed, inject };
+    }
+
     // grouped RMSNorm: reduce over one stream, then scale all streams with the [n_embd, hc] gamma
     // the converter folded each gamma to (1 + w)
     ggml_tensor * xn = ggml_mul(ctx0, ggml_rms_norm(ctx0, x, hparams.f_norm_rms_eps), w_norm);

@@ -12530,3 +12530,124 @@ void ggml_compute_forward_lightning_indexer(
         }
     }
 }
+
+// ggml_compute_forward_dsv4_hc_mix
+
+// Q8_0 weights are dotted with the activation quantized to int8 per 32 values, like mul_mat does
+static void hc_mix_quant32(const float * z, float & d, int8_t * q) {
+    float amax = 0.0f;
+    for (int k = 0; k < 32; ++k) {
+        amax = std::max(amax, fabsf(z[k]));
+    }
+    d = amax/127.0f;
+    const float inv = amax > 0.0f ? 127.0f/amax : 0.0f;
+    for (int k = 0; k < 32; ++k) {
+        q[k] = (int8_t) lrintf(z[k]*inv);
+    }
+}
+
+// dot of weight row `row` with v of length n
+// the optional rscale[s] scales each segment of seg values, which is how the rms scale of a stream is applied
+static float hc_mix_row_dot(const ggml_tensor * w, int64_t row, const float * v, int64_t n, int64_t seg, const float * rscale) {
+    const char * base = (const char *) w->data + row*w->nb[1];
+    float total = 0.0f;
+    if (w->type == GGML_TYPE_Q8_0) {
+        constexpr size_t blk_size = 34; // half d, int8 qs[32]
+        float part = 0.0f;
+        for (int64_t i = 0; i < n/32; ++i) {
+            float dx;
+            int8_t q[32];
+            hc_mix_quant32(v + 32*i, dx, q);
+            int isum = 0;
+            const char * b = base + i*blk_size;
+            ggml_fp16_t dh;
+            memcpy(&dh, b, sizeof(dh));
+            for (int k = 0; k < 32; ++k) {
+                isum += (int) ((const int8_t *) (b + sizeof(dh)))[k]*(int) q[k];
+            }
+            part += GGML_FP16_TO_FP32(dh)*dx*(float) isum;
+            if (rscale && (32*(i + 1)) % seg == 0) {
+                total += part*rscale[(32*i)/seg];
+                part = 0.0f;
+            }
+        }
+        return rscale ? total : part;
+    }
+    const float * wr = (const float *) base;
+    float part = 0.0f;
+    for (int64_t k = 0; k < n; ++k) {
+        part += wr[k]*v[k];
+        if (rscale && (k + 1) % seg == 0) {
+            total += part*rscale[k/seg];
+            part = 0.0f;
+        }
+    }
+    return rscale ? total : part;
+}
+
+void ggml_compute_forward_dsv4_hc_mix(
+        const ggml_compute_params * params,
+        ggml_tensor * dst) {
+    const ggml_tensor * x        = dst->src[0];
+    const ggml_tensor * w_norm   = dst->src[1];
+    const ggml_tensor * w_down   = dst->src[2];
+    const ggml_tensor * w_inject = dst->src[3];
+    const ggml_tensor * w_up     = dst->src[4];
+
+    GGML_ASSERT(x->type == GGML_TYPE_F32 && w_norm->type == GGML_TYPE_F32 && w_inject->type == GGML_TYPE_F32);
+    GGML_ASSERT(ggml_is_contiguous(x) && ggml_is_contiguous(w_norm));
+    GGML_ASSERT(w_down->type == GGML_TYPE_F32 || w_down->type == GGML_TYPE_Q8_0);
+    GGML_ASSERT(w_up->type == GGML_TYPE_F32 || w_up->type == GGML_TYPE_Q8_0);
+
+    const int64_t n_embd   = x->ne[0];
+    const int64_t hc       = x->ne[1];
+    const int64_t n_tokens = x->ne[2];
+    const int64_t n_lo     = w_down->ne[1];
+    const int64_t hc_dim   = hc*n_embd;
+
+    const float eps = ggml_get_op_params_f32(dst, 0);
+
+    // the rms scale is applied after the dot, per stream: sum_k w[k]*(x[k]*wn[k])*rinv[stream(k)]
+    std::vector<float> z(hc_dim);
+    std::vector<float> xn(hc_dim);
+    std::vector<float> rinv(hc);
+    std::vector<float> lo(n_lo);
+    std::vector<float> inj(hc);
+
+    for (int64_t it = params->ith; it < n_tokens; it += params->nth) {
+        const float * xt = (const float *) x->data + it*hc_dim;
+        const float * wn = (const float *) w_norm->data;
+        for (int64_t ih = 0; ih < hc; ++ih) {
+            float ss = 0.0f;
+            for (int64_t i = 0; i < n_embd; ++i) {
+                ss += xt[ih*n_embd + i]*xt[ih*n_embd + i];
+            }
+            rinv[ih] = 1.0f/sqrtf(ss/n_embd + eps);
+            for (int64_t i = 0; i < n_embd; ++i) {
+                z[ih*n_embd + i]  = xt[ih*n_embd + i]*wn[ih*n_embd + i];
+                xn[ih*n_embd + i] = z[ih*n_embd + i]*rinv[ih];
+            }
+        }
+
+        for (int64_t j = 0; j < n_lo; ++j) {
+            const float s = hc_mix_row_dot(w_down, j, z.data(), hc_dim, n_embd, rinv.data())*(1.0f/(float) hc);
+            lo[j] = s/(1.0f + expf(-s));
+        }
+        for (int64_t j = 0; j < hc; ++j) {
+            inj[j] = hc_mix_row_dot(w_inject, j, z.data(), hc_dim, n_embd, rinv.data())*(1.0f/(float) hc);
+        }
+
+        float * out = (float *) dst->data + it*n_embd;
+        for (int64_t i = 0; i < n_embd; ++i) {
+            float sum = 0.0f;
+            for (int64_t ih = 0; ih < hc; ++ih) {
+                const float g = hc_mix_row_dot(w_up, ih*n_embd + i, lo.data(), n_lo, n_lo, nullptr);
+                sum += xn[ih*n_embd + i]*(1.0f/(1.0f + expf(-g)));
+            }
+            out[i] = sum*(1.0f/(float) hc);
+        }
+        for (int64_t ih = 0; ih < hc; ++ih) {
+            ((float *) dst->data)[n_embd*n_tokens + it*hc + ih] = inj[ih];
+        }
+    }
+}

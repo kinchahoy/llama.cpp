@@ -1099,6 +1099,7 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "DSV4_HC_COMB",
     "DSV4_HC_PRE",
     "DSV4_HC_POST",
+    "DSV4_HC_MIX",
     "TOP_K_MASK",
 
     "UNARY",
@@ -1117,7 +1118,7 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "GLU",
 };
 
-static_assert(GGML_OP_COUNT == 102, "GGML_OP_COUNT != 102");
+static_assert(GGML_OP_COUNT == 103, "GGML_OP_COUNT != 103");
 
 static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "none",
@@ -1215,6 +1216,7 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "dsv4_hc_comb(mixes, scale, base)",
     "dsv4_hc_pre(x, weights)",
     "dsv4_hc_post(x, residual, post, comb)",
+    "dsv4_hc_mix(x, w_norm, w_down, w_inject, w_up)",
     "top_k_mask(mask, top_k, score, blocks, extra)",
 
     "unary(x)",
@@ -1233,7 +1235,7 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "glu(x)",
 };
 
-static_assert(GGML_OP_COUNT == 102, "GGML_OP_COUNT != 102");
+static_assert(GGML_OP_COUNT == 103, "GGML_OP_COUNT != 103");
 
 static_assert(GGML_OP_POOL_COUNT == 2, "GGML_OP_POOL_COUNT != 2");
 
@@ -6673,6 +6675,46 @@ struct ggml_tensor * ggml_dsv4_hc_pre_gated(
         struct ggml_tensor  * gate,
         float                 scale) {
     return ggml_dsv4_hc_pre_impl(ctx, x, gate, scale, true);
+}
+
+// ggml_dsv4_hc_mix
+
+struct ggml_tensor * ggml_dsv4_hc_mix(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * x,
+        struct ggml_tensor  * w_norm,
+        struct ggml_tensor  * w_down,
+        struct ggml_tensor  * w_inject,
+        struct ggml_tensor  * w_up,
+        float                 eps) {
+    GGML_ASSERT(x->type == GGML_TYPE_F32);
+    GGML_ASSERT(w_norm->type == GGML_TYPE_F32);
+    GGML_ASSERT(w_inject->type == GGML_TYPE_F32);
+
+    const int64_t n_embd   = x->ne[0];
+    const int64_t hc       = x->ne[1];
+    const int64_t n_tokens = x->ne[2];
+    const int64_t n_lo     = w_down->ne[1];
+
+    GGML_ASSERT(hc > 0 && n_lo > 0);
+    GGML_ASSERT(x->ne[3] == 1);
+    GGML_ASSERT(ggml_nelements(w_norm) == hc*n_embd);
+    GGML_ASSERT(w_down->ne[0] == hc*n_embd);
+    GGML_ASSERT(w_inject->ne[0] == hc*n_embd && w_inject->ne[1] == hc);
+    GGML_ASSERT(w_up->ne[0] == n_lo && w_up->ne[1] == hc*n_embd);
+
+    struct ggml_tensor * result = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, (n_embd + hc)*n_tokens);
+
+    ggml_set_op_params_f32(result, 0, eps);
+
+    result->op     = GGML_OP_DSV4_HC_MIX;
+    result->src[0] = x;
+    result->src[1] = w_norm;
+    result->src[2] = w_down;
+    result->src[3] = w_inject;
+    result->src[4] = w_up;
+
+    return result;
 }
 
 // ggml_dsv4_hc_post

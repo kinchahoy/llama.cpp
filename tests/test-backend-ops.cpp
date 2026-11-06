@@ -4689,6 +4689,57 @@ struct test_dsv4_hc_pre : public test_dsv4_hc {
     }
 };
 
+struct test_dsv4_hc_mix : public test_dsv4_hc {
+    const int64_t n_embd;
+    const int64_t n_lo;
+    const int64_t n_tokens;
+    const ggml_type type_w;
+
+    std::string op_desc(ggml_tensor * t) override {
+        GGML_UNUSED(t);
+        return "DSV4_HC_MIX";
+    }
+
+    std::string vars() override {
+        return VARS_TO_STR4(n_embd, n_lo, n_tokens, type_w);
+    }
+
+    test_dsv4_hc_mix(int64_t n_embd = 64, int64_t n_lo = 32, int64_t n_tokens = 1, ggml_type type_w = GGML_TYPE_F32)
+        : n_embd(n_embd), n_lo(n_lo), n_tokens(n_tokens), type_w(type_w) {}
+
+    ggml_tensor * build_graph(ggml_context * ctx) override {
+        ggml_tensor * x = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, n_embd, hc, n_tokens);
+        ggml_set_name(x, "x");
+        ggml_tensor * w_norm = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, hc);
+        ggml_set_name(w_norm, "hc_norm");
+        ggml_tensor * w_down = ggml_new_tensor_2d(ctx, type_w, hc*n_embd, n_lo);
+        ggml_set_name(w_down, "hc_down");
+        ggml_tensor * w_inject = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hc*n_embd, hc);
+        ggml_set_name(w_inject, "hc_inject");
+        ggml_tensor * w_up = ggml_new_tensor_2d(ctx, type_w, n_lo, hc*n_embd);
+        ggml_set_name(w_up, "hc_up");
+
+        out = ggml_dsv4_hc_mix(ctx, x, w_norm, w_down, w_inject, w_up, 1e-6f);
+        ggml_set_name(out, "out");
+        return out;
+    }
+
+    void initialize_tensors(ggml_context * ctx) override {
+        for (ggml_tensor * t = ggml_get_first_tensor(ctx); t != nullptr; t = ggml_get_next_tensor(ctx, t)) {
+            const std::string name = ggml_get_name(t);
+            if (name == "x" || name == "hc_norm") {
+                init_tensor_uniform(t, -1.0f, 1.0f);
+            } else if (name == "hc_down" || name == "hc_inject") {
+                init_tensor_uniform(t, -2.0f/std::sqrt((float) (hc*n_embd)), 2.0f/std::sqrt((float) (hc*n_embd)));
+            } else if (name == "hc_up") {
+                init_tensor_uniform(t, -2.0f/std::sqrt((float) n_lo), 2.0f/std::sqrt((float) n_lo));
+            } else {
+                init_tensor_uniform(t);
+            }
+        }
+    }
+};
+
 struct test_dsv4_hc_post : public test_dsv4_hc {
     const int64_t n_embd;
     const int64_t n_tokens;
@@ -10402,6 +10453,10 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     test_cases.emplace_back(new test_dsv4_hc_pre(31, 4, 17));
     test_cases.emplace_back(new test_dsv4_hc_pre(128, 4, 257));
     test_cases.emplace_back(new test_dsv4_hc_pre(4096, 4, 21));
+    for (int64_t nt : {1, 2, 3, 4, 5, 8}) {
+        test_cases.emplace_back(new test_dsv4_hc_mix(512, 64, nt));
+        test_cases.emplace_back(new test_dsv4_hc_mix(2560, 320, nt, GGML_TYPE_Q8_0));
+    }
     test_cases.emplace_back(new test_dsv4_hc_pre(31, 4, 17, true));
     test_cases.emplace_back(new test_dsv4_hc_pre(4096, 4, 21, true));
     for (int64_t n_hc : {1, 2, 3, 5, 8, 65}) {
@@ -13073,6 +13128,11 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_perf() {
         test_cases.emplace_back(new test_dsv4_hc_post(7168, n_tokens));             // DeepSeek-V4-Pro
         test_cases.emplace_back(new test_dsv4_hc_post(2560, n_tokens, true, true)); // Qwen4-Exp, with the post gate chain
         test_cases.emplace_back(new test_dsv4_hc_post(2560, n_tokens, true));       // synthetic, Qwen4-Exp kernel without the gate chain
+    }
+
+    // DSV4_HC_MIX: decode and MTP verify widths
+    for (int64_t n_tokens : {1, 2, 4}) {
+        test_cases.emplace_back(new test_dsv4_hc_mix(2560, 320, n_tokens, GGML_TYPE_Q8_0)); // Qwen4-Exp (Qwen3.8-Flash-Next)
     }
 
     // Qwen3.8-Flash-Next pooled indexer prefill.

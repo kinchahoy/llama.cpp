@@ -222,6 +222,12 @@ static bool ggml_backend_meta_device_supports_op(ggml_backend_dev_t dev, const g
         ggml_backend_buffer_type_t w_buft = ggml_backend_buffer_get_type(w->buffer);
         if (!ggml_backend_buft_is_meta(w_buft) || !ggml_backend_meta_buft_is_repack(w_buft)) continue;
 
+        // the fused hc op reads Q8_0 planes directly
+        if (op->op == GGML_OP_DSV4_HC_MIX && (i == 2 || i == 4)) {
+            if (w->type != GGML_TYPE_Q8_0 || w->view_src != nullptr) return false;
+            continue;
+        }
+
         // a repacked weight can only be consumed as src0
         if (i != 0) return false;
         const bool ok_mm   = op->op == GGML_OP_MUL_MAT    && ggml_n_dims(w) == 2;
@@ -1496,6 +1502,7 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(
             case GGML_OP_DSV4_HC_COMB:
             case GGML_OP_DSV4_HC_PRE:
             case GGML_OP_DSV4_HC_POST:
+            case GGML_OP_DSV4_HC_MIX:
             case GGML_OP_TOP_K_MASK: {
                 // DeepSeek-V4 custom attention ops. Replicated under design A (mirrored in, mirrored out).
                 split_state = handle_generic(src_ss, /*scalar_only =*/ true);
