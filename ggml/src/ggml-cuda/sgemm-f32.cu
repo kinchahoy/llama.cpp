@@ -108,7 +108,8 @@ bool ggml_cuda_should_use_sgemm_f32(const ggml_tensor * src0, const ggml_tensor 
         && src0->nb[1] % 16 == 0 && src1->nb[1] % 16 == 0
         && (uintptr_t) src0->data % 16 == 0 && (uintptr_t) src1->data % 16 == 0
         && ggml_is_contiguous(dst)
-        && src1->ne[1] > 16 && src0->ne[1] < 128;
+        && src0->ne[0] == src1->ne[0]
+        && src1->ne[1] > 16 && src1->ne[1] <= 65535 && src0->ne[1] < 128;
 }
 
 template <int BM, int BN>
