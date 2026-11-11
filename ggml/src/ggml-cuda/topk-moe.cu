@@ -132,7 +132,14 @@ __device__ void group_mask_warp_inplace(float (&vals)[experts_per_thread], const
         const float other = __shfl_sync(0xFFFFFFFF, score, g, WARP_SIZE);
         rank += other > score || (other == score && g < lane);
     }
-    const auto keep = __ballot_sync(0xFFFFFFFFULL, lane < n_groups && rank < n_group_used);
+    const bool keep_group = lane < n_groups && rank < n_group_used;
+#if defined(GGML_USE_HIP)
+    // HIP 7 __ballot_sync masks the 64-bit ballot; two 32-lane rows share a wave64, so take the half of this row
+    constexpr bool two_rows = ggml_cuda_get_physical_warp_size() == 2 * WARP_SIZE;
+    const uint64_t keep     = __ballot(keep_group) >> (two_rows ? (threadIdx.y & 1) * WARP_SIZE : 0);
+#else
+    const auto keep = __ballot_sync(0xFFFFFFFFULL, keep_group);
+#endif // defined(GGML_USE_HIP)
 
 #pragma unroll
     for (int i = 0; i < experts_per_thread; i++) {
@@ -369,6 +376,162 @@ __global__ void topk_moe_cuda(const float *         logits,
     }
 }
 
+#if defined(GGML_USE_HIP)
+// fmaxf for float (same NaN handling as topk_moe_cuda) or min for int
+template <bool is_max, typename T>
+static __device__ __forceinline__ T topk_moe_combine(const T a, const T b) {
+    if constexpr (is_max) {
+        return fmaxf(a, b);
+    } else {
+        return min(a, b);
+    }
+}
+
+// Max or min over a 32-lane logical warp (half of a wave64), same value on every lane.
+template <bool is_max, typename T>
+static __device__ __forceinline__ T topk_moe_warp_minmax(T x) {
+#if defined(__GFX9__)
+    // DPP: quad xor1, quad xor2, half mirror (8 lanes), mirror (16 lanes), then xor16 through a shuffle
+#define TOPK_MOE_DPP_STEP(ctrl) \
+    x = topk_moe_combine<is_max>(x, __builtin_bit_cast(T, __builtin_amdgcn_mov_dpp(__builtin_bit_cast(int, x), ctrl, 0xF, 0xF, false)));
+    TOPK_MOE_DPP_STEP(0xB1)
+    TOPK_MOE_DPP_STEP(0x4E)
+    TOPK_MOE_DPP_STEP(0x141)
+    TOPK_MOE_DPP_STEP(0x140)
+#undef TOPK_MOE_DPP_STEP
+    return topk_moe_combine<is_max>(x, __shfl_xor_sync(0xFFFFFFFF, x, 16, WARP_SIZE));
+#else
+    for (int off = WARP_SIZE / 2; off > 0; off >>= 1) {
+        x = topk_moe_combine<is_max>(x, __shfl_xor_sync(0xFFFFFFFF, x, off, WARP_SIZE));
+    }
+    return x;
+#endif // defined(__GFX9__)
+}
+
+/*
+    One 32-lane warp per row (two rows per wave64), no bias, no groups, no delayed softmax, n_used <= 16.
+    Same results as topk_moe_cuda, with the winner chosen by lowest expert id among equal values.
+    The k loop is rolled: for a single wave the cold instruction fetch costs more than the loop overhead.
+*/
+template <int n_experts, int n_used>
+__launch_bounds__(TOPK_MOE_ROWS_PER_BLOCK * WARP_SIZE, 1)
+__global__ void topk_moe_wave_cuda(const float *         logits,
+                                   float *               weights,
+                                   int32_t *             ids,
+                                   const int             n_rows,
+                                   const float           clamp_val,
+                                   const float           scale_val,
+                                   const topk_moe_config config) {
+    static_assert(WARP_SIZE == 32 && n_experts == 512 && n_used >= 1 && n_used <= 16, "unsupported shape");
+    constexpr int ept = n_experts / WARP_SIZE;
+
+    const int row  = blockIdx.x * blockDim.y + threadIdx.y;
+    const int lane = threadIdx.x;
+    if (row >= n_rows) {
+        return;
+    }
+
+    logits  += n_experts * row;
+    weights += n_used * row;
+    ids     += n_experts * row;
+
+    float wt[ept];
+#pragma unroll
+    for (int i = 0; i < ept; i++) {
+        wt[i] = logits[lane + i * WARP_SIZE];
+    }
+
+    // Weights and IDs can alias logits, so wait until every row in the block reads its logits.
+    __syncthreads();
+
+    if (!config.delayed_softmax) {
+        if (config.use_sigmoid) {
+            sigmoid_warp_inplace<ept, false>(wt, n_experts, lane);
+        } else if (config.use_sqrt_softplus) {
+            sqrt_softplus_warp_inplace<ept, false>(wt, n_experts, lane);
+        } else {
+            float lmax = wt[0];
+#pragma unroll
+            for (int i = 1; i < ept; i++) {
+                lmax = fmaxf(lmax, wt[i]);
+            }
+            const float max_val = topk_moe_warp_minmax<true>(lmax);
+
+            float g[ept];
+#pragma unroll
+            for (int i = 0; i < ept; i++) {
+                wt[i] = expf(wt[i] - max_val);
+                g[i]  = warp_reduce_sum(wt[i]);
+            }
+
+            // g[i] is the same on all lanes; this is the butterfly order of the second reduction in topk_moe_cuda (16 groups)
+            float x[8];
+#pragma unroll
+            for (int l = 0; l < 8; l++) {
+                x[l] = g[l] + g[l + 8];
+            }
+            const float sum     = ((x[0] + x[4]) + (x[2] + x[6])) + ((x[1] + x[5]) + (x[3] + x[7]));
+            const float inv_sum = 1.0f / sum;
+#pragma unroll
+            for (int i = 0; i < ept; i++) {
+                wt[i] *= inv_sum;
+            }
+        }
+    }
+
+#pragma unroll
+    for (int i = 0; i < ept; i++) {
+        if (__isnanf(wt[i])) {
+            wt[i] = -FLT_MAX;
+        }
+    }
+
+    float out_w  = 0.f;
+    int   out_id = 0;
+
+    // not unrolled: single-wave kernels are bound by cold instruction fetch
+#pragma unroll 1
+    for (int k = 0; k < n_used; k++) {
+        float lmax = wt[0];
+#pragma unroll
+        for (int i = 1; i < ept; i++) {
+            lmax = fmaxf(lmax, wt[i]);
+        }
+        const float m = topk_moe_warp_minmax<true>(lmax);
+
+        int e = INT_MAX;
+#pragma unroll
+        for (int i = 0; i < ept; i++) {
+            e = wt[i] == m ? min(e, lane + i * WARP_SIZE) : e;
+        }
+        e = topk_moe_warp_minmax<false>(e);
+
+#pragma unroll
+        for (int i = 0; i < ept; i++) {
+            if (lane == (e & (WARP_SIZE - 1)) && i == e / WARP_SIZE) {
+                wt[i] = -INFINITY;
+            }
+        }
+
+        if (lane == k) {
+            out_w  = m;
+            out_id = e;
+        }
+    }
+
+    if (config.with_norm) {
+        float wt_sum = warp_reduce_sum(out_w); // lanes past n_used hold 0
+        wt_sum = fmaxf(wt_sum, clamp_val);
+        out_w /= wt_sum;
+    }
+
+    if (lane < n_used) {
+        weights[lane] = out_w * scale_val;
+        ids[lane]     = out_id;
+    }
+}
+#endif // defined(GGML_USE_HIP)
+
 template<bool has_bias>
 static void launch_topk_moe_cuda(ggml_backend_cuda_context & ctx,
                                  const float *               logits,
@@ -384,6 +547,20 @@ static void launch_topk_moe_cuda(ggml_backend_cuda_context & ctx,
     GGML_ASSERT(!(config.with_norm && config.delayed_softmax) &&
                 "delayed softmax is not supported with weight normalization");
     const int    cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
+
+#if defined(GGML_USE_HIP)
+    if constexpr (!has_bias) {
+        if (cc == GGML_CUDA_CC_VEGA20 && n_expert == 512 && n_expert_used == 10 && n_rows <= TOPK_MOE_ROWS_PER_BLOCK &&
+            !config.delayed_softmax && config.n_groups == 0) {
+            const ggml_cuda_kernel_launch_params wave_params =
+                ggml_cuda_kernel_launch_params(dim3(1, 1, 1), dim3(WARP_SIZE, n_rows, 1), 0, ctx.stream());
+            ggml_cuda_kernel_launch(topk_moe_wave_cuda<512, 10>, wave_params,
+                logits, weights, ids, n_rows, clamp_val, scale_val, config);
+            return;
+        }
+    }
+#endif // defined(GGML_USE_HIP)
+
     const int    rows_per_block = cc == GGML_CUDA_CC_VEGA20 && n_rows == 1 ? 1 : TOPK_MOE_ROWS_PER_BLOCK;
     dim3         grid_dims((n_rows + rows_per_block - 1) / rows_per_block, 1, 1);
     dim3         block_dims(WARP_SIZE, rows_per_block, 1);
