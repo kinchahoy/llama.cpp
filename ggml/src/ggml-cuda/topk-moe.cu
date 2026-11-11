@@ -370,28 +370,26 @@ __global__ void topk_moe_cuda(const float *         logits,
 }
 
 #if defined(GGML_USE_HIP)
-// Max over the wave, same value on every lane. Max is exact, so any order gives the same result.
+// Max over a 32-lane logical warp (half of a wave64), same value on every lane. Max is exact, so any order gives the same result.
 static __device__ __forceinline__ float topk_moe_wave_max(float x) {
 #if defined(__GFX9__)
-    // DPP: quad xor1, quad xor2, half mirror (8 lanes), mirror (16 lanes), then the 4 rows through readlane
+    // DPP: quad xor1, quad xor2, half mirror (8 lanes), mirror (16 lanes), then xor16 inside the 32-lane half wave
     x = fmaxf(x, __int_as_float(__builtin_amdgcn_mov_dpp(__float_as_int(x), 0xB1, 0xF, 0xF, false)));
     x = fmaxf(x, __int_as_float(__builtin_amdgcn_mov_dpp(__float_as_int(x), 0x4E, 0xF, 0xF, false)));
     x = fmaxf(x, __int_as_float(__builtin_amdgcn_mov_dpp(__float_as_int(x), 0x141, 0xF, 0xF, false)));
     x = fmaxf(x, __int_as_float(__builtin_amdgcn_mov_dpp(__float_as_int(x), 0x140, 0xF, 0xF, false)));
-    const int xi = __float_as_int(x);
-    return fmaxf(fmaxf(__int_as_float(__builtin_amdgcn_readlane(xi, 0)), __int_as_float(__builtin_amdgcn_readlane(xi, 16))),
-                 fmaxf(__int_as_float(__builtin_amdgcn_readlane(xi, 32)), __int_as_float(__builtin_amdgcn_readlane(xi, 48))));
+    return fmaxf(x, __int_as_float(__builtin_amdgcn_ds_swizzle(__float_as_int(x), 0x401F)));
 #else
     return warp_reduce_max(x);
 #endif // defined(__GFX9__)
 }
 
 /*
-    One wave per row, no bias, no groups, no delayed softmax, n_used <= 16.
+    One 32-lane warp per row (two rows per wave64), no bias, no groups, no delayed softmax, n_used <= 16.
     Same math as topk_moe_cuda, but:
     - the wave max is exact, so it is computed with DPP (no ds_bpermute)
     - the winner is the lowest expert id with value == max, same tie rule as topk_moe_cuda
-    - all selected values are wave-uniform, so the weight sum is a scalar tree
+    - all selected values are uniform in the warp, so the weight sum is a scalar tree
       that matches the xor butterfly of warp_reduce_sum (zeros past n_used are exact)
     - no dynamically indexed register arrays (these go to scratch)
 */
@@ -404,7 +402,7 @@ __global__ void topk_moe_wave_cuda(const float *         logits,
                                    const float           clamp_val,
                                    const float           scale_val,
                                    const topk_moe_config config) {
-    static_assert(n_experts % WARP_SIZE == 0 && n_used >= 1 && n_used <= 16, "unsupported shape");
+    static_assert(WARP_SIZE == 32 && n_experts == 512 && n_used >= 1 && n_used <= 16, "unsupported shape");
     constexpr int ept = n_experts / WARP_SIZE;
 
     const int row  = blockIdx.x * blockDim.y + threadIdx.y;
@@ -446,8 +444,13 @@ __global__ void topk_moe_wave_cuda(const float *         logits,
                 g[i]  = warp_reduce_sum(wt[i]);
             }
 
-            // g[i] is the same on all lanes (8 groups on wave64); this is the butterfly order of the second reduction in topk_moe_cuda
-            const float sum     = ((g[0] + g[4]) + (g[2] + g[6])) + ((g[1] + g[5]) + (g[3] + g[7]));
+            // g[i] is the same on all lanes; this is the butterfly order of the second reduction in topk_moe_cuda (16 groups)
+            float x[8];
+#pragma unroll
+            for (int l = 0; l < 8; l++) {
+                x[l] = g[l] + g[l + 8];
+            }
+            const float sum     = ((x[0] + x[4]) + (x[2] + x[6])) + ((x[1] + x[5]) + (x[3] + x[7]));
             const float inv_sum = 1.0f / sum;
 #pragma unroll
             for (int i = 0; i < ept; i++) {
@@ -483,7 +486,8 @@ __global__ void topk_moe_wave_cuda(const float *         logits,
         int e = 0;
 #pragma unroll
         for (int i = ept - 1; i >= 0; i--) {
-            const uint64_t b = __ballot_sync(0xFFFFFFFFULL, wt[i] == m);
+            // two logical rows share a wave64: keep the 32 bits of this row
+            const uint64_t b = (__ballot_sync(0xFFFFFFFFULL, wt[i] == m) >> ((threadIdx.y & 1) * 32)) & 0xFFFFFFFFULL;
             if (b != 0) {
                 e = i * WARP_SIZE + (int) __ffsll((long long) b) - 1;
             }
