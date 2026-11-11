@@ -185,6 +185,11 @@ def analyze_token(ks, model, head_grid):
     t0 = ks[0][1]
     body = ks[1:]
     ar_pos = [i for i, k in enumerate(body) if base(k[2]) == "ggml_cuda_ar_kernel"]
+    if not ar_pos:
+        # single GPU: no AllReduce, end each segment before the residual add + norm where TP would reduce
+        # (the residual add is fused into the 1024-thread rms_norm here; the first one of the token is the input norm)
+        norms = [i for i, k in enumerate(body) if k[2].startswith("void rms_norm_f32<1024") or base(k[2]) == "add_rms_norm_mul_f32"]
+        ar_pos = [i - 1 for i in norms[1:]]
     bounds = [-1] + ar_pos + [len(body) - 1]
     steps = [None] * len(body)
     segs = []
@@ -310,8 +315,11 @@ def main():
             for _, st, ns, kind in items:
                 tot[a][st][kind == "i"] += ns
         # critical path: per segment, the GPU that started that AllReduce last; last segment: later head end
-        late = [max(agents, key=lambda a: res[a][1][k][0]) for k in range(n_ar)]
-        late.append(max(agents, key=lambda a: res[a][2][-1][1]))
+        if len(agents) == 1:
+            late = [a0] * len(seg_kinds)
+        else:
+            late = [max(agents, key=lambda a: res[a][1][k][0]) for k in range(n_ar)]
+            late.append(max(agents, key=lambda a: res[a][2][-1][1]))
         for a in agents:
             for seg_i, st, ns, kind in res[a][0]:
                 if late[seg_i] == a:

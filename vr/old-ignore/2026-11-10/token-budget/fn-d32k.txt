@@ -1,0 +1,77 @@
+trace: /home/raistlin/.claude/jobs/5a8c59bb/tmp/prof/fn32k/trace/t_kernel_trace.csv
+model: qwen4exp, decode tokens in trace: 64, token intervals: 63, warm-up intervals (> 1.2 x median 27.10 ms): 2 [38.1, 60.5], LM head grid 7946240x1x1
+all-token mean 27.932 ms/token, steady-token mean 27.231 ms/token (ROCm0)
+ROCm0 (Agent 1) steady: 27.231 ms/token, 2870.0 kernels/token, mat-vec 592.0 calls 7.892 ms, flash_attn* 1.449 ms, topk_moe 1.375 ms
+ROCm1 (Agent 2) steady: 27.231 ms/token, 2870.0 kernels/token, mat-vec 592.0 calls 8.277 ms, flash_attn* 1.457 ms, topk_moe 1.383 ms
+AllReduce per token: 96; segments: {'attn': 12, 'recr': 36, 'ffn': 48, 'out': 1}
+llama-bench profiled: 28.639 ms/token (includes the first token)
+llama-bench unprofiled: 41.32 t/s = 24.200 ms/token; scaled = critical x 0.8664
+critical-path rounding added to idle: 0.0012 ms
+
+ms/token, busy + idle-before (a gap is charged to the step that follows it)
+step                                                                         ROCm0           ROCm1        critical     sum     %  scaled
+Token start: host gap, no kernel                                     0.000 + 1.222   0.000 + 2.505   0.000 + 2.505   2.505   9.0   2.171
+Token start: input copies, embedding                                 0.057 + 0.000   0.071 + 0.000   0.071 + 0.000   0.071   0.3   0.062
+Warm-up tokens: excess over steady tokens, spread over all           0.000 + 0.702   0.000 + 0.702   0.000 + 0.702   0.702   2.5   0.608
+Residual add + norm (Flash Next: hyper-connection combine + mix)     3.645 + 0.000   3.856 + 0.000   3.855 + 0.000   3.855  13.8   3.340
+Per-layer n-gram embedding (Flash Next)                              0.196 + 0.000   0.218 + 0.000   0.220 + 0.000   0.220   0.8   0.191
+Mixer: input projections (mat-vec)                                   2.469 + 0.000   2.691 + 0.000   2.691 + 0.000   2.691   9.6   2.332
+Attention: q/k norm, rope, KV write, gate                            0.457 + 0.000   0.493 + 0.000   0.493 + 0.000   0.493   1.8   0.427
+Attention: flash attention                                           1.449 + 0.000   1.457 + 0.000   1.457 + 0.000   1.457   5.2   1.262
+Attention: QSA indexer (Flash Next)                                  2.724 + 0.000   2.994 + 0.000   2.994 + 0.000   2.994  10.7   2.594
+Recurrent: conv, gated delta net, gates, state                       2.049 + 0.000   2.288 + 0.000   2.288 + 0.000   2.288   8.2   1.982
+Mixer: output projection (mat-vec)                                   0.754 + 0.000   0.763 + 0.000   0.763 + 0.000   0.763   2.7   0.661
+AllReduce after mixer: exchange                                      0.449 + 0.010   0.505 + 0.016   0.505 + 0.016   0.520   1.9   0.451
+AllReduce after mixer: wait for other GPU                            2.348 + 0.000   0.002 + 0.000   0.000 + 0.000   0.000   0.0   0.000
+MoE: router + top-k                                                  1.841 + 0.000   1.856 + 0.000   1.860 + 0.000   1.860   6.7   1.611
+MoE: routed experts                                                  2.464 + 0.000   2.585 + 0.000   2.615 + 0.000   2.615   9.4   2.265
+MoE: shared expert + gate                                            1.366 + 0.000   1.416 + 0.000   1.417 + 0.000   1.417   5.1   1.227
+MoE: weighted reduce + combine                                       0.654 + 0.000   0.878 + 0.000   0.874 + 0.000   0.874   3.1   0.757
+AllReduce after FFN: exchange                                        0.441 + 0.010   0.498 + 0.012   0.494 + 0.012   0.505   1.8   0.438
+AllReduce after FFN: wait for other GPU                              0.901 + 0.000   0.010 + 0.000   0.000 + 0.000   0.000   0.0   0.000
+Output: final norm (+ softcap)                                       0.067 + 0.000   0.077 + 0.000   0.077 + 0.000   0.077   0.3   0.067
+Output: LM head mat-vec                                              0.496 + 0.000   0.520 + 0.000   0.520 + 0.000   0.520   1.9   0.451
+q8_1 quantize of mat-vec inputs                                      1.151 + 0.000   1.506 + 0.000   1.490 + 0.000   1.490   5.3   1.291
+Glue: copies, crops, other                                           0.011 + 0.000   0.013 + 0.000   0.013 + 0.000   0.013   0.0   0.011
+Critical-path rounding (GPU switch at AllReduce ends)                0.000 + 0.000   0.000 + 0.000   0.000 + 0.001   0.001   0.0   0.001
+total                                                               25.988 + 1.944  24.699 + 3.234  24.697 + 3.235  27.932 100.0  24.200
+
+COLUMN (append each cell to the matching row of the main table)
+Column id | FN@32K 2026-11-10
+Measured | 2026-11-10 18:48 PST
+Source commit | 0f7ce1b04
+Build (sha256 llama-bench / libggml-hip.so) | `build-exp-spec` (`e4e83771fc55 / 1ac1232870d5`)
+Model, quant, file revision | Qwen3.8 Flash Next UD-IQ3_XXS rev d96201194f10 + Q8_0 n-gram table
+Settings | -ts 1/1 -b 1024 -ub 512 -fa on, depth 32768, tg64
+Unprofiled TG t/s (ms/token) | 41.32 +- 0.97 (24.20)
+Profiled ms/token: all tokens; steady; llama-bench | 27.93; 27.23; 28.64
+Kernels / AllReduces per token | 2870 / 96
+Token start: host gap, no kernel | 0.00 + 2.51 (9%)
+Token start: input copies, embedding | 0.07 + 0.00 (0%)
+Warm-up tokens: excess over steady tokens, spread over all | 0.00 + 0.70 (3%)
+Residual add + norm (Flash Next: hyper-connection combine + mix) | 3.86 + 0.00 (14%)
+Per-layer n-gram embedding (Flash Next) | 0.22 + 0.00 (1%)
+Mixer: input projections (mat-vec) | 2.69 + 0.00 (10%)
+Attention: q/k norm, rope, KV write, gate | 0.49 + 0.00 (2%)
+Attention: flash attention | 1.46 + 0.00 (5%)
+Attention: QSA indexer (Flash Next) | 2.99 + 0.00 (11%)
+Recurrent: conv, gated delta net, gates, state | 2.29 + 0.00 (8%)
+Mixer: output projection (mat-vec) | 0.76 + 0.00 (3%)
+AllReduce after mixer: exchange | 0.50 + 0.02 (2%)
+AllReduce after mixer: wait for other GPU | -
+FFN dense: gate/up mat-vec | -
+FFN dense: activation | -
+FFN dense: down mat-vec | -
+MoE: router + top-k | 1.86 + 0.00 (7%)
+MoE: routed experts | 2.61 + 0.00 (9%)
+MoE: shared expert + gate | 1.42 + 0.00 (5%)
+MoE: weighted reduce + combine | 0.87 + 0.00 (3%)
+AllReduce after FFN: exchange | 0.49 + 0.01 (2%)
+AllReduce after FFN: wait for other GPU | -
+Output: final norm (+ softcap) | 0.08 + 0.00 (0%)
+Output: LM head mat-vec | 0.52 + 0.00 (2%)
+q8_1 quantize of mat-vec inputs | 1.49 + 0.00 (5%)
+Glue: copies, crops, other | 0.01 + 0.00 (0%)
+Critical-path rounding (GPU switch at AllReduce ends) | -
+Total, profiled | 27.93
+Total, scaled to unprofiled | 24.20

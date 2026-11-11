@@ -8,50 +8,52 @@ This is a growing record. Never edit the numbers of an old column; add a new col
 
 Each cell is `busy + idle-before (share of the profiled token)`. Busy is kernel time on the GPU that is on the critical path for that part of the token. Idle-before is GPU time with no kernel, charged to the step that waited to start after it. Step rows are means over steady tokens; the warm-up row adds the extra time of the first few tokens, so each column sums to the all-token profiled mean. The last row scales the total to the unprofiled llama-bench speed; scale step rows by the same factor if you need estimates, but the profiler inflates small kernels and host gaps more than mat-vecs (see [limits](#method-and-limits)).
 
-| Row | 27B@0 2026-11-10 | 27B@32K 2026-11-10 | FN@8K 2026-11-10 | G4@0 2026-11-10 |
-| --- | --- | --- | --- | --- |
-| Measured | 2026-11-10 16:46 PST | 2026-11-10 17:50 PST | 2026-11-10 17:48 PST | 2026-11-10 18:28 PST |
-| Source commit | 0f7ce1b04 | 0f7ce1b04 | 0f7ce1b04 | 0f7ce1b04 |
-| Build (sha256 llama-bench / libggml-hip.so) | `build-exp-q3` (`246887e7bebf / d67316b02bbe`) | `build-exp-spec` (`e4e83771fc55 / 1ac1232870d5`) | `build-exp-spec` (`e4e83771fc55 / 1ac1232870d5`) | `build-exp-spec` (`e4e83771fc55 / 1ac1232870d5`) |
-| Model, quant, file revision | Qwen3.8-27B Q8_0, rev 4ca720788d1e | Qwen3.8-27B Q8_0, rev 4ca720788d1e | Qwen3.8 Flash Next UD-IQ3_XXS rev d96201194f10 + Q8_0 n-gram table | Gemma 4 31B-it Q8_0, rev c1ac76e99d55 |
-| Settings | -ts 1/1 -b 2048 -ub 2048 -fa on, depth 0, tg64 | -ts 1/1 -b 2048 -ub 2048 -fa on, depth 32768, tg32 | -ts 1/1 -b 1024 -ub 512 -fa on, depth 8192, tg64 | -ts 1/1 -b 2048 -ub 2048 -fa on, depth 0, tg64 |
-| Unprofiled TG t/s (ms/token) | 37.45 +- 0.21 (26.70) (TG128 r3, exp-q3 record, same build) | 33.48 +- 0.97 (29.87) | 43.68 +- 0.60 (22.90) | 32.68 +- 0.15 (30.60) |
-| Profiled ms/token: all tokens; steady; llama-bench | 29.44; 28.58; - | 34.29; 32.88; 35.12 | 27.18; 25.63; 28.39 | 33.08; 32.84; 33.09 |
-| Kernels / AllReduces per token | 1595 / 128 | 1594 / 128 | 2908 / 96 | 1463 / 120 |
-| Token start: host gap, no kernel | 0.00 + 1.02 (3%) | 0.00 + 1.20 (3%) | 0.00 + 2.09 (8%) | 0.00 + 1.07 (3%) |
-| Token start: input copies, embedding | 0.04 + 0.00 (0%) | 0.03 + 0.00 (0%) | 0.08 + 0.00 (0%) | 0.06 + 0.00 (0%) |
-| Warm-up tokens: excess over steady tokens, spread over all | 0.00 + 0.86 (3%) | 0.00 + 1.41 (4%) | 0.00 + 1.55 (6%) | 0.00 + 0.24 (1%) |
-| Residual add + norm (Flash Next: hyper-connection combine + mix) | 1.39 + 0.00 (5%) | 1.47 + 0.00 (4%) | 3.88 + 0.00 (14%) | 1.66 + 0.00 (5%) |
-| Per-layer n-gram embedding (Flash Next) | - | - | 0.25 + 0.00 (1%) | - |
-| Mixer: input projections (mat-vec) | 4.60 + 0.00 (16%) | 4.74 + 0.00 (14%) | 2.69 + 0.00 (10%) | 4.51 + 0.00 (14%) |
-| Attention: q/k norm, rope, KV write, gate | 0.66 + 0.00 (2%) | 0.67 + 0.00 (2%) | 0.50 + 0.00 (2%) | 1.67 + 0.00 (5%) |
-| Attention: flash attention | 0.45 + 0.00 (2%) | 3.34 + 0.00 (10%) | 0.65 + 0.00 (2%) | 1.96 + 0.00 (6%) |
-| Attention: QSA indexer (Flash Next) | - | - | 2.45 + 0.00 (9%) | - |
-| Recurrent: conv, gated delta net, gates, state | 3.23 + 0.00 (11%) | 3.24 + 0.00 (9%) | 2.32 + 0.00 (9%) | - |
-| Mixer: output projection (mat-vec) | 1.57 + 0.00 (5%) | 1.62 + 0.00 (5%) | 0.76 + 0.00 (3%) | 2.40 + 0.00 (7%) |
-| AllReduce after mixer: exchange | 0.83 + 0.03 (3%) | 0.84 + 0.07 (3%) | 0.50 + 0.01 (2%) | 0.69 + 0.02 (2%) |
-| AllReduce after mixer: wait for other GPU | - | - | - | - |
-| FFN dense: gate/up mat-vec | 8.19 + 0.00 (28%) | 8.78 + 0.00 (26%) | - | 10.11 + 0.00 (31%) |
-| FFN dense: activation | - | - | - | 0.04 + 0.00 (0%) |
-| FFN dense: down mat-vec | 4.28 + 0.00 (15%) | 4.57 + 0.00 (13%) | - | 5.24 + 0.00 (16%) |
-| MoE: router + top-k | - | - | 1.82 + 0.00 (7%) | - |
-| MoE: routed experts | - | - | 2.58 + 0.00 (9%) | - |
-| MoE: shared expert + gate | - | - | 1.41 + 0.00 (5%) | - |
-| MoE: weighted reduce + combine | - | - | 1.03 + 0.00 (4%) | - |
-| AllReduce after FFN: exchange | 0.73 + 0.02 (3%) | 0.72 + 0.05 (2%) | 0.49 + 0.01 (2%) | 1.16 + 0.02 (4%) |
-| AllReduce after FFN: wait for other GPU | - | - | - | - |
-| Output: final norm (+ softcap) | 0.01 + 0.00 (0%) | 0.01 + 0.00 (0%) | 0.08 + 0.00 (0%) | 0.03 + 0.00 (0%) |
-| Output: LM head mat-vec | 0.88 + 0.00 (3%) | 0.95 + 0.00 (3%) | 0.52 + 0.00 (2%) | 1.00 + 0.00 (3%) |
-| q8_1 quantize of mat-vec inputs | 0.63 + 0.00 (2%) | 0.62 + 0.00 (2%) | 1.50 + 0.00 (6%) | 1.18 + 0.00 (4%) |
-| Glue: copies, crops, other | 0.01 + 0.00 (0%) | 0.01 + 0.00 (0%) | 0.01 + 0.00 (0%) | 0.01 + 0.00 (0%) |
-| Critical-path rounding (GPU switch at AllReduce ends) | - | - | - | - |
-| Total, profiled | 29.44 | 34.29 | 27.18 | 33.08 |
-| Total, scaled to unprofiled | 26.70 | 29.87 | 22.90 | 30.60 |
+| Row | 27B@0 2026-11-10 | 27B@32K 2026-11-10 | FN@8K 2026-11-10 | G4@0 2026-11-10 | FN@32K 2026-11-10 | 27B 1-GPU@0 2026-11-10 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Measured | 2026-11-10 16:46 PST | 2026-11-10 17:50 PST | 2026-11-10 17:48 PST | 2026-11-10 18:28 PST | 2026-11-10 18:48 PST | 2026-11-10 18:48 PST |
+| Source commit | 0f7ce1b04 | 0f7ce1b04 | 0f7ce1b04 | 0f7ce1b04 | 0f7ce1b04 | 0f7ce1b04 |
+| Build (sha256 llama-bench / libggml-hip.so) | `build-exp-q3` (`246887e7bebf / d67316b02bbe`) | `build-exp-spec` (`e4e83771fc55 / 1ac1232870d5`) | `build-exp-spec` (`e4e83771fc55 / 1ac1232870d5`) | `build-exp-spec` (`e4e83771fc55 / 1ac1232870d5`) | `build-exp-spec` (`e4e83771fc55 / 1ac1232870d5`) | `build-exp-spec` (`e4e83771fc55 / 1ac1232870d5`) |
+| Model, quant, file revision | Qwen3.8-27B Q8_0, rev 4ca720788d1e | Qwen3.8-27B Q8_0, rev 4ca720788d1e | Qwen3.8 Flash Next UD-IQ3_XXS rev d96201194f10 + Q8_0 n-gram table | Gemma 4 31B-it Q8_0, rev c1ac76e99d55 | Qwen3.8 Flash Next UD-IQ3_XXS rev d96201194f10 + Q8_0 n-gram table | Qwen3.8-27B Q8_0, rev 4ca720788d1e |
+| Settings | -ts 1/1 -b 2048 -ub 2048 -fa on, depth 0, tg64 | -ts 1/1 -b 2048 -ub 2048 -fa on, depth 32768, tg32 | -ts 1/1 -b 1024 -ub 512 -fa on, depth 8192, tg64 | -ts 1/1 -b 2048 -ub 2048 -fa on, depth 0, tg64 | -ts 1/1 -b 1024 -ub 512 -fa on, depth 32768, tg64 | -dev ROCm0 (1 GPU, no -sm tensor) -b 2048 -ub 2048 -fa on, depth 0, tg64 |
+| Unprofiled TG t/s (ms/token) | 37.45 +- 0.21 (26.70) (TG128 r3, exp-q3 record, same build) | 33.48 +- 0.97 (29.87) | 43.68 +- 0.60 (22.90) | 32.68 +- 0.15 (30.60) | 41.32 +- 0.97 (24.20) | 23.42 +- 0.01 (42.70) |
+| Profiled ms/token: all tokens; steady; llama-bench | 29.44; 28.58; - | 34.29; 32.88; 35.12 | 27.18; 25.63; 28.39 | 33.08; 32.84; 33.09 | 27.93; 27.23; 28.64 | 43.99; 43.99; 44.02 |
+| Kernels / AllReduces per token | 1595 / 128 | 1594 / 128 | 2908 / 96 | 1463 / 120 | 2870 / 96 | 1594 / 0 |
+| Token start: host gap, no kernel | 0.00 + 1.02 (3%) | 0.00 + 1.20 (3%) | 0.00 + 2.09 (8%) | 0.00 + 1.07 (3%) | 0.00 + 2.51 (9%) | 0.00 + 0.35 (1%) |
+| Token start: input copies, embedding | 0.04 + 0.00 (0%) | 0.03 + 0.00 (0%) | 0.08 + 0.00 (0%) | 0.06 + 0.00 (0%) | 0.07 + 0.00 (0%) | 0.02 + 0.00 (0%) |
+| Warm-up tokens: excess over steady tokens, spread over all | 0.00 + 0.86 (3%) | 0.00 + 1.41 (4%) | 0.00 + 1.55 (6%) | 0.00 + 0.24 (1%) | 0.00 + 0.70 (3%) | - |
+| Residual add + norm (Flash Next: hyper-connection combine + mix) | 1.39 + 0.00 (5%) | 1.47 + 0.00 (4%) | 3.88 + 0.00 (14%) | 1.66 + 0.00 (5%) | 3.86 + 0.00 (14%) | 0.63 + 0.00 (1%) |
+| Per-layer n-gram embedding (Flash Next) | - | - | 0.25 + 0.00 (1%) | - | 0.22 + 0.00 (1%) | - |
+| Mixer: input projections (mat-vec) | 4.60 + 0.00 (16%) | 4.74 + 0.00 (14%) | 2.69 + 0.00 (10%) | 4.51 + 0.00 (14%) | 2.69 + 0.00 (10%) | 8.07 + 0.01 (18%) |
+| Attention: q/k norm, rope, KV write, gate | 0.66 + 0.00 (2%) | 0.67 + 0.00 (2%) | 0.50 + 0.00 (2%) | 1.67 + 0.00 (5%) | 0.49 + 0.00 (2%) | 0.59 + 0.01 (1%) |
+| Attention: flash attention | 0.45 + 0.00 (2%) | 3.34 + 0.00 (10%) | 0.65 + 0.00 (2%) | 1.96 + 0.00 (6%) | 1.46 + 0.00 (5%) | 0.38 + 0.00 (1%) |
+| Attention: QSA indexer (Flash Next) | - | - | 2.45 + 0.00 (9%) | - | 2.99 + 0.00 (11%) | - |
+| Recurrent: conv, gated delta net, gates, state | 3.23 + 0.00 (11%) | 3.24 + 0.00 (9%) | 2.32 + 0.00 (9%) | - | 2.29 + 0.00 (8%) | 3.46 + 0.03 (8%) |
+| Mixer: output projection (mat-vec) | 1.57 + 0.00 (5%) | 1.62 + 0.00 (5%) | 0.76 + 0.00 (3%) | 2.40 + 0.00 (7%) | 0.76 + 0.00 (3%) | 3.05 + 0.00 (7%) |
+| AllReduce after mixer: exchange | 0.83 + 0.03 (3%) | 0.84 + 0.07 (3%) | 0.50 + 0.01 (2%) | 0.69 + 0.02 (2%) | 0.50 + 0.02 (2%) | - |
+| AllReduce after mixer: wait for other GPU | - | - | - | - | - | - |
+| FFN dense: gate/up mat-vec | 8.19 + 0.00 (28%) | 8.78 + 0.00 (26%) | - | 10.11 + 0.00 (31%) | - | 16.12 + 0.00 (37%) |
+| FFN dense: activation | - | - | - | 0.04 + 0.00 (0%) | - | - |
+| FFN dense: down mat-vec | 4.28 + 0.00 (15%) | 4.57 + 0.00 (13%) | - | 5.24 + 0.00 (16%) | - | 8.41 + 0.00 (19%) |
+| MoE: router + top-k | - | - | 1.82 + 0.00 (7%) | - | 1.86 + 0.00 (7%) | - |
+| MoE: routed experts | - | - | 2.58 + 0.00 (9%) | - | 2.61 + 0.00 (9%) | - |
+| MoE: shared expert + gate | - | - | 1.41 + 0.00 (5%) | - | 1.42 + 0.00 (5%) | - |
+| MoE: weighted reduce + combine | - | - | 1.03 + 0.00 (4%) | - | 0.87 + 0.00 (3%) | - |
+| AllReduce after FFN: exchange | 0.73 + 0.02 (3%) | 0.72 + 0.05 (2%) | 0.49 + 0.01 (2%) | 1.16 + 0.02 (4%) | 0.49 + 0.01 (2%) | - |
+| AllReduce after FFN: wait for other GPU | - | - | - | - | - | - |
+| Output: final norm (+ softcap) | 0.01 + 0.00 (0%) | 0.01 + 0.00 (0%) | 0.08 + 0.00 (0%) | 0.03 + 0.00 (0%) | 0.08 + 0.00 (0%) | 0.01 + 0.00 (0%) |
+| Output: LM head mat-vec | 0.88 + 0.00 (3%) | 0.95 + 0.00 (3%) | 0.52 + 0.00 (2%) | 1.00 + 0.00 (3%) | 0.52 + 0.00 (2%) | 1.75 + 0.00 (4%) |
+| q8_1 quantize of mat-vec inputs | 0.63 + 0.00 (2%) | 0.62 + 0.00 (2%) | 1.50 + 0.00 (6%) | 1.18 + 0.00 (4%) | 1.49 + 0.00 (5%) | 1.11 + 0.01 (3%) |
+| Glue: copies, crops, other | 0.01 + 0.00 (0%) | 0.01 + 0.00 (0%) | 0.01 + 0.00 (0%) | 0.01 + 0.00 (0%) | 0.01 + 0.00 (0%) | - |
+| Critical-path rounding (GPU switch at AllReduce ends) | - | - | - | - | - | - |
+| Total, profiled | 29.44 | 34.29 | 27.18 | 33.08 | 27.93 | 43.99 |
+| Total, scaled to unprofiled | 26.70 | 29.87 | 22.90 | 30.60 | 24.20 | 42.70 |
 
 Column notes:
 
 - 27B@0: the trace is the Q3 trace ([exp-q3](old-ignore/2026-11-10/exp-q3/README.md)); no unprofiled TG64 JSON was kept, so the unprofiled figure is the Q3 TG128 r3 result of the same build (`GGML_RP_MMV_ROWS=8`). Its profiled llama-bench figure was 33.84 t/s (29.55 ms) in `trace-bench.txt`.
 - 27B@32K and FN@8K: traces from the P3/Q1 follow-up profile runs of `build-exp-spec`; G4@0 was traced for this record with [token_budget_trace.sh](scripts/token_budget_trace.sh).
+- FN@32K: same build and settings as FN@8K except depth; traced with [token_budget_trace.sh](scripts/token_budget_trace.sh). Only flash attention grows (0.65 -> 1.45 ms); the QSA indexer and the rest stay flat.
+- 27B 1-GPU@0: ROCm0 (MI60) alone, no `-sm tensor`, `-ub 2048` fits. There is no AllReduce, so the script ends each segment before the residual norm where TP would reduce (AllReduce rows empty). On one GPU the residual add is fused into `rms_norm_f32` without the q8_1 producer, so quantize is a separate row (1.11 ms). Mat-vec is 37.4 ms (85%, about 767 GB/s); TP halves it to 19.3 per GPU but adds about 3.5 ms (profiled) of AllReduce, extra glue and start gap, for 1.60x (42.70 -> 26.70 ms).
 - The critical path has no "wait" rows by construction: the GPU that arrives last at an AllReduce does not wait. The waits are in the per-GPU view below.
 - Times are PST (the host clock); the trace file time is the end of the profiled run.
 
@@ -67,6 +69,9 @@ Column notes:
 | FN@8K | ROCm1 | 8.25 (592) | 0.65 | 0.99 | 0.00 | 2.09 | 0.02 | 23.51 |
 | G4@0 | ROCm0 | 22.95 (360) | 1.54 | 1.68 | 2.20 | 0.25 | 0.03 | 32.56 |
 | G4@0 | ROCm1 | 23.26 (360) | 1.96 | 1.86 | 0.00 | 1.07 | 0.05 | 31.72 |
+| FN@32K | ROCm0 | 7.89 (592) | 1.45 | 0.89 | 3.25 | 1.22 | 0.02 | 25.99 |
+| FN@32K | ROCm1 | 8.28 (592) | 1.46 | 1.00 | 0.01 | 2.50 | 0.03 | 24.70 |
+| 27B 1-GPU@0 | ROCm0 | 37.40 (433) | 0.38 | - | - | 0.35 | 0.05 | 43.59 |
 
 "Busy" includes AR wait (the AR kernel spins). ROCm1 starts each token about 0.8-1.2 ms after ROCm0 under the profiler (one slow `hipGraphLaunch` per lane, see [P3](old-ignore/2026-11-10/exp-p3/README.md)), so ROCm0 waits at the first AllReduces of the token. Without the profiler this lag is about 20 us, so most of the token-start gap and the ROCm0 AR wait are profiler cost. Inside the token there is almost no idle: the GPUs run back to back between AllReduces. The full per-GPU tables (busy + idle per step) are in [old-ignore/2026-11-10/token-budget/](old-ignore/2026-11-10/token-budget/) (`*.txt`, `*.json`).
 
