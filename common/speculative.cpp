@@ -2062,6 +2062,13 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
         }
     }
 
+    // target h rows on the device (llama_set_embeddings_nextn_dev): the catch-up in process() reads row k - 1 of the last
+    // target decode in place, and row n_batch_tgt + seq_id for the first token of seq_id, uploaded from pending_h
+    // pending_h stays on the host: process() and accept() fetch it before the next target decode overwrites the rows
+    bool    dev_rows    = false;
+    int32_t n_batch_tgt = 0;
+    std::vector<int32_t> verify_row0; // [n_seq] device row of the first verify row, see verify_h_rows
+
     common_speculative_impl_draft_mtp(const common_params_speculative & params, uint32_t n_seq)
         : common_speculative_impl(COMMON_SPECULATIVE_TYPE_DRAFT_MTP, n_seq, params.draft.n_max)
         , params(params.draft)
@@ -2141,6 +2148,21 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
         verify_h.assign(n_seq, {});
         verify_h_rows.assign(n_seq, 0);
 
+        n_batch_tgt = (int32_t) llama_n_batch(ctx_tgt);
+        verify_row0.assign(n_seq, -1);
+
+        // shared memory and chained heads keep the host rows
+        // opt-in here: the default path is the deferred prefill below, which needs the host rows
+        const char * env_dev_rows = std::getenv("LLAMA_MTP_DEV_ROWS");
+        if (!is_mem_shared && !chain_heads && env_dev_rows != nullptr && std::strcmp(env_dev_rows, "0") != 0) {
+            dev_rows = llama_set_embeddings_nextn_dev(ctx_tgt, true) && llama_set_embd_state_src(ctx_dft, ctx_tgt);
+            if (!dev_rows) {
+                llama_set_embd_state_src(ctx_dft, nullptr);
+                llama_set_embeddings_nextn_dev(ctx_tgt, false);
+            }
+        }
+        SPC_TRC("- target h rows on the device: %s\n", dev_rows ? "yes" : "no");
+
         disabled.assign(n_seq, false);
         // Non-finite draft probabilities mean the MTP hidden carry is invalid; fall back to target-only decode.
         if (const char * env = std::getenv("LLAMA_MTP_ADAPTIVE_DISABLE")) {
@@ -2151,7 +2173,7 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
         // handles the single-head, non-shared-KV draft path (qwen35 / qwen35moe): the
         // chain_heads (multi-head) and is_mem_shared (gemma4) paths keep upstream's native
         // per-chunk prefill unchanged.
-        deferred_prefill = n_seq == 1 && !is_mem_shared && !chain_heads;
+        deferred_prefill = n_seq == 1 && !is_mem_shared && !chain_heads && !dev_rows;
         if (const char * env = std::getenv("LLAMA_MTP_DEFERRED_PREFILL")) {
             deferred_prefill = deferred_prefill && (std::strcmp(env, "0") != 0);
         }
@@ -2175,6 +2197,10 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
 
     ~common_speculative_impl_draft_mtp() override {
         auto * ctx_dft = this->params.ctx_dft;
+        if (dev_rows) {
+            llama_set_embd_state_src(ctx_dft, nullptr);
+            llama_set_embeddings_nextn_dev(this->params.ctx_tgt, false);
+        }
         for (llama_seq_id seq_id = 0; seq_id < (llama_seq_id) backend_chains.size(); ++seq_id) {
             if (backend_chains[seq_id] == nullptr) {
                 continue;
@@ -2266,8 +2292,21 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
             //                                                       ^--- this is a problem
             // TODO:this is generally true, but would be nice to assert it
             // h_tgt_in (deferred prefill) already holds the right rows, otherwise the
-            // synchronizing getter returns this batch's rows.
-            const float * h_tgt = h_tgt_in ? h_tgt_in : llama_get_embeddings_nextn(ctx_tgt);
+            // synchronizing getter returns this batch's rows. dev_rows keeps the rows on the device.
+            if (dev_rows) {
+                GGML_ASSERT(n_tokens <= n_batch_tgt && "the target batch exceeds the h_nextn device buffer");
+                for (llama_seq_id seq_id = 0; seq_id < (llama_seq_id) n_seq; ++seq_id) {
+                    const int32_t i_first = i_batch_beg[seq_id];
+                    if (i_first >= 0) {
+                        if (positions[i_first] == 0) {
+                            std::fill(pending_h[seq_id].begin(), pending_h[seq_id].end(), 0.0f);
+                        }
+                        llama_set_embeddings_nextn_rows(ctx_tgt, n_batch_tgt + seq_id, 1, pending_h[seq_id].data());
+                    }
+                }
+            }
+
+            const float * h_tgt = dev_rows ? nullptr : h_tgt_in ? h_tgt_in : llama_get_embeddings_nextn(ctx_tgt);
 
             for (int k = 0; k < n_tokens; ++k) {
                 const llama_seq_id seq_id = seqs[k];
@@ -2278,6 +2317,11 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
                 const int32_t i_first = i_batch_beg[seq_id];
                 if (positions[i_first] == 0) {
                     std::fill(pending_h[seq_id].begin(), pending_h[seq_id].end(), 0.0f);
+                }
+
+                if (dev_rows) {
+                    batch.set_embd_state_row(idx, k == i_first ? n_batch_tgt + seq_id : k - 1);
+                    continue;
                 }
 
                 const float * h_row = k == i_first ? pending_h[seq_id].data() : h_tgt + (size_t) (k - 1) * n_embd;
@@ -2339,6 +2383,14 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
             const int32_t h_offset  = last_only ? i_batch_end[seq_id] : i_batch_beg[seq_id];
 
             verify_h_rows[seq_id] = h_rows;
+
+            if (dev_rows) {
+                // the rows stay on the device until the next target decode, only the pending row comes to the host
+                verify_row0[seq_id] = h_offset;
+                llama_get_embeddings_nextn_rows(ctx_tgt, h_offset + h_rows - 1, 1, pending_h[seq_id].data());
+                continue;
+            }
+
             verify_h[seq_id].resize((size_t) h_rows * n_embd);
 
             for (int32_t i = 0; i < h_rows; ++i) {
@@ -2686,6 +2738,13 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
         }
 
         const int32_t i_h = std::min<int32_t>(n_accepted, n_rows - 1);
+        if (dev_rows) {
+            // process() already fetched the last row
+            if (i_h != n_rows - 1) {
+                llama_get_embeddings_nextn_rows(params.ctx_tgt, verify_row0[seq_id] + i_h, 1, pending_h[seq_id].data());
+            }
+            return;
+        }
         const size_t row_bytes = (size_t) n_embd * sizeof(float);
         std::memcpy(pending_h[seq_id].data(), verify_h[seq_id].data() + (size_t) i_h * n_embd, row_bytes);
     }
@@ -3541,7 +3600,7 @@ common_speculative_init_result::common_speculative_init_result(
         model_path = params.speculative.draft.mparams.path;
         LOG_INF("%s: loading draft model '%s'\n", __func__, model_path.c_str());
 
-        llama_model * model_dft = llama_model_load_from_file(model_path.c_str(), mparams);
+        llama_model * model_dft = common_model_load(params.speculative.draft.mparams.get_paths(), mparams);
         if (model_dft == NULL) {
             LOG_ERR("%s: failed to load draft model, '%s'\n", __func__, model_path.c_str());
             return;

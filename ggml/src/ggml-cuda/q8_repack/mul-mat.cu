@@ -109,8 +109,8 @@ void ggml_cuda_mul_mat_repacked(ggml_backend_cuda_context & ctx,
                             (const float *) src1->data, buf, ne10, s11, x_stride);
                     } else {
                         ggml_cuda_pool_alloc<block_q8_1> tmp(ctx.pool(), nblk);
-                        quantize_row_q8_1_cuda((const float *) src1->data, nullptr, tmp.get(),
-                            wtype, ne10, s11, s12, s13, ne10_padded, ne11, ne12, ne13, stream);
+                        quantize_row_q8_1_cuda((const float *) src1->data, tmp.get(),
+                            ne10, s11, s12, s13, ne10_padded, ne11, ne12, ne13, stream);
                         rp_q8_1_to_planar<<<(nblk + 255) / 256, 256, 0, stream>>>(tmp.get(), buf, x_stride, (int64_t) nblk);
                     }
                 }

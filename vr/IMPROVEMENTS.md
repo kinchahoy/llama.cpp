@@ -66,6 +66,9 @@ These merged or compiled cleanly but were wrong. Check them first on each merge.
 - The upstream DFlash device feature path is opt-in (`LLAMA_DFLASH_DEV=1`), so the fork tap and accum pipeline stays the default. A DFlash draft with its own head does not set `ctx_other`, to keep it single-GPU.
 - A new repack type must also be added to the type whitelist in `ggml_backend_meta_device_supports_op` (`ggml-backend-meta.cpp`), or under `-sm tensor` its weights never reach the repack buffer and nothing fails.
 - K/V rotations are per-layer constants (`inp->self_k_rot[il]`), not graph inputs. Local MTP KV-only code must index them by layer and use `build_rope`.
+- Upstream `hv_tensor_requires_copy` (#31419) skips split inputs that were not flagged. The fork `GGML_SCHED_SHARE_VIEW_INPUTS` path adds the view's root to `split->inputs`, so it must flag the root too, or the root copy is never uploaded (found on the aa75ff323 merge).
+- The fork `top-k.cu` (count/offsets/gather) is kept over upstream #31084: upstream makes only the tie set deterministic, while the fork also fixes the output order that the backend sampler and DFlash rely on. HIP has no CUB, so rows wider than 1024 columns use it.
+- Upstream MTP device rows (`dev_rows`, #31927) are opt-in (`LLAMA_MTP_DEV_ROWS=1`) and exclude the fork deferred prefill, which stays the default.
 
 Update a row when its dispatch, dependencies or validation needs change. Record new evidence once and link it here. DFlash vision remains unvalidated. The [catch-up guide](how-to-catchup.md#one-final-validation-pass) defines the common final pass and approval limits; feature-specific checks join that pass rather than becoming repeated intermediate suites.
 
