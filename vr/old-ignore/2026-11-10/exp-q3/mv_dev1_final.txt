@@ -1,0 +1,79 @@
+device 1 gfx906:sramecc+:xnack- CUs 60
+pass bytes 3.243 GB over 108 mat-vecs (16 layers)
+flat 2GiB stream U4 grid  4xCU        753.4 GB/s
+flat 2GiB stream U4 grid  8xCU        742.4 GB/s
+flat 2GiB stream U4 grid 16xCU        752.2 GB/s
+flat 2GiB stream U4 grid 32xCU        756.2 GB/s
+flat 2GiB chunk U4   1 KB/wave         936.6 GB/s
+flat 2GiB chunk U4   2 KB/wave         930.1 GB/s
+flat 2GiB chunk U4   4 KB/wave         910.7 GB/s
+flat 2GiB chunk U4   8 KB/wave         822.7 GB/s
+flat 2GiB chunk U4  16 KB/wave         782.6 GB/s
+D2D memcpy 1GiB (read+write)          742.4 GB/s
+per-matrix stream U4 grid 4xCU        5.170 ms    627.4 GB/s
+per-matrix stream U4 grid 8xCU        5.222 ms    621.0 GB/s
+per-matrix stream U4 grid 16xCU       5.943 ms    545.7 GB/s
+row-shaped stream (8 rows/block)      5.411 ms    599.4 GB/s
+per-matrix chunk U4 2 KB/wave         4.237 ms    765.4 GB/s
+per-matrix chunk U4 4 KB/wave         4.681 ms    692.9 GB/s
+per-matrix chunk U4 8 KB/wave         6.870 ms    472.1 GB/s
+bit-identity check: pass (sample y=2627.19)
+cand R8 U2                            4.807 ms    674.7 GB/s
+cand R8 U3                            5.039 ms    643.6 GB/s
+cand R8 U4                            5.252 ms    617.5 GB/s
+cand R8 U5                            5.961 ms    544.0 GB/s
+cand R4 U4                            4.872 ms    665.6 GB/s
+cand R4 U5                            5.746 ms    564.4 GB/s
+cand R16 U4                          15.863 ms    204.4 GB/s
+real WPR2 <8,16>                      5.732 ms    565.8 GB/s
+real WPR2 <4,8>                       5.139 ms    631.1 GB/s
+real WPR4 <4,16>                      6.746 ms    480.7 GB/s
+real WPR4 <2,8>                       6.189 ms    524.0 GB/s
+real WPR8 <2,16>                      8.926 ms    363.3 GB/s
+real repacked mat-vec ROWS=8          4.757 ms    681.8 GB/s
+real repacked mat-vec ROWS=16         5.003 ms    648.3 GB/s
+real repacked mat-vec ROWS=4          4.734 ms    685.1 GB/s
+big 5120x124160 real ROWS=8                       890.5 us   760.7 GB/s
+big 5120x124160 chunk U4 1 KB/wave                728.0 us   930.5 GB/s
+big 5120x124160 chunk U4 2 KB/wave                736.5 us   919.8 GB/s
+big 5120x124160 chunk U4 4 KB/wave                760.7 us   890.5 GB/s
+big 5120x124160 row-shaped stream 8 rows          895.8 us   756.2 GB/s
+big 5120x124160 S1 rows all-in-flight 8           859.8 us   787.9 GB/s
+big 5120x124160 S1 rows all-in-flight 4           862.1 us   785.8 GB/s
+big 5120x124160 S1 no scales 8                    820.9 us   825.2 GB/s
+big 5120x124160 S1 stride 5120                    849.1 us   797.8 GB/s
+big 5120x124160 S1 stride 5136                    859.5 us   788.2 GB/s
+big 5120x124160 S1 stride 5184                    855.2 us   792.1 GB/s
+big 5120x124160 S1 stride 5248                    844.3 us   802.3 GB/s
+big 5120x124160 S1 stride 6144                   1016.5 us   666.4 GB/s
+big 5120x124160 S2 interleaved 8                  866.6 us   781.7 GB/s
+big 5120x124160 S2 interleaved 4                  876.7 us   772.7 GB/s
+big 5120x124160 S2 interleaved 16                 859.3 us   788.3 GB/s
+big 5120x8704 real ROWS=8                        75.6 us   628.6 GB/s
+big 5120x8704 chunk U4 1 KB/wave                 64.5 us   736.7 GB/s
+big 5120x8704 chunk U4 2 KB/wave                 69.1 us   687.1 GB/s
+big 5120x8704 chunk U4 4 KB/wave                 73.7 us   644.5 GB/s
+big 5120x8704 row-shaped stream 8 rows           87.5 us   542.6 GB/s
+big 5120x8704 S1 rows all-in-flight 8            71.7 us   661.9 GB/s
+big 5120x8704 S1 rows all-in-flight 4            71.3 us   665.6 GB/s
+big 5120x8704 S1 no scales 8                     75.9 us   626.0 GB/s
+big 5120x8704 S1 stride 5120                     71.6 us   663.1 GB/s
+big 5120x8704 S1 stride 5136                     71.8 us   661.3 GB/s
+big 5120x8704 S1 stride 5184                     71.4 us   665.3 GB/s
+big 5120x8704 S1 stride 5248                     69.8 us   680.0 GB/s
+big 5120x8704 S1 stride 6144                     86.0 us   552.1 GB/s
+big 5120x8704 S2 interleaved 8                   77.2 us   615.0 GB/s
+big 5120x8704 S2 interleaved 4                   77.6 us   611.6 GB/s
+big 5120x8704 S2 interleaved 16                  73.2 us   648.8 GB/s
+per-matrix chunk U4 1 KB/wave         4.262 ms    761.0 GB/s
+  ffn_gate_up(fused)    5120x8704   n= 16  real  128.92 us  736.7 GB/s | stream  139.85 us  679.1 GB/s
+  ffn_down              8704x5120   n= 16  real   69.72 us  680.4 GB/s | stream   69.87 us  678.9 GB/s
+  gdn_qkv               5120x5120   n= 12  real   41.61 us  671.4 GB/s | stream   44.06 us  634.0 GB/s
+  gdn_gate              5120x3072   n= 12  real   27.31 us  613.7 GB/s | stream   28.89 us  580.1 GB/s
+  gdn_alpha             5120x24     n= 12  real    4.97 us   26.4 GB/s | stream    3.93 us   33.3 GB/s
+  gdn_beta              5120x24     n= 12  real    4.78 us   27.4 GB/s | stream    3.63 us   36.1 GB/s
+  ssm_out               3072x5120   n= 12  real   26.79 us  626.9 GB/s | stream   28.97 us  579.8 GB/s
+  attn_q                5120x6144   n=  4  real   50.98 us  657.6 GB/s | stream   51.74 us  647.9 GB/s
+  attn_k                5120x512    n=  4  real    9.03 us  309.3 GB/s | stream    6.76 us  413.2 GB/s
+  attn_v                5120x512    n=  4  real    9.11 us  306.6 GB/s | stream    6.61 us  422.7 GB/s
+  attn_out              3072x5120   n=  4  real   28.78 us  583.4 GB/s | stream   28.82 us  582.6 GB/s
