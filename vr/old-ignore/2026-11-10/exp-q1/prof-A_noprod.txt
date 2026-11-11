@@ -1,0 +1,31 @@
+window 224325 dispatches, span 2021.6 ms, ms/tok 31.59
+agent Agent 1: busy 1888.4 ms (93.4%), dispatches 112158
+   11.351 ms/tok   374.7/tok avg   30.3 us  void mul_mat_vec_q8_0_repacked<8, 8, false, 64, false>
+    8.306 ms/tok    65.0/tok avg  127.8 us  void mul_mat_vec_q8_0_repacked<8, 8, false, 64, true>
+    3.939 ms/tok   130.0/tok avg   30.3 us  void ggml_cuda_ar_kernel<float, __hip_bfloat16>
+    1.102 ms/tok   261.0/tok avg    4.2 us  void quantize_q8_1<32>
+    0.918 ms/tok   130.0/tok avg    7.1 us  void add_rms_norm_mul_f32<1024>
+    0.474 ms/tok   113.7/tok avg    4.2 us  void unary_gated_op_kernel<&
+    0.404 ms/tok    97.5/tok avg    4.1 us  void rms_norm_f32<32, 1, true, false, false, true>
+    0.329 ms/tok    48.7/tok avg    6.7 us  void gated_delta_net_cuda<128, false, false, 1>
+    0.306 ms/tok    16.2/tok avg   18.8 us  void flash_attn_tile<256, 256, 1, 2, false>
+    0.276 ms/tok    65.0/tok avg    4.2 us  void cpy_scalar<&
+    0.260 ms/tok    48.7/tok avg    5.3 us  void k_get_rows_float_vec<float>
+    0.215 ms/tok    50.8/tok avg    4.2 us  void k_get_rows_float<float, float>
+    0.208 ms/tok    48.7/tok avg    4.3 us  void concat_dim0_transposed<unsigned int>
+    0.206 ms/tok    48.7/tok avg    4.2 us  void k_bin_bcast<&
+agent Agent 2: busy 1800.5 ms (89.1%), dispatches 112167
+   11.552 ms/tok   374.7/tok avg   30.8 us  void mul_mat_vec_q8_0_repacked<8, 8, false, 64, false>
+    8.341 ms/tok    65.0/tok avg  128.3 us  void mul_mat_vec_q8_0_repacked<8, 8, false, 64, true>
+    1.567 ms/tok   130.0/tok avg   12.1 us  void ggml_cuda_ar_kernel<float, __hip_bfloat16>
+    1.279 ms/tok   261.0/tok avg    4.9 us  void quantize_q8_1<32>
+    0.921 ms/tok   130.0/tok avg    7.1 us  void add_rms_norm_mul_f32<1024>
+    0.588 ms/tok   113.8/tok avg    5.2 us  void unary_gated_op_kernel<&
+    0.464 ms/tok    97.5/tok avg    4.8 us  void rms_norm_f32<32, 1, true, false, false, true>
+    0.356 ms/tok    48.8/tok avg    7.3 us  void gated_delta_net_cuda<128, false, false, 1>
+    0.337 ms/tok    16.2/tok avg   20.8 us  void flash_attn_tile<256, 256, 1, 2, false>
+    0.317 ms/tok    65.0/tok avg    4.9 us  void cpy_scalar<&
+    0.273 ms/tok    48.7/tok avg    5.6 us  void k_get_rows_float_vec<float>
+    0.249 ms/tok    50.8/tok avg    4.9 us  void k_get_rows_float<float, float>
+    0.238 ms/tok    48.7/tok avg    4.9 us  void concat_dim0_transposed<unsigned int>
+    0.237 ms/tok    48.7/tok avg    4.9 us  void k_bin_bcast<&

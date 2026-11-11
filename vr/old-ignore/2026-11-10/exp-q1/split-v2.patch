@@ -1,0 +1,90 @@
+diff --git a/ggml/src/ggml-cuda/norm.cu b/ggml/src/ggml-cuda/norm.cu
+index 1d66dc795..8126026e9 100644
+--- a/ggml/src/ggml-cuda/norm.cu
++++ b/ggml/src/ggml-cuda/norm.cu
+@@ -833,6 +833,60 @@ static __global__ void add_rms_norm_mul_f32(
+     }
+ }
+ 
++// Same result as add_rms_norm_mul_f32, but blockIdx.y picks a slice of block_size output columns.
++// Every block computes the full-row sum of squares in the same order, so the scale is identical.
++template <int block_size>
++static __global__ void add_rms_norm_mul_split_f32(
++        const float * a, const float * b, float * sum, const float * w, float * dst,
++        block_q8_1 * q, const int ncols, const int ncols_padded, const float eps) {
++    const int64_t row = blockIdx.x;
++    const int     tid = threadIdx.x;
++    const int     col = blockIdx.y*block_size + tid;
++
++    extern __shared__ float s_sum[];
++
++    a   += row*ncols;
++    b   += row*ncols;
++    sum += row*ncols;
++    dst += row*ncols;
++
++    const float wc = col < ncols ? w[col] : 0.0f;
++    float xc  = 0.0f;
++    float tmp = 0.0f;
++    for (int c = tid; c < ncols; c += block_size) {
++        const float xi = a[c] + b[c];
++        xc   = c == col ? xi : xc;
++        tmp += xi * xi;
++    }
++
++    tmp = block_reduce<block_reduce_method::SUM, block_size>(tmp, s_sum);
++
++    const float mean  = tmp / ncols;
++    const float scale = rsqrtf(mean + eps);
++
++    float xi = 0.0f;
++    if (col < ncols) {
++        sum[col] = xc;
++        xi = scale * xc * wc;
++        dst[col] = xi;
++    }
++
++    static_assert(block_size % QK8_1 == 0, "Q8_1 groups must not cross blocks");
++    // whole 32-lane groups are in or out, so the shuffles below see full groups
++    if (q == nullptr || blockIdx.y*block_size + (tid & ~(QK8_1 - 1)) >= ncols_padded) {
++        return;
++    }
++    block_q8_1 * qrow = q + row*(ncols_padded/QK8_1);
++    const float amax = warp_reduce_max<QK8_1>(fabsf(xi));
++    const float xsum = warp_reduce_sum<QK8_1>(xi);
++    const float d    = amax / 127.0f;
++    const int   iqs  = col % QK8_1;
++    qrow[col / QK8_1].qs[iqs] = amax == 0.0f ? 0 : roundf(xi / d);
++    if (iqs == 0) {
++        qrow[col / QK8_1].ds = make_half2(d, xsum);
++    }
++}
++
+ bool ggml_cuda_add_rms_norm_mul_supported(const ggml_tensor * add, const ggml_tensor * rms_norm, const ggml_tensor * mul) {
+     const ggml_tensor * w = mul->src[0] == rms_norm ? mul->src[1] : mul->src[0];
+     if (rms_norm->src[0] != add || (mul->src[0] != rms_norm && mul->src[1] != rms_norm)) {
+@@ -867,7 +921,23 @@ void ggml_cuda_op_add_rms_norm_mul(ggml_backend_cuda_context & ctx, ggml_tensor
+     float       * dst_d = (float *) mul->data;
+     cudaStream_t stream = ctx.stream();
+ 
+-    if (ncols < 1024) {
++    // the split kernel writes columns that other blocks still read, so outputs must not alias the inputs
++    const size_t nbytes = ggml_nbytes(add);
++    auto overlaps = [nbytes](const void * x, const void * y) {
++        return (const char *) x < (const char *) y + nbytes && (const char *) y < (const char *) x + nbytes;
++    };
++    // only for few rows: each slice re-reads the whole row
++    const bool split = ncols >= 1024 && nrows <= 8 &&
++        !overlaps(sum_d, a_d) && !overlaps(sum_d, b_d) && !overlaps(dst_d, a_d) && !overlaps(dst_d, b_d);
++
++    static int dbg = 0;
++    if (nrows == 1 && dbg++ < 4) {
++        fprintf(stderr, "Q1DBG sum=a %d sum=b %d dst=a %d dst=b %d\n", overlaps(sum_d, a_d), overlaps(sum_d, b_d), overlaps(dst_d, a_d), overlaps(dst_d, b_d));
++    }
++    if (split) {
++        const dim3 grid(nrows, (ncols_padded + 1023)/1024);
++        add_rms_norm_mul_split_f32<1024><<<grid, 1024, 32*sizeof(float), stream>>>(a_d, b_d, sum_d, w_d, dst_d, q, ncols, ncols_padded, eps);
++    } else if (ncols < 1024) {
+         add_rms_norm_mul_f32<256><<<nrows, 256, 32*sizeof(float), stream>>>(a_d, b_d, sum_d, w_d, dst_d, q, ncols, ncols_padded, eps);
+     } else {
+         add_rms_norm_mul_f32<1024><<<nrows, 1024, 32*sizeof(float), stream>>>(a_d, b_d, sum_d, w_d, dst_d, q, ncols, ncols_padded, eps);
