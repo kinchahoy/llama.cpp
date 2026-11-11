@@ -22,3 +22,21 @@ Flash Next TG128 @ d8192 (llama-bench -r 5, -ts 1/1, alternating, 60 s idle)
 - Earlier version (25 us/call): 44.29 46.29 46.30, mean 45.62.
 
 Trace (rocprofv3 kernel trace, TG64 @ 8192): topk_moe_cuda<512> 28.84 us/call (7648 calls) vs topk_moe_wave_cuda<512,10> 14.89 us/call (6256 calls).
+
+## Follow-up checks (final head)
+
+MTP3 verify (llama-cli, draft-mtp n-max 3, -c 16384, 256 tokens, temp 0, top-k 1)
+- Generated text identical between build-exp-spec and build-play-b1 (compared without the banner build line); also identical on the final head.
+- Whole-file output differs only by the banner build string. Late text (after ~2.1 KB) varies from run to run inside each build (A vs A, B vs B), an existing nondeterminism, not related to this change.
+- llama-cli prints no acceptance statistics; with identical text the draft acceptance is the same. Generation 48.3 / 49.8 t/s (A), 50.6 / 50.5 / 50.5 t/s (B).
+
+Balanced A/B, Flash Next TG128 @ d8192, -r 5, strictly alternating, 60 s idle, 4 rounds
+- A build-exp-spec: 45.68 45.74 45.68 45.74 -> 45.71 +- 0.04 t/s
+- B build-play-b1:  47.64 47.53 47.29 47.65 -> 47.53 +- 0.17 t/s
+- change +4.0 percent
+
+Old kernel calls in the trace: the 1392 `topk_moe_cuda<512>` calls have grid 64 blocks x 8 rows (512 rows) = prefill ubatches of 512; all decode calls (rows <= 8) use the new kernel.
+
+HIP 7 `__ballot_sync` masks the 64-bit ballot with the mask argument, so the upper half of a wave64 lost its bits. This was the cause of the failed ballot version and of the failing grouped TOPK_MOE cases (`group_mask_warp_inplace`). Fixed in 457d4470b; `test-backend-ops test -o TOPK_MOE -b ROCm0` now passes 980/980 in 3 runs.
+
+Ties and NaN: the test helper builds a unique permutation grid, and the CPU argsort tie order is unspecified, so tie and NaN cases cannot be added to test-backend-ops without false failures. They were checked bitwise (ids and weight bits) against the old kernel in a standalone harness: ties within a lane and across lanes, NaN logits, softmax and sigmoid, rows 1/2/5/8, with norm and scale. No differences.
