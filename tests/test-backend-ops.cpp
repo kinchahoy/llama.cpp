@@ -12684,6 +12684,11 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     }
     // a selection of the indexer of sparse attention, with more ties at the threshold than slots
     test_cases.emplace_back(new test_top_k(GGML_TYPE_F32, {1088, 2048, 1, 1}, 512, true));
+    // one-row decode top-k of the indexer at 8K, 12K, 32K and 64K context
+    for (int n : {2112, 4096, 8256, 8192, 12288, 16384, 16448}) {
+        test_cases.emplace_back(new test_top_k(GGML_TYPE_F32, {n, 1, 1, 1}, 512));
+        test_cases.emplace_back(new test_top_k(GGML_TYPE_F32, {n, 1, 1, 1}, 512, true));
+    }
 
     for (int i = 0; i < 20; ++i) {
         for (int k : {1, 2, 3, 7, 15, 32, 40, 64, 100, 500, 1023, 9999}) {
@@ -13900,6 +13905,9 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_perf() {
     test_cases.emplace_back(new test_argsort(GGML_TYPE_F32, {200000, 1,  1, 1}));
     test_cases.emplace_back(new test_argsort(GGML_TYPE_F32, {200000, 16, 1, 1}));
 
+    for (int n : {2112, 4096, 8256, 8192, 12288, 16384, 16448}) {
+        test_cases.emplace_back(new test_top_k(GGML_TYPE_F32, {n, 1, 1, 1}, 512));
+    }
     test_cases.emplace_back(new test_top_k(GGML_TYPE_F32, {2, 1, 1, 1}, 1));
     // widths around the tiling threshold
     for (auto cols : {4096, 8192, 12288, 16384, 24576, 32768, 65536, 131072}) {
