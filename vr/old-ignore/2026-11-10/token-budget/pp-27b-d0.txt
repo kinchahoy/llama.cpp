@@ -1,0 +1,33 @@
+trace: /home/raistlin/.claude/jobs/5a8c59bb/tmp/pp/27b-d0/trace/t_kernel_trace.csv
+model: qwen35, PP 2048 tokens, -b 2048 -ub 2048 depth 0: 1 measured ubatches of 2 in the trace
+ROCm0 (Agent 1): compute stream k4, AllReduce copy streams ['c6', 'c7'], AllReduce per ubatch 128, ubatch cut: smallest boundary gap 15.96 ms, largest other gap 1.54 ms, span 2911.12 ms, kernels/ubatch 3510, GEMM 899.62 ms/1K (877 calls/ubatch), flash_attn* 23.88 ms/1K
+ROCm1 (Agent 2): compute stream k5, AllReduce copy streams ['c8', 'c9'], AllReduce per ubatch 128, ubatch cut: smallest boundary gap 22.17 ms, largest other gap 0.08 ms, span 2911.12 ms, kernels/ubatch 3510, GEMM 1088.36 ms/1K (877 calls/ubatch), flash_attn* 27.06 ms/1K
+run start (bench timer start to the first compute kernel, critical): 30.59 ms
+llama-bench profiled: 1421.44 ms/1K (703.5 t/s)
+llama-bench unprofiled: 705.3 t/s = 1417.76 ms/1K; scaled = critical x 0.9974
+
+ms per 1K prompt tokens, busy + idle-before
+step                                                                                           ROCm0             ROCm1          critical      sum     %
+Run start: bench timer start to the first compute kernel (host prep, input upload)     0.00 +  14.97     0.00 +  14.94     0.00 +  14.94    14.94   1.1
+Residual add + norm                                                                   17.01 +   0.90    16.59 +   1.18    16.59 +   1.18    17.76   1.2
+Mixer GEMM: attention input projections (q+gate, k, v)                                42.72 +   0.00    53.47 +   0.00    53.47 +   0.00    53.47   3.8
+Mixer GEMM: GDN input projections (qkv, z, beta/alpha)                               155.74 +   0.00   183.48 +   0.00   183.48 +   0.00   183.48  12.9
+Attention: q/k norm, rope, KV write, gate                                              6.30 +   0.00     7.24 +   0.00     7.24 +   0.00     7.24   0.5
+Attention: flash attention (batched)                                                  23.88 +   0.00    27.06 +   0.00    27.06 +   0.00    27.06   1.9
+Recurrent: chunked gated delta net                                                    93.21 +   0.00   111.70 +   0.00   111.70 +   0.00   111.70   7.9
+Recurrent: conv, l2 norms, gates, state copies                                        28.07 +   0.05    30.34 +   0.01    30.34 +   0.01    30.35   2.1
+Mixer GEMM: output projection (slabs)                                                 86.58 +   0.00   105.63 +   0.00   105.63 +   0.00   105.63   7.4
+AllReduce after mixer: exposed                                                       116.66 +  10.95    41.34 +   3.00    41.34 +   3.00    44.34   3.1
+FFN dense GEMM: gate/up                                                              396.66 +   0.00   476.09 +   0.00   476.09 +   0.00   476.09  33.5
+FFN dense: activation                                                                  9.27 +   0.00    10.26 +   0.00    10.26 +   0.00    10.26   0.7
+FFN dense GEMM: down (slabs)                                                         217.48 +   0.00   269.26 +   0.01   269.26 +   0.01   269.27  18.9
+AllReduce after FFN: exposed                                                          83.92 +  81.33    29.58 +   3.51    29.41 +   3.51    32.92   2.3
+Output: last-token rows, final norm (+ softcap)                                        0.01 +   0.00     0.01 +   0.00     0.01 +   0.00     0.01   0.0
+Output: LM head (last token)                                                           0.43 +   0.00     0.43 +   0.00     0.43 +   0.00     0.43   0.0
+q8_1 quantize of GEMM inputs                                                          34.22 +   1.02    35.56 +   0.70    35.56 +   0.70    36.25   2.6
+Copies H2D/D2H outside AllReduce, exposed                                              0.04 +   0.01     0.04 +   0.03     0.04 +   0.03     0.06   0.0
+Glue: crops, copies, other                                                             0.00 +   0.01     0.00 +   0.01     0.00 +   0.01     0.01   0.0
+Critical-path rounding (GPU switch at AllReduce ends)                                  0.00 +   0.00     0.00 +   0.00     0.00 +   0.17     0.17   0.0
+AllReduce overlapped with compute (info, not in total)                               157.06 +   0.00   275.99 +   0.00   275.99 +   0.00   275.99  19.4
+total                                                                                        1421.44           1421.44           1421.44
+PP t/s profiled 703.5, unprofiled 705.3

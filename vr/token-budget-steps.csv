@@ -1,0 +1,999 @@
+column_id,step_key,step_label,gpu,busy_ms,idle_ms,scaled_ms
+27B@0 TG 2026-11-10,start_idle,"Token start: host gap, no kernel",ROCm0,0.0,0.24896316666666665,
+27B@0 TG 2026-11-10,start_input,"Token start: input copies, embedding",ROCm0,0.025098699999999998,0.0,
+27B@0 TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",ROCm0,0.0,0.8649080619047621,
+27B@0 TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),ROCm0,1.3782484166666669,4.233333333333333e-06,
+27B@0 TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm0,0.0,0.0,
+27B@0 TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),ROCm0,4.461159866666667,1.1833333333333334e-06,
+27B@0 TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm0,0.5820598333333333,0.0,
+27B@0 TG 2026-11-10,attn_fa,Attention: flash attention,ROCm0,0.3609315,0.0,
+27B@0 TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),ROCm0,0.0,0.0,
+27B@0 TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",ROCm0,2.798892016666667,1.3833333333333334e-06,
+27B@0 TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),ROCm0,1.5556752333333332,3.0583333333333336e-05,
+27B@0 TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,ROCm0,0.7506644166666666,0.014829533333333334,
+27B@0 TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,ROCm0,1.68318825,0.0,
+27B@0 TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,ROCm0,8.156055566666668,8.916666666666667e-06,
+27B@0 TG 2026-11-10,ffn_act,FFN dense: activation,ROCm0,0.0,0.0,
+27B@0 TG 2026-11-10,ffn_down,FFN dense: down mat-vec,ROCm0,4.25215295,1.6833333333333335e-06,
+27B@0 TG 2026-11-10,moe_router,MoE: router + top-k,ROCm0,0.0,0.0,
+27B@0 TG 2026-11-10,moe_routed,MoE: routed experts,ROCm0,0.0,0.0,
+27B@0 TG 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm0,0.0,0.0,
+27B@0 TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm0,0.0,0.0,
+27B@0 TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,ROCm0,0.6453345333333333,0.014304033333333332,
+27B@0 TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,ROCm0,0.20770485,0.0,
+27B@0 TG 2026-11-10,out_norm,Output: final norm (+ softcap),ROCm0,0.011168016666666667,0.0,
+27B@0 TG 2026-11-10,out_head,Output: LM head mat-vec,ROCm0,0.8767485500000001,0.0,
+27B@0 TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,ROCm0,0.5440224166666667,8.333333333333333e-07,
+27B@0 TG 2026-11-10,glue,"Glue: copies, crops, other",ROCm0,0.008304033333333334,0.0,
+27B@0 TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm0,0.0,0.0,
+27B@0 TG 2026-11-10,info_matvec_ms,Mat-vec kernel time (info),ROCm0,19.30183506666667,,
+27B@0 TG 2026-11-10,info_matvec_calls,Mat-vec calls per token (info),ROCm0,433.0,,
+27B@0 TG 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm0,0.3609315,,
+27B@0 TG 2026-11-10,info_topk_moe_ms,topk_moe kernel time (info),ROCm0,0.0,,
+27B@0 TG 2026-11-10,start_idle,"Token start: host gap, no kernel",ROCm1,0.0,1.0231035,
+27B@0 TG 2026-11-10,start_input,"Token start: input copies, embedding",ROCm1,0.035303966666666665,0.0,
+27B@0 TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",ROCm1,0.0,0.8649736063492064,
+27B@0 TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),ROCm1,1.3893390833333332,0.0,
+27B@0 TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm1,0.0,0.0,
+27B@0 TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),ROCm1,4.595618016666666,6.083333333333333e-06,
+27B@0 TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm1,0.6567303666666666,0.0,
+27B@0 TG 2026-11-10,attn_fa,Attention: flash attention,ROCm1,0.44845578333333336,0.0,
+27B@0 TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),ROCm1,0.0,0.0,
+27B@0 TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",ROCm1,3.2278735666666667,6.05e-06,
+27B@0 TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),ROCm1,1.5690562,1.55e-06,
+27B@0 TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,ROCm1,0.8331968,0.029242666666666663,
+27B@0 TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,ROCm1,0.0,0.0,
+27B@0 TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,ROCm1,8.192544133333334,5.1e-06,
+27B@0 TG 2026-11-10,ffn_act,FFN dense: activation,ROCm1,0.0,0.0,
+27B@0 TG 2026-11-10,ffn_down,FFN dense: down mat-vec,ROCm1,4.273228616666667,8.233333333333333e-06,
+27B@0 TG 2026-11-10,moe_router,MoE: router + top-k,ROCm1,0.0,0.0,
+27B@0 TG 2026-11-10,moe_routed,MoE: routed experts,ROCm1,0.0,0.0,
+27B@0 TG 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm1,0.0,0.0,
+27B@0 TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm1,0.0,0.0,
+27B@0 TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,ROCm1,0.7378635833333332,0.02489065,
+27B@0 TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,ROCm1,0.002146816666666667,0.0,
+27B@0 TG 2026-11-10,out_norm,Output: final norm (+ softcap),ROCm1,0.011231983333333334,0.0,
+27B@0 TG 2026-11-10,out_head,Output: LM head mat-vec,ROCm1,0.8815091333333334,0.0,
+27B@0 TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,ROCm1,0.6345810666666666,0.0,
+27B@0 TG 2026-11-10,glue,"Glue: copies, crops, other",ROCm1,0.009607983333333332,0.0,
+27B@0 TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm1,0.0,0.0,
+27B@0 TG 2026-11-10,info_matvec_ms,Mat-vec kernel time (info),ROCm1,19.511978716666665,,
+27B@0 TG 2026-11-10,info_matvec_calls,Mat-vec calls per token (info),ROCm1,433.0,,
+27B@0 TG 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm1,0.44845578333333336,,
+27B@0 TG 2026-11-10,info_topk_moe_ms,topk_moe kernel time (info),ROCm1,0.0,,
+27B@0 TG 2026-11-10,start_idle,"Token start: host gap, no kernel",critical,0.0,1.0231035,0.9279468805131935
+27B@0 TG 2026-11-10,start_input,"Token start: input copies, embedding",critical,0.035303966666666665,0.0,0.032020421920240814
+27B@0 TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",critical,0.0,0.8649080619047621,0.78446485421586
+27B@0 TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),critical,1.3902405500000001,0.0,1.2609373162494768
+27B@0 TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),critical,0.0,0.0,0.0
+27B@0 TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),critical,4.595618016666666,6.083333333333333e-06,4.168195150936588
+27B@0 TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",critical,0.6567303666666666,0.0,0.5956493112247383
+27B@0 TG 2026-11-10,attn_fa,Attention: flash attention,critical,0.44845578333333336,0.0,0.4067458914882681
+27B@0 TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),critical,0.0,0.0,0.0
+27B@0 TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",critical,3.2278735666666667,6.05e-06,2.9276615913814745
+27B@0 TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),critical,1.5690562,1.55e-06,1.4231231194669456
+27B@0 TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,critical,0.8331968,0.029242666666666663,0.7822258576231981
+27B@0 TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,critical,0.0,0.0,0.0
+27B@0 TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,critical,8.194809183333334,5.1e-06,7.432632525061373
+27B@0 TG 2026-11-10,ffn_act,FFN dense: activation,critical,0.0,0.0,0.0
+27B@0 TG 2026-11-10,ffn_down,FFN dense: down mat-vec,critical,4.276138216666666,8.233333333333333e-06,3.8784314186150928
+27B@0 TG 2026-11-10,moe_router,MoE: router + top-k,critical,0.0,0.0,0.0
+27B@0 TG 2026-11-10,moe_routed,MoE: routed experts,critical,0.0,0.0,0.0
+27B@0 TG 2026-11-10,moe_shared,MoE: shared expert + gate,critical,0.0,0.0,0.0
+27B@0 TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,critical,0.0,0.0,0.0
+27B@0 TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,critical,0.7327038,0.02489065,0.6871322467097499
+27B@0 TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,critical,0.0,0.0,0.0
+27B@0 TG 2026-11-10,out_norm,Output: final norm (+ softcap),critical,0.011231983333333334,0.0,0.010187321122587157
+27B@0 TG 2026-11-10,out_head,Output: LM head mat-vec,critical,0.8815091333333334,0.0,0.7995218962896281
+27B@0 TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,critical,0.6328878,0.0,0.5740242895512115
+27B@0 TG 2026-11-10,glue,"Glue: copies, crops, other",critical,0.009607983333333332,0.0,0.00871436581165974
+27B@0 TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),critical,0.0,0.0029275166666666665,0.0026552347426078747
+27B@32K TG 2026-11-10,start_idle,"Token start: host gap, no kernel",ROCm0,0.0,0.32103841379310344,
+27B@32K TG 2026-11-10,start_input,"Token start: input copies, embedding",ROCm0,0.02138496551724138,0.0,
+27B@32K TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",ROCm0,0.0,1.4092240311457174,
+27B@32K TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),ROCm0,1.3829179999999999,0.0,
+27B@32K TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm0,0.0,0.0,
+27B@32K TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),ROCm0,4.778081034482758,0.0,
+27B@32K TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm0,0.6265129655172414,5.862068965517242e-06,
+27B@32K TG 2026-11-10,attn_fa,Attention: flash attention,ROCm0,3.076475068965517,1.310344827586207e-06,
+27B@32K TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),ROCm0,0.0,0.0,
+27B@32K TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",ROCm0,2.832385724137931,1.3448275862068966e-06,
+27B@32K TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),ROCm0,1.6541303448275861,5.862068965517241e-07,
+27B@32K TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,ROCm0,0.767427724137931,0.03515493103448276,
+27B@32K TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,ROCm0,1.6717815172413795,0.0,
+27B@32K TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,ROCm0,8.75675148275862,0.0,
+27B@32K TG 2026-11-10,ffn_act,FFN dense: activation,ROCm0,0.0,0.0,
+27B@32K TG 2026-11-10,ffn_down,FFN dense: down mat-vec,ROCm0,4.555840931034482,0.0,
+27B@32K TG 2026-11-10,moe_router,MoE: router + top-k,ROCm0,0.0,0.0,
+27B@32K TG 2026-11-10,moe_routed,MoE: routed experts,ROCm0,0.0,0.0,
+27B@32K TG 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm0,0.0,0.0,
+27B@32K TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm0,0.0,0.0,
+27B@32K TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,ROCm0,0.6645719310344828,0.029007241379310347,
+27B@32K TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,ROCm0,0.17953020689655172,0.0,
+27B@32K TG 2026-11-10,out_norm,Output: final norm (+ softcap),ROCm0,0.01118355172413793,0.0,
+27B@32K TG 2026-11-10,out_head,Output: LM head mat-vec,ROCm0,0.9531126551724138,0.0,
+27B@32K TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,ROCm0,0.5512460689655172,0.0,
+27B@32K TG 2026-11-10,glue,"Glue: copies, crops, other",ROCm0,0.008507655172413793,0.0,
+27B@32K TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm0,0.0,0.0,
+27B@32K TG 2026-11-10,info_matvec_ms,Mat-vec kernel time (info),ROCm0,20.69792275862069,,
+27B@32K TG 2026-11-10,info_matvec_calls,Mat-vec calls per token (info),ROCm0,433.0,,
+27B@32K TG 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm0,3.076475068965517,,
+27B@32K TG 2026-11-10,info_topk_moe_ms,topk_moe kernel time (info),ROCm0,0.0,,
+27B@32K TG 2026-11-10,start_idle,"Token start: host gap, no kernel",ROCm1,0.0,1.1975570689655173,
+27B@32K TG 2026-11-10,start_input,"Token start: input copies, embedding",ROCm1,0.03163586206896552,0.0,
+27B@32K TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",ROCm1,0.0,1.4095201345939936,
+27B@32K TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),ROCm1,1.4795650689655173,0.0,
+27B@32K TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm1,0.0,0.0,
+27B@32K TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),ROCm1,4.613867793103449,0.0,
+27B@32K TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm1,0.6752481379310344,0.0,
+27B@32K TG 2026-11-10,attn_fa,Attention: flash attention,ROCm1,3.3374159310344824,9.586206896551723e-06,
+27B@32K TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),ROCm1,0.0,0.0,
+27B@32K TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",ROCm1,3.3059557931034487,0.0,
+27B@32K TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),ROCm1,1.5800380689655171,6.172413793103448e-06,
+27B@32K TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,ROCm1,0.8663429310344827,0.0657153103448276,
+27B@32K TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,ROCm1,0.06316406896551724,0.0,
+27B@32K TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,ROCm1,8.203312862068966,5.862068965517242e-06,
+27B@32K TG 2026-11-10,ffn_act,FFN dense: activation,ROCm1,0.0,0.0,
+27B@32K TG 2026-11-10,ffn_down,FFN dense: down mat-vec,ROCm1,4.291982586206896,1.0689655172413794e-06,
+27B@32K TG 2026-11-10,moe_router,MoE: router + top-k,ROCm1,0.0,0.0,
+27B@32K TG 2026-11-10,moe_routed,MoE: routed experts,ROCm1,0.0,0.0,
+27B@32K TG 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm1,0.0,0.0,
+27B@32K TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm1,0.0,0.0,
+27B@32K TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,ROCm1,0.7862610689655172,0.051326965517241384,
+27B@32K TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,ROCm1,0.7738508275862068,0.0,
+27B@32K TG 2026-11-10,out_norm,Output: final norm (+ softcap),ROCm1,0.011768310344827585,0.0,
+27B@32K TG 2026-11-10,out_head,Output: LM head mat-vec,ROCm1,0.8798739655172414,0.0,
+27B@32K TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,ROCm1,0.6466658965517241,1.0724137931034484e-05,
+27B@32K TG 2026-11-10,glue,"Glue: copies, crops, other",ROCm1,0.00991448275862069,0.0,
+27B@32K TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm1,0.0,0.0,
+27B@32K TG 2026-11-10,info_matvec_ms,Mat-vec kernel time (info),ROCm1,19.56908455172414,,
+27B@32K TG 2026-11-10,info_matvec_calls,Mat-vec calls per token (info),ROCm1,433.0,,
+27B@32K TG 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm1,3.337421344827586,,
+27B@32K TG 2026-11-10,info_topk_moe_ms,topk_moe kernel time (info),ROCm1,0.0,,
+27B@32K TG 2026-11-10,start_idle,"Token start: host gap, no kernel",critical,0.0,1.1975570689655173,1.0432744358265897
+27B@32K TG 2026-11-10,start_input,"Token start: input copies, embedding",critical,0.03163586206896552,0.0,0.027560178138648826
+27B@32K TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",critical,0.0,1.4092240311457174,1.22767210360741
+27B@32K TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),critical,1.4658894137931033,0.0,1.2770372208484755
+27B@32K TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),critical,0.0,0.0,0.0
+27B@32K TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),critical,4.737379275862069,0.0,4.127057339815085
+27B@32K TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",critical,0.6714469655172415,0.0,0.5849436926981608
+27B@32K TG 2026-11-10,attn_fa,Attention: flash attention,critical,3.3437734137931034,5.172413793103448e-07,2.9129917494830524
+27B@32K TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),critical,0.0,0.0,0.0
+27B@32K TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",critical,3.2353143793103447,1.3448275862068966e-06,2.8185063361837033
+27B@32K TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),critical,1.6221188620689655,6.172413793103448e-06,1.4131448296255822
+27B@32K TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,critical,0.8421420689655172,0.0657153103448276,0.7908970852046121
+27B@32K TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,critical,0.0,0.0,0.0
+27B@32K TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,critical,8.779808206896552,2.103448275862069e-06,7.64869740704877
+27B@32K TG 2026-11-10,ffn_act,FFN dense: activation,critical,0.0,0.0,0.0
+27B@32K TG 2026-11-10,ffn_down,FFN dense: down mat-vec,critical,4.569787620689655,1.0689655172413794e-06,3.981057638585079
+27B@32K TG 2026-11-10,moe_router,MoE: router + top-k,critical,0.0,0.0,0.0
+27B@32K TG 2026-11-10,moe_routed,MoE: routed experts,critical,0.0,0.0,0.0
+27B@32K TG 2026-11-10,moe_shared,MoE: shared expert + gate,critical,0.0,0.0,0.0
+27B@32K TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,critical,0.0,0.0,0.0
+27B@32K TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,critical,0.7205256206896552,0.05132989655172414,0.6724164970152479
+27B@32K TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,critical,0.0,0.0,0.0
+27B@32K TG 2026-11-10,out_norm,Output: final norm (+ softcap),critical,0.01165244827586207,0.0,0.010151250170899842
+27B@32K TG 2026-11-10,out_head,Output: LM head mat-vec,critical,0.9546837931034482,0.0,0.8316907990891478
+27B@32K TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,critical,0.6196869655172415,1.0724137931034484e-05,0.5398613346389566
+27B@32K TG 2026-11-10,glue,"Glue: copies, crops, other",critical,0.009373793103448276,0.0,0.008166156724374669
+27B@32K TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),critical,0.0,-0.052791379310344826,-0.045990206140308264
+FN@8K TG 2026-11-10,start_idle,"Token start: host gap, no kernel",ROCm0,0.0,0.89732885,
+FN@8K TG 2026-11-10,start_input,"Token start: input copies, embedding",ROCm0,0.06542933333333333,0.0,
+FN@8K TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",ROCm0,0.0,1.5471158619047618,
+FN@8K TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),ROCm0,3.632954433333333,2.0666666666666666e-06,
+FN@8K TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm0,0.19473364999999998,0.0,
+FN@8K TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),ROCm0,2.4519319333333334,1.15e-06,
+FN@8K TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm0,0.45827271666666664,0.0,
+FN@8K TG 2026-11-10,attn_fa,Attention: flash attention,ROCm0,0.6660594166666667,3.5333333333333335e-06,
+FN@8K TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),ROCm0,2.2335962499999997,7.283333333333334e-06,
+FN@8K TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",ROCm0,2.04270635,6.433333333333333e-06,
+FN@8K TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),ROCm0,0.7522276166666667,0.0,
+FN@8K TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,ROCm0,0.43652158333333335,0.010751833333333332,
+FN@8K TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,ROCm0,2.243118733333333,0.0,
+FN@8K TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,ROCm0,0.0,0.0,
+FN@8K TG 2026-11-10,ffn_act,FFN dense: activation,ROCm0,0.0,0.0,
+FN@8K TG 2026-11-10,ffn_down,FFN dense: down mat-vec,ROCm0,0.0,0.0,
+FN@8K TG 2026-11-10,moe_router,MoE: router + top-k,ROCm0,1.8038052,0.0,
+FN@8K TG 2026-11-10,moe_routed,MoE: routed experts,ROCm0,2.4563430166666667,4.6666666666666666e-07,
+FN@8K TG 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm0,1.36494075,0.0,
+FN@8K TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm0,0.78125105,0.0,
+FN@8K TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,ROCm0,0.4290211166666667,0.010751616666666667,
+FN@8K TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,ROCm0,0.9749088333333333,0.0,
+FN@8K TG 2026-11-10,out_norm,Output: final norm (+ softcap),ROCm0,0.0666162,0.0,
+FN@8K TG 2026-11-10,out_head,Output: LM head mat-vec,ROCm0,0.4973072833333333,0.0,
+FN@8K TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,ROCm0,1.1473829500000001,5.833333333333333e-07,
+FN@8K TG 2026-11-10,glue,"Glue: copies, crops, other",ROCm0,0.011375999999999999,0.0,
+FN@8K TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm0,0.0,0.0,
+FN@8K TG 2026-11-10,info_matvec_ms,Mat-vec kernel time (info),ROCm0,7.856744816666667,,
+FN@8K TG 2026-11-10,info_matvec_calls,Mat-vec calls per token (info),ROCm0,592.0,,
+FN@8K TG 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm0,0.6660594166666667,,
+FN@8K TG 2026-11-10,info_topk_moe_ms,topk_moe kernel time (info),ROCm0,1.3470152000000002,,
+FN@8K TG 2026-11-10,start_idle,"Token start: host gap, no kernel",ROCm1,0.0,2.0893699333333333,
+FN@8K TG 2026-11-10,start_input,"Token start: input copies, embedding",ROCm1,0.08339733333333334,0.0,
+FN@8K TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",ROCm1,0.0,1.5490541023809525,
+FN@8K TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),ROCm1,3.8844521,5.016666666666666e-06,
+FN@8K TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm1,0.24728798333333335,0.0,
+FN@8K TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),ROCm1,2.69019005,2.5833333333333333e-06,
+FN@8K TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm1,0.4952878666666667,2.3333333333333333e-07,
+FN@8K TG 2026-11-10,attn_fa,Attention: flash attention,ROCm1,0.6498132166666667,0.0,
+FN@8K TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),ROCm1,2.45316505,0.0,
+FN@8K TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",ROCm1,2.315439566666667,8.5e-07,
+FN@8K TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),ROCm1,0.7564275666666667,1.15e-06,
+FN@8K TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,ROCm1,0.49690265,0.012541533333333334,
+FN@8K TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,ROCm1,0.0003613,0.0,
+FN@8K TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,ROCm1,0.0,0.0,
+FN@8K TG 2026-11-10,ffn_act,FFN dense: activation,ROCm1,0.0,0.0,
+FN@8K TG 2026-11-10,ffn_down,FFN dense: down mat-vec,ROCm1,0.0,0.0,
+FN@8K TG 2026-11-10,moe_router,MoE: router + top-k,ROCm1,1.8235144333333333,0.0,
+FN@8K TG 2026-11-10,moe_routed,MoE: routed experts,ROCm1,2.5644636000000003,3.5166666666666667e-06,
+FN@8K TG 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm1,1.4097277833333335,2.0833333333333334e-06,
+FN@8K TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm1,1.0342825666666666,0.0,
+FN@8K TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,ROCm1,0.49189973333333337,0.012298666666666668,
+FN@8K TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,ROCm1,0.0018373833333333333,0.0,
+FN@8K TG 2026-11-10,out_norm,Output: final norm (+ softcap),ROCm1,0.07635733333333333,0.0,
+FN@8K TG 2026-11-10,out_head,Output: LM head mat-vec,ROCm1,0.5179386666666667,0.0,
+FN@8K TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,ROCm1,1.5057784666666667,8.966666666666667e-06,
+FN@8K TG 2026-11-10,glue,"Glue: copies, crops, other",ROCm1,0.012802666666666665,0.0,
+FN@8K TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm1,0.0,0.0,
+FN@8K TG 2026-11-10,info_matvec_ms,Mat-vec kernel time (info),ROCm1,8.254526883333334,,
+FN@8K TG 2026-11-10,info_matvec_calls,Mat-vec calls per token (info),ROCm1,592.0,,
+FN@8K TG 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm1,0.6498132166666667,,
+FN@8K TG 2026-11-10,info_topk_moe_ms,topk_moe kernel time (info),ROCm1,1.35949045,,
+FN@8K TG 2026-11-10,start_idle,"Token start: host gap, no kernel",critical,0.0,2.0893699333333333,1.7602475769844277
+FN@8K TG 2026-11-10,start_input,"Token start: input copies, embedding",critical,0.08339733333333334,0.0,0.07026039361673084
+FN@8K TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",critical,0.0,1.5471158619047618,1.3034106137860084
+FN@8K TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),critical,3.88277215,3.816666666666667e-06,3.271152168057922
+FN@8K TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),critical,0.24728798333333335,0.0,0.20833461156656777
+FN@8K TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),critical,2.6901287166666665,2.5833333333333333e-06,2.266375631739078
+FN@8K TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",critical,0.4952878666666667,2.3333333333333333e-07,0.41726917958627063
+FN@8K TG 2026-11-10,attn_fa,Attention: flash attention,critical,0.6498132166666667,0.0,0.5474531445492341
+FN@8K TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),critical,2.45316505,0.0,2.0667368503366275
+FN@8K TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",critical,2.3153115666666664,8.5e-07,1.9505990807944014
+FN@8K TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),critical,0.7564329,1.15e-06,0.6372788190441483
+FN@8K TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,critical,0.4968773,0.012525533333333333,0.42916052766848584
+FN@8K TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,critical,0.0,0.0,0.0
+FN@8K TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,critical,0.0,0.0,0.0
+FN@8K TG 2026-11-10,ffn_act,FFN dense: activation,critical,0.0,0.0,0.0
+FN@8K TG 2026-11-10,ffn_down,FFN dense: down mat-vec,critical,0.0,0.0,0.0
+FN@8K TG 2026-11-10,moe_router,MoE: router + top-k,critical,1.8247971166666666,0.0,1.537350878777205
+FN@8K TG 2026-11-10,moe_routed,MoE: routed experts,critical,2.5759143166666667,3.5166666666666667e-06,2.1701533329725544
+FN@8K TG 2026-11-10,moe_shared,MoE: shared expert + gate,critical,1.4099678333333334,2.0833333333333334e-06,1.1878682132052485
+FN@8K TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,critical,1.0330612333333333,0.0,0.8703310523620109
+FN@8K TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,critical,0.48994780000000004,0.012242666666666667,0.4230842695837966
+FN@8K TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,critical,0.0,0.0,0.0
+FN@8K TG 2026-11-10,out_norm,Output: final norm (+ softcap),critical,0.07635733333333333,0.0,0.0643293506050224
+FN@8K TG 2026-11-10,out_head,Output: LM head mat-vec,critical,0.5179386666666667,0.0,0.43635177690723215
+FN@8K TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,critical,1.4996425333333332,8.966666666666667e-06,1.2634229473115144
+FN@8K TG 2026-11-10,glue,"Glue: copies, crops, other",critical,0.012802666666666665,0.0,0.010785961173944
+FN@8K TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),critical,0.0,0.004293316666666667,0.0036170235529665714
+G4@0 TG 2026-11-10,start_idle,"Token start: host gap, no kernel",ROCm0,0.0,0.25299409677419354,
+G4@0 TG 2026-11-10,start_input,"Token start: input copies, embedding",ROCm0,0.04353035483870967,0.0,
+G4@0 TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",ROCm0,0.0,0.2433760486431132,
+G4@0 TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),ROCm0,1.5822715161290324,1.2580645161290322e-06,
+G4@0 TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm0,0.0,0.0,
+G4@0 TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),ROCm0,4.43130714516129,4.35483870967742e-06,
+G4@0 TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm0,1.4826303548387096,0.0,
+G4@0 TG 2026-11-10,attn_fa,Attention: flash attention,ROCm0,1.5406702580645162,3.709677419354839e-07,
+G4@0 TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),ROCm0,0.0,0.0,
+G4@0 TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",ROCm0,0.0,0.0,
+G4@0 TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),ROCm0,2.3385913387096773,0.0,
+G4@0 TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,ROCm0,0.6100996935483871,0.01544291935483871,
+G4@0 TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,ROCm0,1.852627935483871,0.0,
+G4@0 TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,ROCm0,10.060593854838709,7.4354838709677414e-06,
+G4@0 TG 2026-11-10,ffn_act,FFN dense: activation,ROCm0,0.03812904838709678,0.0,
+G4@0 TG 2026-11-10,ffn_down,FFN dense: down mat-vec,ROCm0,5.139720338709678,1.3548387096774193e-06,
+G4@0 TG 2026-11-10,moe_router,MoE: router + top-k,ROCm0,0.0,0.0,
+G4@0 TG 2026-11-10,moe_routed,MoE: routed experts,ROCm0,0.0,0.0,
+G4@0 TG 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm0,0.0,0.0,
+G4@0 TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm0,0.0,0.0,
+G4@0 TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,ROCm0,1.0670215806451613,0.013021935483870968,
+G4@0 TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,ROCm0,0.3515759838709677,0.0,
+G4@0 TG 2026-11-10,out_norm,Output: final norm (+ softcap),ROCm0,0.018596129032258064,0.0,
+G4@0 TG 2026-11-10,out_head,Output: LM head mat-vec,ROCm0,0.9825275806451613,0.0,
+G4@0 TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,ROCm0,1.0117704838709678,1.5161290322580645e-06,
+G4@0 TG 2026-11-10,glue,"Glue: copies, crops, other",ROCm0,0.008467096774193548,0.0,
+G4@0 TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm0,0.0,0.0,
+G4@0 TG 2026-11-10,info_matvec_ms,Mat-vec kernel time (info),ROCm0,22.952749887096772,,
+G4@0 TG 2026-11-10,info_matvec_calls,Mat-vec calls per token (info),ROCm0,360.0,,
+G4@0 TG 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm0,1.5406702580645162,,
+G4@0 TG 2026-11-10,info_topk_moe_ms,topk_moe kernel time (info),ROCm0,0.0,,
+G4@0 TG 2026-11-10,start_idle,"Token start: host gap, no kernel",ROCm1,0.0,1.0731275,
+G4@0 TG 2026-11-10,start_input,"Token start: input copies, embedding",ROCm1,0.05654451612903226,0.0,
+G4@0 TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",ROCm1,0.0,0.24317205427547361,
+G4@0 TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),ROCm1,1.6558601774193549,7.125806451612904e-05,
+G4@0 TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm1,0.0,0.0,
+G4@0 TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),ROCm1,4.508592161290323,7.870967741935484e-06,
+G4@0 TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm1,1.6675122096774193,0.0,
+G4@0 TG 2026-11-10,attn_fa,Attention: flash attention,ROCm1,1.964128370967742,2.903225806451613e-07,
+G4@0 TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),ROCm1,0.0,0.0,
+G4@0 TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",ROCm1,0.0,0.0,
+G4@0 TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),ROCm1,2.404116822580645,1.8225806451612902e-06,
+G4@0 TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,ROCm1,0.6916128225806452,0.022611612903225806,
+G4@0 TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,ROCm1,3.332258064516129e-05,0.0,
+G4@0 TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,ROCm1,10.110340483870967,4.580645161290323e-06,
+G4@0 TG 2026-11-10,ffn_act,FFN dense: activation,ROCm1,0.04435096774193549,0.0,
+G4@0 TG 2026-11-10,ffn_down,FFN dense: down mat-vec,ROCm1,5.243751903225807,6.370967741935484e-06,
+G4@0 TG 2026-11-10,moe_router,MoE: router + top-k,ROCm1,0.0,0.0,
+G4@0 TG 2026-11-10,moe_routed,MoE: routed experts,ROCm1,0.0,0.0,
+G4@0 TG 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm1,0.0,0.0,
+G4@0 TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm1,0.0,0.0,
+G4@0 TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,ROCm1,1.1644820161290323,0.023481290322580645,
+G4@0 TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,ROCm1,0.0002761612903225806,0.0,
+G4@0 TG 2026-11-10,out_norm,Output: final norm (+ softcap),ROCm1,0.025009032258064515,0.0,
+G4@0 TG 2026-11-10,out_head,Output: LM head mat-vec,ROCm1,0.9965542419354839,0.0,
+G4@0 TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,ROCm1,1.1793648225806452,9.838709677419355e-07,
+G4@0 TG 2026-11-10,glue,"Glue: copies, crops, other",ROCm1,0.009790967741935485,0.0,
+G4@0 TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm1,0.0,0.0,
+G4@0 TG 2026-11-10,info_matvec_ms,Mat-vec kernel time (info),ROCm1,23.26337166129032,,
+G4@0 TG 2026-11-10,info_matvec_calls,Mat-vec calls per token (info),ROCm1,360.0,,
+G4@0 TG 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm1,1.964128370967742,,
+G4@0 TG 2026-11-10,info_topk_moe_ms,topk_moe kernel time (info),ROCm1,0.0,,
+G4@0 TG 2026-11-10,start_idle,"Token start: host gap, no kernel",critical,0.0,1.0731275,0.9925419831328705
+G4@0 TG 2026-11-10,start_input,"Token start: input copies, embedding",critical,0.05654451612903226,0.0,0.05229835799939733
+G4@0 TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",critical,0.0,0.2433760486431132,0.22509994941633454
+G4@0 TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),critical,1.6561363225806451,7.125806451612904e-05,1.5318362045267147
+G4@0 TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),critical,0.0,0.0,0.0
+G4@0 TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),critical,4.508584419354839,7.870967741935484e-06,4.170023723159033
+G4@0 TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",critical,1.6675535,0.0,1.54233011256366
+G4@0 TG 2026-11-10,attn_fa,Attention: flash attention,critical,1.9641774032258064,2.903225806451613e-07,1.8166795867032237
+G4@0 TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),critical,0.0,0.0,0.0
+G4@0 TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",critical,0.0,0.0,0.0
+G4@0 TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),critical,2.404116822580645,1.8225806451612902e-06,2.2235835795421295
+G4@0 TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,critical,0.6915687258064516,0.022611612903225806,0.6605496268592579
+G4@0 TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,critical,0.0,0.0,0.0
+G4@0 TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,critical,10.110910838709678,4.580645161290323e-06,9.351645579500266
+G4@0 TG 2026-11-10,ffn_act,FFN dense: activation,critical,0.04435096774193549,0.0,0.04102047284823343
+G4@0 TG 2026-11-10,ffn_down,FFN dense: down mat-vec,critical,5.2437725967741935,6.370967741935484e-06,4.850002237155433
+G4@0 TG 2026-11-10,moe_router,MoE: router + top-k,critical,0.0,0.0,0.0
+G4@0 TG 2026-11-10,moe_routed,MoE: routed experts,critical,0.0,0.0,0.0
+G4@0 TG 2026-11-10,moe_shared,MoE: shared expert + gate,critical,0.0,0.0,0.0
+G4@0 TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,critical,0.0,0.0,0.0
+G4@0 TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,critical,1.1639375322580645,0.023481290322580645,1.098250704574705
+G4@0 TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,critical,0.0,0.0,0.0
+G4@0 TG 2026-11-10,out_norm,Output: final norm (+ softcap),critical,0.025009032258064515,0.0,0.02313100211638718
+G4@0 TG 2026-11-10,out_head,Output: LM head mat-vec,critical,0.9965542419354839,0.0,0.9217189230451364
+G4@0 TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,critical,1.1789751451612902,9.838709677419355e-07,1.0904420072880365
+G4@0 TG 2026-11-10,glue,"Glue: copies, crops, other",critical,0.009790967741935485,0.0,0.009055724076934576
+G4@0 TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),critical,0.0,0.0003093225806451613,0.00028609428760452573
+FN@32K TG 2026-11-10,start_idle,"Token start: host gap, no kernel",ROCm0,0.0,1.2220788360655737,
+FN@32K TG 2026-11-10,start_input,"Token start: input copies, embedding",ROCm0,0.05670386885245902,0.0,
+FN@32K TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",ROCm0,0.0,0.7016536068175905,
+FN@32K TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),ROCm0,3.644586754098361,2.6901639344262298e-05,
+FN@32K TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm0,0.19632062295081967,0.0,
+FN@32K TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),ROCm0,2.4694080163934427,2.3934426229508195e-06,
+FN@32K TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm0,0.4569718524590164,0.0,
+FN@32K TG 2026-11-10,attn_fa,Attention: flash attention,ROCm0,1.4493525409836066,0.0,
+FN@32K TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),ROCm0,2.723538524590164,0.0,
+FN@32K TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",ROCm0,2.04906768852459,0.0,
+FN@32K TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),ROCm0,0.7541294426229509,0.0,
+FN@32K TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,ROCm0,0.4490207540983607,0.010249491803278688,
+FN@32K TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,ROCm0,2.34793068852459,0.0,
+FN@32K TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,ROCm0,0.0,0.0,
+FN@32K TG 2026-11-10,ffn_act,FFN dense: activation,ROCm0,0.0,0.0,
+FN@32K TG 2026-11-10,ffn_down,FFN dense: down mat-vec,ROCm0,0.0,0.0,
+FN@32K TG 2026-11-10,moe_router,MoE: router + top-k,ROCm0,1.8408524262295083,3.5901639344262297e-06,
+FN@32K TG 2026-11-10,moe_routed,MoE: routed experts,ROCm0,2.463537245901639,0.0,
+FN@32K TG 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm0,1.365561918032787,2.901639344262295e-06,
+FN@32K TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm0,0.6543963934426229,0.0,
+FN@32K TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,ROCm0,0.441212131147541,0.010248704918032788,
+FN@32K TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,ROCm0,0.901363524590164,0.0,
+FN@32K TG 2026-11-10,out_norm,Output: final norm (+ softcap),ROCm0,0.06658444262295082,0.0,
+FN@32K TG 2026-11-10,out_head,Output: LM head mat-vec,ROCm0,0.4955030655737705,6.108196721311476e-05,
+FN@32K TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,ROCm0,1.1507888360655738,0.0,
+FN@32K TG 2026-11-10,glue,"Glue: copies, crops, other",ROCm0,0.011268245901639343,0.0,
+FN@32K TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm0,0.0,0.0,
+FN@32K TG 2026-11-10,info_matvec_ms,Mat-vec kernel time (info),ROCm0,7.891966459016394,,
+FN@32K TG 2026-11-10,info_matvec_calls,Mat-vec calls per token (info),ROCm0,592.0,,
+FN@32K TG 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm0,1.4493525409836066,,
+FN@32K TG 2026-11-10,info_topk_moe_ms,topk_moe kernel time (info),ROCm0,1.3749494098360657,,
+FN@32K TG 2026-11-10,start_idle,"Token start: host gap, no kernel",ROCm1,0.0,2.504569426229508,
+FN@32K TG 2026-11-10,start_input,"Token start: input copies, embedding",ROCm1,0.0712892131147541,0.0,
+FN@32K TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",ROCm1,0.0,0.7017870741608119,
+FN@32K TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),ROCm1,3.8558150819672132,1.118032786885246e-05,
+FN@32K TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm1,0.21822696721311474,0.0,
+FN@32K TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),ROCm1,2.6907057049180327,3.0819672131147538e-06,
+FN@32K TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm1,0.49329827868852455,0.0,
+FN@32K TG 2026-11-10,attn_fa,Attention: flash attention,ROCm1,1.4571127049180328,0.0,
+FN@32K TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),ROCm1,2.994215229508197,1.4262295081967214e-06,
+FN@32K TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",ROCm1,2.2875237213114756,5.360655737704918e-06,
+FN@32K TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),ROCm1,0.762935524590164,0.0,
+FN@32K TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,ROCm1,0.5047777704918033,0.015688803278688525,
+FN@32K TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,ROCm1,0.0019294098360655737,0.0,
+FN@32K TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,ROCm1,0.0,0.0,
+FN@32K TG 2026-11-10,ffn_act,FFN dense: activation,ROCm1,0.0,0.0,
+FN@32K TG 2026-11-10,ffn_down,FFN dense: down mat-vec,ROCm1,0.0,0.0,
+FN@32K TG 2026-11-10,moe_router,MoE: router + top-k,ROCm1,1.856161,5.147540983606557e-06,
+FN@32K TG 2026-11-10,moe_routed,MoE: routed experts,ROCm1,2.585235213114754,4.754098360655738e-07,
+FN@32K TG 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm1,1.4163442622950821,0.0,
+FN@32K TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm1,0.8778909016393442,0.0,
+FN@32K TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,ROCm1,0.4981954098360656,0.011703606557377049,
+FN@32K TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,ROCm1,0.010353131147540984,0.0,
+FN@32K TG 2026-11-10,out_norm,Output: final norm (+ softcap),ROCm1,0.0770938524590164,0.0,
+FN@32K TG 2026-11-10,out_head,Output: LM head mat-vec,ROCm1,0.5202887868852459,0.0,
+FN@32K TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,ROCm1,1.5063595409836066,0.0,
+FN@32K TG 2026-11-10,glue,"Glue: copies, crops, other",ROCm1,0.012862950819672132,0.0,
+FN@32K TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm1,0.0,0.0,
+FN@32K TG 2026-11-10,info_matvec_ms,Mat-vec kernel time (info),ROCm1,8.276638983606558,,
+FN@32K TG 2026-11-10,info_matvec_calls,Mat-vec calls per token (info),ROCm1,592.0,,
+FN@32K TG 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm1,1.4571127049180328,,
+FN@32K TG 2026-11-10,info_topk_moe_ms,topk_moe kernel time (info),ROCm1,1.3832608852459016,,
+FN@32K TG 2026-11-10,start_idle,"Token start: host gap, no kernel",critical,0.0,2.50530393442623,2.170565377680693
+FN@32K TG 2026-11-10,start_input,"Token start: input copies, embedding",critical,0.07113183606557377,0.0,0.06162777238050099
+FN@32K TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",critical,0.0,0.7016536068175905,0.6079042966225338
+FN@32K TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),critical,3.8551419344262294,1.118032786885246e-05,3.3400585699633107
+FN@32K TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),critical,0.22017581967213115,0.0,0.19075769794463943
+FN@32K TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),critical,2.6912512786885245,3.0819672131147538e-06,2.3316706039139223
+FN@32K TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",critical,0.49329827868852455,0.0,0.4273877312358971
+FN@32K TG 2026-11-10,attn_fa,Attention: flash attention,critical,1.4571127049180328,0.0,1.262425027643637
+FN@32K TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),critical,2.994215229508197,1.4262295081967214e-06,2.594153514434799
+FN@32K TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",critical,2.2876365245901638,5.360655737704918e-06,1.9819855804378268
+FN@32K TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),critical,0.7631322459016394,0.0,0.6611686545429731
+FN@32K TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,critical,0.5046717704918032,0.015536672131147542,0.450702375555551
+FN@32K TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,critical,0.0,0.0,0.0
+FN@32K TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,critical,0.0,0.0,0.0
+FN@32K TG 2026-11-10,ffn_act,FFN dense: activation,critical,0.0,0.0,0.0
+FN@32K TG 2026-11-10,ffn_down,FFN dense: down mat-vec,critical,0.0,0.0,0.0
+FN@32K TG 2026-11-10,moe_router,MoE: router + top-k,critical,1.8600134098360657,5.147540983606557e-06,1.6114978414428756
+FN@32K TG 2026-11-10,moe_routed,MoE: routed experts,critical,2.61486968852459,4.754098360655738e-07,2.265492249053676
+FN@32K TG 2026-11-10,moe_shared,MoE: shared expert + gate,critical,1.416504393442623,0.0,1.2272424720569095
+FN@32K TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,critical,0.8740562622950819,0.0,0.7572718962408844
+FN@32K TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,critical,0.49352175409836063,0.011632819672131147,0.4376598835519704
+FN@32K TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,critical,0.0,0.0,0.0
+FN@32K TG 2026-11-10,out_norm,Output: final norm (+ softcap),critical,0.0770938524590164,0.0,0.06679319210740332
+FN@32K TG 2026-11-10,out_head,Output: LM head mat-vec,critical,0.5202887868852459,0.0,0.45077198486388154
+FN@32K TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,critical,1.4901182950819671,0.0,1.2910206763772354
+FN@32K TG 2026-11-10,glue,"Glue: copies, crops, other",critical,0.012862950819672132,0.0,0.011144306812572061
+FN@32K TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),critical,0.0,0.0011757704918032787,0.0010186734976693685
+27B 1-GPU@0 TG 2026-11-10,start_idle,"Token start: host gap, no kernel",ROCm0,0.0,0.34725996825396827,
+27B 1-GPU@0 TG 2026-11-10,start_input,"Token start: input copies, embedding",ROCm0,0.02452073015873016,0.0,
+27B 1-GPU@0 TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",ROCm0,0.0,0.0,
+27B 1-GPU@0 TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),ROCm0,0.6253352222222222,0.00013206349206349206,
+27B 1-GPU@0 TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm0,0.0,0.0,
+27B 1-GPU@0 TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),ROCm0,8.071235793650795,0.0067536666666666665,
+27B 1-GPU@0 TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm0,0.5926343968253968,0.006763190476190476,
+27B 1-GPU@0 TG 2026-11-10,attn_fa,Attention: flash attention,ROCm0,0.382541,0.0,
+27B 1-GPU@0 TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),ROCm0,0.0,0.0,
+27B 1-GPU@0 TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",ROCm0,3.460849476190476,0.027193507936507936,
+27B 1-GPU@0 TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),ROCm0,3.049277888888889,6.349206349206349e-08,
+27B 1-GPU@0 TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,ROCm0,0.0,0.0,
+27B 1-GPU@0 TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,ROCm0,0.0,0.0,
+27B 1-GPU@0 TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,ROCm0,16.118305460317462,7.603174603174603e-06,
+27B 1-GPU@0 TG 2026-11-10,ffn_act,FFN dense: activation,ROCm0,0.0,0.0,
+27B 1-GPU@0 TG 2026-11-10,ffn_down,FFN dense: down mat-vec,ROCm0,8.405301317460317,6.174603174603175e-06,
+27B 1-GPU@0 TG 2026-11-10,moe_router,MoE: router + top-k,ROCm0,0.0,0.0,
+27B 1-GPU@0 TG 2026-11-10,moe_routed,MoE: routed experts,ROCm0,0.0,0.0,
+27B 1-GPU@0 TG 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm0,0.0,0.0,
+27B 1-GPU@0 TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm0,0.0,0.0,
+27B 1-GPU@0 TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,ROCm0,0.0,0.0,
+27B 1-GPU@0 TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,ROCm0,0.0,0.0,
+27B 1-GPU@0 TG 2026-11-10,out_norm,Output: final norm (+ softcap),ROCm0,0.005272428571428571,0.0,
+27B 1-GPU@0 TG 2026-11-10,out_head,Output: LM head mat-vec,ROCm0,1.7525263809523808,1.1746031746031745e-06,
+27B 1-GPU@0 TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,ROCm0,1.1069234444444445,0.006909571428571428,
+27B 1-GPU@0 TG 2026-11-10,glue,"Glue: copies, crops, other",ROCm0,0.0,0.0,
+27B 1-GPU@0 TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm0,0.0,0.0,
+27B 1-GPU@0 TG 2026-11-10,info_matvec_ms,Mat-vec kernel time (info),ROCm0,37.396674920634915,,
+27B 1-GPU@0 TG 2026-11-10,info_matvec_calls,Mat-vec calls per token (info),ROCm0,433.0,,
+27B 1-GPU@0 TG 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm0,0.382541,,
+27B 1-GPU@0 TG 2026-11-10,info_topk_moe_ms,topk_moe kernel time (info),ROCm0,0.0,,
+27B 1-GPU@0 TG 2026-11-10,start_idle,"Token start: host gap, no kernel",critical,0.0,0.34725996825396827,0.3370778544884506
+27B 1-GPU@0 TG 2026-11-10,start_input,"Token start: input copies, embedding",critical,0.02452073015873016,0.0,0.02380175046940659
+27B 1-GPU@0 TG 2026-11-10,warmup,"Warm-up tokens: excess over steady tokens, spread over all",critical,0.0,0.0,0.0
+27B 1-GPU@0 TG 2026-11-10,norm,Residual add + norm (Flash Next: hyper-connection combine + mix),critical,0.6253352222222222,0.00013206349206349206,0.6071277716845697
+27B 1-GPU@0 TG 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),critical,0.0,0.0,0.0
+27B 1-GPU@0 TG 2026-11-10,mix_in,Mixer: input projections (mat-vec),critical,8.071235793650795,0.0067536666666666665,7.8411323065972525
+27B 1-GPU@0 TG 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",critical,0.5926343968253968,0.006763190476190476,0.5818224707243201
+27B 1-GPU@0 TG 2026-11-10,attn_fa,Attention: flash attention,critical,0.382541,0.0,0.37132440051241894
+27B 1-GPU@0 TG 2026-11-10,qsa,Attention: QSA indexer (Flash Next),critical,0.0,0.0,0.0
+27B 1-GPU@0 TG 2026-11-10,recr,"Recurrent: conv, gated delta net, gates, state",critical,3.460849476190476,0.027193507936507936,3.3857690287903806
+27B 1-GPU@0 TG 2026-11-10,mix_out,Mixer: output projection (mat-vec),critical,3.049277888888889,6.349206349206349e-08,2.9598691582434133
+27B 1-GPU@0 TG 2026-11-10,ar_mix,AllReduce after mixer: exchange,critical,0.0,0.0,0.0
+27B 1-GPU@0 TG 2026-11-10,ar_mix_wait,AllReduce after mixer: wait for other GPU,critical,0.0,0.0,0.0
+27B 1-GPU@0 TG 2026-11-10,ffn_gu,FFN dense: gate/up mat-vec,critical,16.118305460317462,7.603174603174603e-06,15.645703167955018
+27B 1-GPU@0 TG 2026-11-10,ffn_act,FFN dense: activation,critical,0.0,0.0,0.0
+27B 1-GPU@0 TG 2026-11-10,ffn_down,FFN dense: down mat-vec,critical,8.405301317460317,6.174603174603175e-06,8.158852948084048
+27B 1-GPU@0 TG 2026-11-10,moe_router,MoE: router + top-k,critical,0.0,0.0,0.0
+27B 1-GPU@0 TG 2026-11-10,moe_routed,MoE: routed experts,critical,0.0,0.0,0.0
+27B 1-GPU@0 TG 2026-11-10,moe_shared,MoE: shared expert + gate,critical,0.0,0.0,0.0
+27B 1-GPU@0 TG 2026-11-10,moe_reduce,MoE: weighted reduce + combine,critical,0.0,0.0,0.0
+27B 1-GPU@0 TG 2026-11-10,ar_ffn,AllReduce after FFN: exchange,critical,0.0,0.0,0.0
+27B 1-GPU@0 TG 2026-11-10,ar_ffn_wait,AllReduce after FFN: wait for other GPU,critical,0.0,0.0,0.0
+27B 1-GPU@0 TG 2026-11-10,out_norm,Output: final norm (+ softcap),critical,0.005272428571428571,0.0,0.005117834110671179
+27B 1-GPU@0 TG 2026-11-10,out_head,Output: LM head mat-vec,critical,1.7525263809523808,1.1746031746031745e-06,1.7011411690463545
+27B 1-GPU@0 TG 2026-11-10,q8,q8_1 quantize of mat-vec inputs,critical,1.1069234444444445,0.006909571428571428,1.0811739836775331
+27B 1-GPU@0 TG 2026-11-10,glue,"Glue: copies, crops, other",critical,0.0,0.0,0.0
+27B 1-GPU@0 TG 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),critical,0.0,0.0,0.0
+27B@0 PP 2026-11-10,run_start,"Run start: bench timer start to the first compute kernel (host prep, input upload)",ROCm0,0.0,14.9709384765625,
+27B@0 PP 2026-11-10,start_idle,Ubatch start: host gap before the first compute kernel,ROCm0,0.0,0.0,
+27B@0 PP 2026-11-10,start_input,"Ubatch start: input upload, embedding",ROCm0,0.0,0.0,
+27B@0 PP 2026-11-10,norm,Residual add + norm,ROCm0,17.0125244140625,0.89734423828125,
+27B@0 PP 2026-11-10,hc,Hyper-connection pre/post with its small GEMMs (Flash Next),ROCm0,0.0,0.0,
+27B@0 PP 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm0,0.0,0.0,
+27B@0 PP 2026-11-10,mix_in_attn,"Mixer GEMM: attention input projections (q+gate, k, v)",ROCm0,42.7225419921875,6.4453125e-05,
+27B@0 PP 2026-11-10,mix_in_recr,"Mixer GEMM: GDN input projections (qkv, z, beta/alpha)",ROCm0,155.74446923828125,0.0,
+27B@0 PP 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm0,6.29977294921875,0.0,
+27B@0 PP 2026-11-10,attn_fa,Attention: flash attention (batched),ROCm0,23.87566015625,0.0,
+27B@0 PP 2026-11-10,qsa,Attention: QSA indexer and key pooling (Flash Next),ROCm0,0.0,0.0,
+27B@0 PP 2026-11-10,recr_gdn,Recurrent: chunked gated delta net,ROCm0,93.21405859375,0.00430419921875,
+27B@0 PP 2026-11-10,recr,"Recurrent: conv, l2 norms, gates, state copies",ROCm0,28.07183740234375,0.048359375,
+27B@0 PP 2026-11-10,mix_out,Mixer GEMM: output projection (slabs),ROCm0,86.5831708984375,0.0043749999999999995,
+27B@0 PP 2026-11-10,ar_mix,AllReduce after mixer: exposed,ROCm0,116.65567089843749,10.952281249999999,
+27B@0 PP 2026-11-10,ffn_gu,FFN dense GEMM: gate/up,ROCm0,396.65878466796875,0.00040136718750000003,
+27B@0 PP 2026-11-10,ffn_act,FFN dense: activation,ROCm0,9.27001025390625,0.0,
+27B@0 PP 2026-11-10,ffn_down,FFN dense GEMM: down (slabs),ROCm0,217.482724609375,0.00096728515625,
+27B@0 PP 2026-11-10,moe_router,MoE: router + top-k,ROCm0,0.0,0.0,
+27B@0 PP 2026-11-10,moe_ids,"MoE: ids helper, tile list (repack_tile_off)",ROCm0,0.0,0.0,
+27B@0 PP 2026-11-10,moe_routed,MoE: routed expert GEMM + activation,ROCm0,0.0,0.0,
+27B@0 PP 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm0,0.0,0.0,
+27B@0 PP 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm0,0.0,0.0,
+27B@0 PP 2026-11-10,ar_ffn,AllReduce after FFN: exposed,ROCm0,83.9230625,81.3258212890625,
+27B@0 PP 2026-11-10,out_norm,"Output: last-token rows, final norm (+ softcap)",ROCm0,0.0059375,0.0,
+27B@0 PP 2026-11-10,out_head,Output: LM head (last token),ROCm0,0.42726611328124997,0.0,
+27B@0 PP 2026-11-10,q8,q8_1 quantize of GEMM inputs,ROCm0,34.22317578125,1.0169902343750001,
+27B@0 PP 2026-11-10,copy,"Copies H2D/D2H outside AllReduce, exposed",ROCm0,0.035390625,0.0059375,
+27B@0 PP 2026-11-10,glue,"Glue: crops, copies, other",ROCm0,0.00421875,0.00671875,
+27B@0 PP 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm0,0.0,0.0,
+27B@0 PP 2026-11-10,ar_overlap,"AllReduce overlapped with compute (info, not in total)",ROCm0,157.05527197265627,0.0,
+27B@0 PP 2026-11-10,info_gemm_ms,GEMM kernel time (info),ROCm0,899.6230830078125,,
+27B@0 PP 2026-11-10,info_gemm_calls,GEMM calls per ubatch (info),ROCm0,877.0,,
+27B@0 PP 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm0,23.87566015625,,
+27B@0 PP 2026-11-10,run_start,"Run start: bench timer start to the first compute kernel (host prep, input upload)",ROCm1,0.0,14.93745458984375,
+27B@0 PP 2026-11-10,start_idle,Ubatch start: host gap before the first compute kernel,ROCm1,0.0,0.0,
+27B@0 PP 2026-11-10,start_input,"Ubatch start: input upload, embedding",ROCm1,0.0,0.0,
+27B@0 PP 2026-11-10,norm,Residual add + norm,ROCm1,16.58577880859375,1.1753125,
+27B@0 PP 2026-11-10,hc,Hyper-connection pre/post with its small GEMMs (Flash Next),ROCm1,0.0,0.0,
+27B@0 PP 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm1,0.0,0.0,
+27B@0 PP 2026-11-10,mix_in_attn,"Mixer GEMM: attention input projections (q+gate, k, v)",ROCm1,53.47382421875,0.00012744140625,
+27B@0 PP 2026-11-10,mix_in_recr,"Mixer GEMM: GDN input projections (qkv, z, beta/alpha)",ROCm1,183.47847753906248,8.056640625e-05,
+27B@0 PP 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm1,7.237184082031249,0.0,
+27B@0 PP 2026-11-10,attn_fa,Attention: flash attention (batched),ROCm1,27.05632666015625,0.0,
+27B@0 PP 2026-11-10,qsa,Attention: QSA indexer and key pooling (Flash Next),ROCm1,0.0,0.0,
+27B@0 PP 2026-11-10,recr_gdn,Recurrent: chunked gated delta net,ROCm1,111.69621289062499,0.00484375,
+27B@0 PP 2026-11-10,recr,"Recurrent: conv, l2 norms, gates, state copies",ROCm1,30.34134326171875,0.01171875,
+27B@0 PP 2026-11-10,mix_out,Mixer GEMM: output projection (slabs),ROCm1,105.62735986328126,0.0,
+27B@0 PP 2026-11-10,ar_mix,AllReduce after mixer: exposed,ROCm1,41.3354765625,3.00056005859375,
+27B@0 PP 2026-11-10,ffn_gu,FFN dense GEMM: gate/up,ROCm1,476.090474609375,0.00069140625,
+27B@0 PP 2026-11-10,ffn_act,FFN dense: activation,ROCm1,10.262725097656249,0.000361328125,
+27B@0 PP 2026-11-10,ffn_down,FFN dense GEMM: down (slabs),ROCm1,269.2642094726562,0.00541748046875,
+27B@0 PP 2026-11-10,moe_router,MoE: router + top-k,ROCm1,0.0,0.0,
+27B@0 PP 2026-11-10,moe_ids,"MoE: ids helper, tile list (repack_tile_off)",ROCm1,0.0,0.0,
+27B@0 PP 2026-11-10,moe_routed,MoE: routed expert GEMM + activation,ROCm1,0.0,0.0,
+27B@0 PP 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm1,0.0,0.0,
+27B@0 PP 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm1,0.0,0.0,
+27B@0 PP 2026-11-10,ar_ffn,AllReduce after FFN: exposed,ROCm1,29.57952685546875,3.51296875,
+27B@0 PP 2026-11-10,out_norm,"Output: last-token rows, final norm (+ softcap)",ROCm1,0.005625000000000001,0.0,
+27B@0 PP 2026-11-10,out_head,Output: LM head (last token),ROCm1,0.42789062499999997,0.0,
+27B@0 PP 2026-11-10,q8,q8_1 quantize of GEMM inputs,ROCm1,35.55827197265625,0.696373046875,
+27B@0 PP 2026-11-10,copy,"Copies H2D/D2H outside AllReduce, exposed",ROCm1,0.0353125,0.028632324218749998,
+27B@0 PP 2026-11-10,glue,"Glue: crops, copies, other",ROCm1,0.004296875,0.009921875,
+27B@0 PP 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm1,0.0,0.0,
+27B@0 PP 2026-11-10,ar_overlap,"AllReduce overlapped with compute (info, not in total)",ROCm1,275.9906645507813,0.0,
+27B@0 PP 2026-11-10,info_gemm_ms,GEMM kernel time (info),ROCm1,1088.3645576171875,,
+27B@0 PP 2026-11-10,info_gemm_calls,GEMM calls per ubatch (info),ROCm1,877.0,,
+27B@0 PP 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm1,27.05632666015625,,
+27B@0 PP 2026-11-10,run_start,"Run start: bench timer start to the first compute kernel (host prep, input upload)",critical,0.0,14.93745458984375,14.898722555527492
+27B@0 PP 2026-11-10,start_idle,Ubatch start: host gap before the first compute kernel,critical,0.0,0.0,0.0
+27B@0 PP 2026-11-10,start_input,"Ubatch start: input upload, embedding",critical,0.0,0.0,0.0
+27B@0 PP 2026-11-10,norm,Residual add + norm,critical,16.58593505859375,1.1753125,17.71519357758907
+27B@0 PP 2026-11-10,hc,Hyper-connection pre/post with its small GEMMs (Flash Next),critical,0.0,0.0,0.0
+27B@0 PP 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),critical,0.0,0.0,0.0
+27B@0 PP 2026-11-10,mix_in_attn,"Mixer GEMM: attention input projections (q+gate, k, v)",critical,53.47382421875,0.00012744140625,53.33529651524721
+27B@0 PP 2026-11-10,mix_in_recr,"Mixer GEMM: GDN input projections (qkv, z, beta/alpha)",critical,183.47847753906248,8.056640625e-05,183.00280785189673
+27B@0 PP 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",critical,7.237184082031249,0.0,7.2184184442492345
+27B@0 PP 2026-11-10,attn_fa,Attention: flash attention (batched),critical,27.05632666015625,0.0,26.986171027791315
+27B@0 PP 2026-11-10,qsa,Attention: QSA indexer and key pooling (Flash Next),critical,0.0,0.0,0.0
+27B@0 PP 2026-11-10,recr_gdn,Recurrent: chunked gated delta net,critical,111.69621289062499,0.00484375,111.41142167417573
+27B@0 PP 2026-11-10,recr,"Recurrent: conv, l2 norms, gates, state copies",critical,30.34134326171875,0.01171875,30.27435811793482
+27B@0 PP 2026-11-10,mix_out,Mixer GEMM: output projection (slabs),critical,105.62735986328126,0.0,105.35347367321097
+27B@0 PP 2026-11-10,ar_mix,AllReduce after mixer: exposed,critical,41.3354765625,3.00056005859375,44.22107560939483
+27B@0 PP 2026-11-10,ffn_gu,FFN dense GEMM: gate/up,critical,476.090474609375,0.00069140625,474.85668665578
+27B@0 PP 2026-11-10,ffn_act,FFN dense: activation,critical,10.262725097656249,0.000361328125,10.236474782328667
+27B@0 PP 2026-11-10,ffn_down,FFN dense GEMM: down (slabs),critical,269.26452246093754,0.00541748046875,268.5717371457815
+27B@0 PP 2026-11-10,moe_router,MoE: router + top-k,critical,0.0,0.0,0.0
+27B@0 PP 2026-11-10,moe_ids,"MoE: ids helper, tile list (repack_tile_off)",critical,0.0,0.0,0.0
+27B@0 PP 2026-11-10,moe_routed,MoE: routed expert GEMM + activation,critical,0.0,0.0,0.0
+27B@0 PP 2026-11-10,moe_shared,MoE: shared expert + gate,critical,0.0,0.0,0.0
+27B@0 PP 2026-11-10,moe_reduce,MoE: weighted reduce + combine,critical,0.0,0.0,0.0
+27B@0 PP 2026-11-10,ar_ffn,AllReduce after FFN: exposed,critical,29.413120605468748,3.5103125,32.83806437459293
+27B@0 PP 2026-11-10,out_norm,"Output: last-token rows, final norm (+ softcap)",critical,0.005625000000000001,0.0,0.00561041467077148
+27B@0 PP 2026-11-10,out_head,Output: LM head (last token),critical,0.42789062499999997,0.0,0.4267811271085471
+27B@0 PP 2026-11-10,q8,q8_1 quantize of GEMM inputs,critical,35.555850097656254,0.696373046875,36.15822303611725
+27B@0 PP 2026-11-10,copy,"Copies H2D/D2H outside AllReduce, exposed",critical,0.0353125,0.028632324218749998,0.06377901865187172
+27B@0 PP 2026-11-10,glue,"Glue: crops, copies, other",critical,0.00421875,0.00671875,0.010909139637611209
+27B@0 PP 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),critical,0.0,0.17429638671875,0.17384444535277052
+27B@0 PP 2026-11-10,ar_overlap,"AllReduce overlapped with compute (info, not in total)",critical,275.9906645507813,0.0,
+27B@32K PP 2026-11-10,run_start,"Run start: bench timer start to the first compute kernel (host prep, input upload)",ROCm0,0.0,87.192556640625,
+27B@32K PP 2026-11-10,start_idle,Ubatch start: host gap before the first compute kernel,ROCm0,0.0,0.0,
+27B@32K PP 2026-11-10,start_input,"Ubatch start: input upload, embedding",ROCm0,0.0,0.0,
+27B@32K PP 2026-11-10,norm,Residual add + norm,ROCm0,17.847728515625,1.0292211914062501,
+27B@32K PP 2026-11-10,hc,Hyper-connection pre/post with its small GEMMs (Flash Next),ROCm0,0.0,0.0,
+27B@32K PP 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm0,0.0,0.0,
+27B@32K PP 2026-11-10,mix_in_attn,"Mixer GEMM: attention input projections (q+gate, k, v)",ROCm0,50.54696875,7.71484375e-05,
+27B@32K PP 2026-11-10,mix_in_recr,"Mixer GEMM: GDN input projections (qkv, z, beta/alpha)",ROCm0,178.89540576171876,0.0,
+27B@32K PP 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm0,8.08650439453125,0.000142578125,
+27B@32K PP 2026-11-10,attn_fa,Attention: flash attention (batched),ROCm0,716.6136391601563,0.000248046875,
+27B@32K PP 2026-11-10,qsa,Attention: QSA indexer and key pooling (Flash Next),ROCm0,0.0,0.0,
+27B@32K PP 2026-11-10,recr_gdn,Recurrent: chunked gated delta net,ROCm0,111.28974072265625,0.0,
+27B@32K PP 2026-11-10,recr,"Recurrent: conv, l2 norms, gates, state copies",ROCm0,29.64832763671875,0.04984375,
+27B@32K PP 2026-11-10,mix_out,Mixer GEMM: output projection (slabs),ROCm0,105.84871044921874,0.0,
+27B@32K PP 2026-11-10,ar_mix,AllReduce after mixer: exposed,ROCm0,84.48043798828125,27.57403076171875,
+27B@32K PP 2026-11-10,ffn_gu,FFN dense GEMM: gate/up,ROCm0,462.95807324218754,0.00012451171875,
+27B@32K PP 2026-11-10,ffn_act,FFN dense: activation,ROCm0,9.91410009765625,0.0,
+27B@32K PP 2026-11-10,ffn_down,FFN dense GEMM: down (slabs),ROCm0,245.1230126953125,0.0,
+27B@32K PP 2026-11-10,moe_router,MoE: router + top-k,ROCm0,0.0,0.0,
+27B@32K PP 2026-11-10,moe_ids,"MoE: ids helper, tile list (repack_tile_off)",ROCm0,0.0,0.0,
+27B@32K PP 2026-11-10,moe_routed,MoE: routed expert GEMM + activation,ROCm0,0.0,0.0,
+27B@32K PP 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm0,0.0,0.0,
+27B@32K PP 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm0,0.0,0.0,
+27B@32K PP 2026-11-10,ar_ffn,AllReduce after FFN: exposed,ROCm0,64.39469287109375,41.18894677734375,
+27B@32K PP 2026-11-10,out_norm,"Output: last-token rows, final norm (+ softcap)",ROCm0,0.008749999999999999,0.0,
+27B@32K PP 2026-11-10,out_head,Output: LM head (last token),ROCm0,0.44367333984375,0.0,
+27B@32K PP 2026-11-10,q8,q8_1 quantize of GEMM inputs,ROCm0,36.6377646484375,1.11442236328125,
+27B@32K PP 2026-11-10,copy,"Copies H2D/D2H outside AllReduce, exposed",ROCm0,0.03585986328125,0.007890625,
+27B@32K PP 2026-11-10,glue,"Glue: crops, copies, other",ROCm0,0.00671875,0.008984375,
+27B@32K PP 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm0,0.0,0.0,
+27B@32K PP 2026-11-10,ar_overlap,"AllReduce overlapped with compute (info, not in total)",ROCm0,207.42388134765625,0.0,
+27B@32K PP 2026-11-10,info_gemm_ms,GEMM kernel time (info),ROCm0,1043.8171411132812,,
+27B@32K PP 2026-11-10,info_gemm_calls,GEMM calls per ubatch (info),ROCm0,877.0,,
+27B@32K PP 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm0,716.6138798828125,,
+27B@32K PP 2026-11-10,run_start,"Run start: bench timer start to the first compute kernel (host prep, input upload)",ROCm1,0.0,86.7885703125,
+27B@32K PP 2026-11-10,start_idle,Ubatch start: host gap before the first compute kernel,ROCm1,0.0,0.0,
+27B@32K PP 2026-11-10,start_input,"Ubatch start: input upload, embedding",ROCm1,0.0,0.0,
+27B@32K PP 2026-11-10,norm,Residual add + norm,ROCm1,16.55259228515625,1.18406396484375,
+27B@32K PP 2026-11-10,hc,Hyper-connection pre/post with its small GEMMs (Flash Next),ROCm1,0.0,0.0,
+27B@32K PP 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm1,0.0,0.0,
+27B@32K PP 2026-11-10,mix_in_attn,"Mixer GEMM: attention input projections (q+gate, k, v)",ROCm1,54.75597265625,0.00011328125,
+27B@32K PP 2026-11-10,mix_in_recr,"Mixer GEMM: GDN input projections (qkv, z, beta/alpha)",ROCm1,187.32253759765624,0.0,
+27B@32K PP 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm1,6.923755371093749,5.908203125e-05,
+27B@32K PP 2026-11-10,attn_fa,Attention: flash attention (batched),ROCm1,713.7273652343749,0.00033349609375,
+27B@32K PP 2026-11-10,qsa,Attention: QSA indexer and key pooling (Flash Next),ROCm1,0.0,0.0,
+27B@32K PP 2026-11-10,recr_gdn,Recurrent: chunked gated delta net,ROCm1,113.43136865234375,0.0,
+27B@32K PP 2026-11-10,recr,"Recurrent: conv, l2 norms, gates, state copies",ROCm1,30.188708007812497,0.016640625,
+27B@32K PP 2026-11-10,mix_out,Mixer GEMM: output projection (slabs),ROCm1,107.16126904296874,0.0,
+27B@32K PP 2026-11-10,ar_mix,AllReduce after mixer: exposed,ROCm1,98.68166796874999,8.47628515625,
+27B@32K PP 2026-11-10,ffn_gu,FFN dense GEMM: gate/up,ROCm1,484.96221923828125,0.00018115234375,
+27B@32K PP 2026-11-10,ffn_act,FFN dense: activation,ROCm1,10.5818818359375,0.0,
+27B@32K PP 2026-11-10,ffn_down,FFN dense GEMM: down (slabs),ROCm1,276.42389990234375,0.005530273437499999,
+27B@32K PP 2026-11-10,moe_router,MoE: router + top-k,ROCm1,0.0,0.0,
+27B@32K PP 2026-11-10,moe_ids,"MoE: ids helper, tile list (repack_tile_off)",ROCm1,0.0,0.0,
+27B@32K PP 2026-11-10,moe_routed,MoE: routed expert GEMM + activation,ROCm1,0.0,0.0,
+27B@32K PP 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm1,0.0,0.0,
+27B@32K PP 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm1,0.0,0.0,
+27B@32K PP 2026-11-10,ar_ffn,AllReduce after FFN: exposed,ROCm1,39.22727294921875,7.0868681640625,
+27B@32K PP 2026-11-10,out_norm,"Output: last-token rows, final norm (+ softcap)",ROCm1,0.006015624999999999,0.0,
+27B@32K PP 2026-11-10,out_head,Output: LM head (last token),ROCm1,0.42882861328125005,0.0,
+27B@32K PP 2026-11-10,q8,q8_1 quantize of GEMM inputs,ROCm1,35.68305224609375,1.254681640625,
+27B@32K PP 2026-11-10,copy,"Copies H2D/D2H outside AllReduce, exposed",ROCm1,0.0353125,0.02291015625,
+27B@32K PP 2026-11-10,glue,"Glue: crops, copies, other",ROCm1,0.00671875,0.009921875,
+27B@32K PP 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm1,0.0,0.0,
+27B@32K PP 2026-11-10,ar_overlap,"AllReduce overlapped with compute (info, not in total)",ROCm1,251.20574951171875,0.0,
+27B@32K PP 2026-11-10,info_gemm_ms,GEMM kernel time (info),ROCm1,1111.0555278320314,,
+27B@32K PP 2026-11-10,info_gemm_calls,GEMM calls per ubatch (info),ROCm1,877.0,,
+27B@32K PP 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm1,713.7276181640625,,
+27B@32K PP 2026-11-10,run_start,"Run start: bench timer start to the first compute kernel (host prep, input upload)",critical,0.0,86.7885703125,83.11550982244407
+27B@32K PP 2026-11-10,start_idle,Ubatch start: host gap before the first compute kernel,critical,0.0,0.0,0.0
+27B@32K PP 2026-11-10,start_input,"Ubatch start: input upload, embedding",critical,0.0,0.0,0.0
+27B@32K PP 2026-11-10,norm,Residual add + norm,critical,17.19823779296875,1.15625341796875,17.577693572271208
+27B@32K PP 2026-11-10,hc,Hyper-connection pre/post with its small GEMMs (Flash Next),critical,0.0,0.0,0.0
+27B@32K PP 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),critical,0.0,0.0,0.0
+27B@32K PP 2026-11-10,mix_in_attn,"Mixer GEMM: attention input projections (q+gate, k, v)",critical,51.395458496093745,0.000158203125,49.22045459687945
+27B@32K PP 2026-11-10,mix_in_recr,"Mixer GEMM: GDN input projections (qkv, z, beta/alpha)",critical,193.04756640625,0.0,184.8774192737984
+27B@32K PP 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",critical,7.931579101562501,0.000142578125,7.59603584669269
+27B@32K PP 2026-11-10,attn_fa,Attention: flash attention (batched),critical,725.548505859375,0.00027197265624999997,694.8421474558495
+27B@32K PP 2026-11-10,qsa,Attention: QSA indexer and key pooling (Flash Next),critical,0.0,0.0,0.0
+27B@32K PP 2026-11-10,recr_gdn,Recurrent: chunked gated delta net,critical,118.79461328125001,0.0,113.76699502571587
+27B@32K PP 2026-11-10,recr,"Recurrent: conv, l2 norms, gates, state copies",critical,30.76764306640625,0.04,29.503803907269134
+27B@32K PP 2026-11-10,mix_out,Mixer GEMM: output projection (slabs),critical,115.01049169921875,0.0,110.14302480258452
+27B@32K PP 2026-11-10,ar_mix,AllReduce after mixer: exposed,critical,62.49576171875,3.963431640625,63.64651149988193
+27B@32K PP 2026-11-10,ffn_gu,FFN dense GEMM: gate/up,critical,496.7645581054688,0.00018115234375,475.7406927727651
+27B@32K PP 2026-11-10,ffn_act,FFN dense: activation,critical,10.54439013671875,0.0,10.098131111325646
+27B@32K PP 2026-11-10,ffn_down,FFN dense GEMM: down (slabs),critical,272.591806640625,0.0003740234375,261.0555513004244
+27B@32K PP 2026-11-10,moe_router,MoE: router + top-k,critical,0.0,0.0,0.0
+27B@32K PP 2026-11-10,moe_ids,"MoE: ids helper, tile list (repack_tile_off)",critical,0.0,0.0,0.0
+27B@32K PP 2026-11-10,moe_routed,MoE: routed expert GEMM + activation,critical,0.0,0.0,0.0
+27B@32K PP 2026-11-10,moe_shared,MoE: shared expert + gate,critical,0.0,0.0,0.0
+27B@32K PP 2026-11-10,moe_reduce,MoE: weighted reduce + combine,critical,0.0,0.0,0.0
+27B@32K PP 2026-11-10,ar_ffn,AllReduce after FFN: exposed,critical,34.75880615234375,2.658927734375,35.83414287384849
+27B@32K PP 2026-11-10,out_norm,"Output: last-token rows, final norm (+ softcap)",critical,0.008749999999999999,0.0,0.008379683042683323
+27B@32K PP 2026-11-10,out_head,Output: LM head (last token),critical,0.44367333984375,0.0,0.4248962242719254
+27B@32K PP 2026-11-10,q8,q8_1 quantize of GEMM inputs,critical,37.065391601562496,1.06296484375,36.514690508590924
+27B@32K PP 2026-11-10,copy,"Copies H2D/D2H outside AllReduce, exposed",critical,0.03585986328125,0.007890625,0.04189888282965784
+27B@32K PP 2026-11-10,glue,"Glue: crops, copies, other",critical,0.00671875,0.009921875,0.01593636150081739
+27B@32K PP 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),critical,0.0,10.847697265625,10.388601694733723
+27B@32K PP 2026-11-10,ar_overlap,"AllReduce overlapped with compute (info, not in total)",critical,275.7286743164062,0.0,
+FN@0 PP 2026-11-10,run_start,"Run start: bench timer start to the first compute kernel (host prep, input upload)",ROCm0,0.0,51.39850048828125,
+FN@0 PP 2026-11-10,start_idle,Ubatch start: host gap before the first compute kernel,ROCm0,0.0,113.8958115234375,
+FN@0 PP 2026-11-10,start_input,"Ubatch start: input upload, embedding",ROCm0,2.5450048828125,20.73917578125,
+FN@0 PP 2026-11-10,norm,Residual add + norm,ROCm0,0.0,0.0,
+FN@0 PP 2026-11-10,hc,Hyper-connection pre/post with its small GEMMs (Flash Next),ROCm0,249.48198632812498,2.9067177734375,
+FN@0 PP 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm0,8.240950195312498,0.008203125,
+FN@0 PP 2026-11-10,mix_in_attn,"Mixer GEMM: attention input projections (q+gate, k, v)",ROCm0,31.8985234375,4.443359375e-05,
+FN@0 PP 2026-11-10,mix_in_recr,"Mixer GEMM: GDN input projections (qkv, z, beta/alpha)",ROCm0,104.37489404296875,0.0043388671875,
+FN@0 PP 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm0,5.360324218750001,0.00453125,
+FN@0 PP 2026-11-10,attn_fa,Attention: flash attention (batched),ROCm0,18.49183251953125,0.0,
+FN@0 PP 2026-11-10,qsa,Attention: QSA indexer and key pooling (Flash Next),ROCm0,19.06510986328125,0.063125,
+FN@0 PP 2026-11-10,recr_gdn,Recurrent: chunked gated delta net,ROCm0,62.84008203124999,0.0044150390625,
+FN@0 PP 2026-11-10,recr,"Recurrent: conv, l2 norms, gates, state copies",ROCm0,19.3351142578125,0.15609423828125,
+FN@0 PP 2026-11-10,mix_out,Mixer GEMM: output projection (slabs),ROCm0,69.5516884765625,0.0,
+FN@0 PP 2026-11-10,ar_mix,AllReduce after mixer: exposed,ROCm0,60.060671875,46.084806640625004,
+FN@0 PP 2026-11-10,ffn_gu,FFN dense GEMM: gate/up,ROCm0,0.0,0.0,
+FN@0 PP 2026-11-10,ffn_act,FFN dense: activation,ROCm0,0.0,0.0,
+FN@0 PP 2026-11-10,ffn_down,FFN dense GEMM: down (slabs),ROCm0,0.0,0.0,
+FN@0 PP 2026-11-10,moe_router,MoE: router + top-k,ROCm0,18.9786181640625,0.013406738281249999,
+FN@0 PP 2026-11-10,moe_ids,"MoE: ids helper, tile list (repack_tile_off)",ROCm0,29.904746582031247,0.0,
+FN@0 PP 2026-11-10,moe_routed,MoE: routed expert GEMM + activation,ROCm0,451.8191499023437,0.00564501953125,
+FN@0 PP 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm0,46.66218701171875,0.04734423828125,
+FN@0 PP 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm0,20.1927724609375,2.5390625e-05,
+FN@0 PP 2026-11-10,ar_ffn,AllReduce after FFN: exposed,ROCm0,59.27783349609375,108.8581376953125,
+FN@0 PP 2026-11-10,out_norm,"Output: last-token rows, final norm (+ softcap)",ROCm0,0.26890722656250005,0.01328125,
+FN@0 PP 2026-11-10,out_head,Output: LM head (last token),ROCm0,0.48929785156249994,0.0,
+FN@0 PP 2026-11-10,q8,q8_1 quantize of GEMM inputs,ROCm0,34.38121093749999,0.92841796875,
+FN@0 PP 2026-11-10,copy,"Copies H2D/D2H outside AllReduce, exposed",ROCm0,0.1759375,0.125,
+FN@0 PP 2026-11-10,glue,"Glue: crops, copies, other",ROCm0,0.032265625,1.62109716796875,
+FN@0 PP 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm0,0.0,0.0,
+FN@0 PP 2026-11-10,ar_overlap,"AllReduce overlapped with compute (info, not in total)",ROCm0,36.71917529296876,0.0,
+FN@0 PP 2026-11-10,info_gemm_ms,GEMM kernel time (info),ROCm0,915.197796875,,
+FN@0 PP 2026-11-10,info_gemm_calls,GEMM calls per ubatch (info),ROCm0,1135.0,,
+FN@0 PP 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm0,18.49183251953125,,
+FN@0 PP 2026-11-10,run_start,"Run start: bench timer start to the first compute kernel (host prep, input upload)",ROCm1,0.0,51.4262392578125,
+FN@0 PP 2026-11-10,start_idle,Ubatch start: host gap before the first compute kernel,ROCm1,0.0,114.13105810546875,
+FN@0 PP 2026-11-10,start_input,"Ubatch start: input upload, embedding",ROCm1,1.376640625,20.7461298828125,
+FN@0 PP 2026-11-10,norm,Residual add + norm,ROCm1,0.0,0.0,
+FN@0 PP 2026-11-10,hc,Hyper-connection pre/post with its small GEMMs (Flash Next),ROCm1,254.09494873046873,3.5557939453125,
+FN@0 PP 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm1,8.660937500000001,0.005,
+FN@0 PP 2026-11-10,mix_in_attn,"Mixer GEMM: attention input projections (q+gate, k, v)",ROCm1,35.488828125000005,1.416015625e-05,
+FN@0 PP 2026-11-10,mix_in_recr,"Mixer GEMM: GDN input projections (qkv, z, beta/alpha)",ROCm1,124.05170556640626,0.0057275390625,
+FN@0 PP 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm1,6.3834365234375,0.005234375,
+FN@0 PP 2026-11-10,attn_fa,Attention: flash attention (batched),ROCm1,20.074513671875,0.0,
+FN@0 PP 2026-11-10,qsa,Attention: QSA indexer and key pooling (Flash Next),ROCm1,22.282993652343748,0.00874169921875,
+FN@0 PP 2026-11-10,recr_gdn,Recurrent: chunked gated delta net,ROCm1,79.91491552734375,0.005763671875,
+FN@0 PP 2026-11-10,recr,"Recurrent: conv, l2 norms, gates, state copies",ROCm1,21.4960126953125,0.1337587890625,
+FN@0 PP 2026-11-10,mix_out,Mixer GEMM: output projection (slabs),ROCm1,75.666037109375,0.0,
+FN@0 PP 2026-11-10,ar_mix,AllReduce after mixer: exposed,ROCm1,24.78540087890625,8.974796386718749,
+FN@0 PP 2026-11-10,ffn_gu,FFN dense GEMM: gate/up,ROCm1,0.0,0.0,
+FN@0 PP 2026-11-10,ffn_act,FFN dense: activation,ROCm1,0.0,0.0,
+FN@0 PP 2026-11-10,ffn_down,FFN dense GEMM: down (slabs),ROCm1,0.0,0.0,
+FN@0 PP 2026-11-10,moe_router,MoE: router + top-k,ROCm1,24.8437490234375,0.01609326171875,
+FN@0 PP 2026-11-10,moe_ids,"MoE: ids helper, tile list (repack_tile_off)",ROCm1,30.3019462890625,6.201171875e-05,
+FN@0 PP 2026-11-10,moe_routed,MoE: routed expert GEMM + activation,ROCm1,491.525990234375,0.00791943359375,
+FN@0 PP 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm1,51.47730078125,0.04794873046875,
+FN@0 PP 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm1,20.962812500000002,0.0,
+FN@0 PP 2026-11-10,ar_ffn,AllReduce after FFN: exposed,ROCm1,58.55812353515625,68.15838818359376,
+FN@0 PP 2026-11-10,out_norm,"Output: last-token rows, final norm (+ softcap)",ROCm1,0.2768740234375,0.01511328125,
+FN@0 PP 2026-11-10,out_head,Output: LM head (last token),ROCm1,0.52171875,0.0,
+FN@0 PP 2026-11-10,q8,q8_1 quantize of GEMM inputs,ROCm1,36.4685556640625,0.69862841796875,
+FN@0 PP 2026-11-10,copy,"Copies H2D/D2H outside AllReduce, exposed",ROCm1,1.276640625,1.33552783203125,
+FN@0 PP 2026-11-10,glue,"Glue: crops, copies, other",ROCm1,0.0396875,0.49952001953125,
+FN@0 PP 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm1,0.0,0.0,
+FN@0 PP 2026-11-10,ar_overlap,"AllReduce overlapped with compute (info, not in total)",ROCm1,66.36912548828126,0.0,
+FN@0 PP 2026-11-10,info_gemm_ms,GEMM kernel time (info),ROCm1,997.5153505859375,,
+FN@0 PP 2026-11-10,info_gemm_calls,GEMM calls per ubatch (info),ROCm1,1135.0,,
+FN@0 PP 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm1,20.0745302734375,,
+FN@0 PP 2026-11-10,run_start,"Run start: bench timer start to the first compute kernel (host prep, input upload)",critical,0.0,51.4262392578125,52.37317397416895
+FN@0 PP 2026-11-10,start_idle,Ubatch start: host gap before the first compute kernel,critical,0.0,114.13105810546875,116.23260515021295
+FN@0 PP 2026-11-10,start_input,"Ubatch start: input upload, embedding",critical,1.376640625,20.7461298828125,22.53012713583293
+FN@0 PP 2026-11-10,norm,Residual add + norm,critical,0.0,0.0,0.0
+FN@0 PP 2026-11-10,hc,Hyper-connection pre/post with its small GEMMs (Flash Next),critical,252.98905224609373,3.37308935546875,261.0826542298533
+FN@0 PP 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),critical,8.660937500000001,0.005,8.8255073458016
+FN@0 PP 2026-11-10,mix_in_attn,"Mixer GEMM: attention input projections (q+gate, k, v)",critical,35.488828125000005,1.416015625e-05,36.142314467608486
+FN@0 PP 2026-11-10,mix_in_recr,"Mixer GEMM: GDN input projections (qkv, z, beta/alpha)",critical,124.05170556640626,0.0057275390625,126.34175900456297
+FN@0 PP 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",critical,6.3834365234375,0.005234375,6.506308399301178
+FN@0 PP 2026-11-10,attn_fa,Attention: flash attention (batched),critical,20.074513671875,0.0,20.444154815855462
+FN@0 PP 2026-11-10,qsa,Attention: QSA indexer and key pooling (Flash Next),critical,22.282993652343748,0.00874169921875,22.702203206044356
+FN@0 PP 2026-11-10,recr_gdn,Recurrent: chunked gated delta net,critical,79.91491552734375,0.005763671875,81.39229498876009
+FN@0 PP 2026-11-10,recr,"Recurrent: conv, l2 norms, gates, state copies",critical,21.4960126953125,0.1337587890625,22.02805029731192
+FN@0 PP 2026-11-10,mix_out,Mixer GEMM: output projection (slabs),critical,75.666037109375,0.0,77.05931024040797
+FN@0 PP 2026-11-10,ar_mix,AllReduce after mixer: exposed,critical,24.78540087890625,8.974796386718749,34.381839121674304
+FN@0 PP 2026-11-10,ffn_gu,FFN dense GEMM: gate/up,critical,0.0,0.0,0.0
+FN@0 PP 2026-11-10,ffn_act,FFN dense: activation,critical,0.0,0.0,0.0
+FN@0 PP 2026-11-10,ffn_down,FFN dense GEMM: down (slabs),critical,0.0,0.0,0.0
+FN@0 PP 2026-11-10,moe_router,MoE: router + top-k,critical,21.98437939453125,0.01338916015625,22.40282346493244
+FN@0 PP 2026-11-10,moe_ids,"MoE: ids helper, tile list (repack_tile_off)",critical,30.121587890624998,0.0,30.676230378527354
+FN@0 PP 2026-11-10,moe_routed,MoE: routed expert GEMM + activation,critical,559.8166650390625,0.00772705078125,570.1326930580598
+FN@0 PP 2026-11-10,moe_shared,MoE: shared expert + gate,critical,49.60574072265625,0.05484423828125,50.575007882246815
+FN@0 PP 2026-11-10,moe_reduce,MoE: weighted reduce + combine,critical,20.77673486328125,0.0,21.15930632521419
+FN@0 PP 2026-11-10,ar_ffn,AllReduce after FFN: exposed,critical,40.93003076171875,10.0305947265625,51.89898664668079
+FN@0 PP 2026-11-10,out_norm,"Output: last-token rows, final norm (+ softcap)",critical,0.275,0.013316406250000001,0.2936253072762749
+FN@0 PP 2026-11-10,out_head,Output: LM head (last token),critical,0.516796875,0.0,0.5263128907403049
+FN@0 PP 2026-11-10,q8,q8_1 quantize of GEMM inputs,critical,36.21411181640625,0.696640625,37.59040690181474
+FN@0 PP 2026-11-10,copy,"Copies H2D/D2H outside AllReduce, exposed",critical,1.276640625,1.33552783203125,2.6602675020447033
+FN@0 PP 2026-11-10,glue,"Glue: crops, copies, other",critical,0.0396875,0.49952001953125,0.5491361926548057
+FN@0 PP 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),critical,0.0,14.112265625000001,14.372121185889108
+FN@0 PP 2026-11-10,ar_overlap,"AllReduce overlapped with compute (info, not in total)",critical,84.25478027343749,0.0,
+G4@0 PP 2026-11-10,run_start,"Run start: bench timer start to the first compute kernel (host prep, input upload)",ROCm0,0.0,21.64116357421875,
+G4@0 PP 2026-11-10,start_idle,Ubatch start: host gap before the first compute kernel,ROCm0,0.0,0.0,
+G4@0 PP 2026-11-10,start_input,"Ubatch start: input upload, embedding",ROCm0,0.077578125,0.0,
+G4@0 PP 2026-11-10,norm,Residual add + norm,ROCm0,22.69489208984375,0.881798828125,
+G4@0 PP 2026-11-10,hc,Hyper-connection pre/post with its small GEMMs (Flash Next),ROCm0,0.0,0.0,
+G4@0 PP 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm0,0.0,0.0,
+G4@0 PP 2026-11-10,mix_in_attn,"Mixer GEMM: attention input projections (q+gate, k, v)",ROCm0,196.92119970703126,0.00016015625,
+G4@0 PP 2026-11-10,mix_in_recr,"Mixer GEMM: GDN input projections (qkv, z, beta/alpha)",ROCm0,0.0,0.0,
+G4@0 PP 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm0,34.93179443359375,0.00011962890625,
+G4@0 PP 2026-11-10,attn_fa,Attention: flash attention (batched),ROCm0,170.31208154296877,0.00016162109375,
+G4@0 PP 2026-11-10,qsa,Attention: QSA indexer and key pooling (Flash Next),ROCm0,0.0,0.0,
+G4@0 PP 2026-11-10,recr_gdn,Recurrent: chunked gated delta net,ROCm0,0.0,0.0,
+G4@0 PP 2026-11-10,recr,"Recurrent: conv, l2 norms, gates, state copies",ROCm0,0.0,0.0,
+G4@0 PP 2026-11-10,mix_out,Mixer GEMM: output projection (slabs),ROCm0,124.061708984375,0.0,
+G4@0 PP 2026-11-10,ar_mix,AllReduce after mixer: exposed,ROCm0,102.84287939453125,28.41175927734375,
+G4@0 PP 2026-11-10,ffn_gu,FFN dense GEMM: gate/up,ROCm0,484.8653999023437,0.00048974609375,
+G4@0 PP 2026-11-10,ffn_act,FFN dense: activation,ROCm0,12.18252099609375,0.004765625,
+G4@0 PP 2026-11-10,ffn_down,FFN dense GEMM: down (slabs),ROCm0,277.58161425781253,2.734375e-05,
+G4@0 PP 2026-11-10,moe_router,MoE: router + top-k,ROCm0,0.0,0.0,
+G4@0 PP 2026-11-10,moe_ids,"MoE: ids helper, tile list (repack_tile_off)",ROCm0,0.0,0.0,
+G4@0 PP 2026-11-10,moe_routed,MoE: routed expert GEMM + activation,ROCm0,0.0,0.0,
+G4@0 PP 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm0,0.0,0.0,
+G4@0 PP 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm0,0.0,0.0,
+G4@0 PP 2026-11-10,ar_ffn,AllReduce after FFN: exposed,ROCm0,75.625185546875,85.88596142578126,
+G4@0 PP 2026-11-10,out_norm,"Output: last-token rows, final norm (+ softcap)",ROCm0,0.00984375,0.0,
+G4@0 PP 2026-11-10,out_head,Output: LM head (last token),ROCm0,0.4803916015625,0.0,
+G4@0 PP 2026-11-10,q8,q8_1 quantize of GEMM inputs,ROCm0,26.93872265625,1.66250732421875,
+G4@0 PP 2026-11-10,copy,"Copies H2D/D2H outside AllReduce, exposed",ROCm0,0.037265625,0.006796875,
+G4@0 PP 2026-11-10,glue,"Glue: crops, copies, other",ROCm0,0.00390625,0.007265625,
+G4@0 PP 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm0,0.0,0.0,
+G4@0 PP 2026-11-10,ar_overlap,"AllReduce overlapped with compute (info, not in total)",ROCm0,195.89025732421874,0.0,
+G4@0 PP 2026-11-10,info_gemm_ms,GEMM kernel time (info),ROCm0,1083.91050390625,,
+G4@0 PP 2026-11-10,info_gemm_calls,GEMM calls per ubatch (info),ROCm0,767.0,,
+G4@0 PP 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm0,170.31208154296877,,
+G4@0 PP 2026-11-10,run_start,"Run start: bench timer start to the first compute kernel (host prep, input upload)",ROCm1,0.0,21.58694580078125,
+G4@0 PP 2026-11-10,start_idle,Ubatch start: host gap before the first compute kernel,ROCm1,0.0,0.0,
+G4@0 PP 2026-11-10,start_input,"Ubatch start: input upload, embedding",ROCm1,0.08234375000000001,0.0,
+G4@0 PP 2026-11-10,norm,Residual add + norm,ROCm1,24.55180029296875,1.09281298828125,
+G4@0 PP 2026-11-10,hc,Hyper-connection pre/post with its small GEMMs (Flash Next),ROCm1,0.0,0.0,
+G4@0 PP 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm1,0.0,0.0,
+G4@0 PP 2026-11-10,mix_in_attn,"Mixer GEMM: attention input projections (q+gate, k, v)",ROCm1,241.07322900390625,0.00078564453125,
+G4@0 PP 2026-11-10,mix_in_recr,"Mixer GEMM: GDN input projections (qkv, z, beta/alpha)",ROCm1,0.0,0.0,
+G4@0 PP 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm1,40.623284179687495,0.00515625,
+G4@0 PP 2026-11-10,attn_fa,Attention: flash attention (batched),ROCm1,204.2639873046875,0.0059375,
+G4@0 PP 2026-11-10,qsa,Attention: QSA indexer and key pooling (Flash Next),ROCm1,0.0,0.0,
+G4@0 PP 2026-11-10,recr_gdn,Recurrent: chunked gated delta net,ROCm1,0.0,0.0,
+G4@0 PP 2026-11-10,recr,"Recurrent: conv, l2 norms, gates, state copies",ROCm1,0.0,0.0,
+G4@0 PP 2026-11-10,mix_out,Mixer GEMM: output projection (slabs),ROCm1,136.72905859375,0.00046435546875000003,
+G4@0 PP 2026-11-10,ar_mix,AllReduce after mixer: exposed,ROCm1,29.15948583984375,3.39539892578125,
+G4@0 PP 2026-11-10,ffn_gu,FFN dense GEMM: gate/up,ROCm1,579.965916015625,0.000908203125,
+G4@0 PP 2026-11-10,ffn_act,FFN dense: activation,ROCm1,13.73132861328125,0.0,
+G4@0 PP 2026-11-10,ffn_down,FFN dense GEMM: down (slabs),ROCm1,307.89380224609374,0.0,
+G4@0 PP 2026-11-10,moe_router,MoE: router + top-k,ROCm1,0.0,0.0,
+G4@0 PP 2026-11-10,moe_ids,"MoE: ids helper, tile list (repack_tile_off)",ROCm1,0.0,0.0,
+G4@0 PP 2026-11-10,moe_routed,MoE: routed expert GEMM + activation,ROCm1,0.0,0.0,
+G4@0 PP 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm1,0.0,0.0,
+G4@0 PP 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm1,0.0,0.0,
+G4@0 PP 2026-11-10,ar_ffn,AllReduce after FFN: exposed,ROCm1,29.118568847656253,3.35640625,
+G4@0 PP 2026-11-10,out_norm,"Output: last-token rows, final norm (+ softcap)",ROCm1,0.01234375,0.0,
+G4@0 PP 2026-11-10,out_head,Output: LM head (last token),ROCm1,0.48335937500000004,0.0,
+G4@0 PP 2026-11-10,q8,q8_1 quantize of GEMM inputs,ROCm1,29.77117529296875,1.09046728515625,
+G4@0 PP 2026-11-10,copy,"Copies H2D/D2H outside AllReduce, exposed",ROCm1,0.037265625,0.02327685546875,
+G4@0 PP 2026-11-10,glue,"Glue: crops, copies, other",ROCm1,0.0043749999999999995,0.010078124999999999,
+G4@0 PP 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm1,0.0,0.0,
+G4@0 PP 2026-11-10,ar_overlap,"AllReduce overlapped with compute (info, not in total)",ROCm1,287.35197998046874,0.0,
+G4@0 PP 2026-11-10,info_gemm_ms,GEMM kernel time (info),ROCm1,1266.14655078125,,
+G4@0 PP 2026-11-10,info_gemm_calls,GEMM calls per ubatch (info),ROCm1,767.0,,
+G4@0 PP 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm1,204.264630859375,,
+G4@0 PP 2026-11-10,run_start,"Run start: bench timer start to the first compute kernel (host prep, input upload)",critical,0.0,21.58694580078125,21.481056954582847
+G4@0 PP 2026-11-10,start_idle,Ubatch start: host gap before the first compute kernel,critical,0.0,0.0,0.0
+G4@0 PP 2026-11-10,start_input,"Ubatch start: input upload, embedding",critical,0.08234375000000001,0.0,0.08193983530268167
+G4@0 PP 2026-11-10,norm,Residual add + norm,critical,24.55156591796875,1.09281298828125,25.51858743399091
+G4@0 PP 2026-11-10,hc,Hyper-connection pre/post with its small GEMMs (Flash Next),critical,0.0,0.0,0.0
+G4@0 PP 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),critical,0.0,0.0,0.0
+G4@0 PP 2026-11-10,mix_in_attn,"Mixer GEMM: attention input projections (q+gate, k, v)",critical,241.07322900390625,0.00078564453125,239.8914921417744
+G4@0 PP 2026-11-10,mix_in_recr,"Mixer GEMM: GDN input projections (qkv, z, beta/alpha)",critical,0.0,0.0,0.0
+G4@0 PP 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",critical,40.623284179687495,0.00515625,40.42914875037154
+G4@0 PP 2026-11-10,attn_fa,Attention: flash attention (batched),critical,204.2639873046875,0.0059375,203.26793467369728
+G4@0 PP 2026-11-10,qsa,Attention: QSA indexer and key pooling (Flash Next),critical,0.0,0.0,0.0
+G4@0 PP 2026-11-10,recr_gdn,Recurrent: chunked gated delta net,critical,0.0,0.0,0.0
+G4@0 PP 2026-11-10,recr,"Recurrent: conv, l2 norms, gates, state copies",critical,0.0,0.0,0.0
+G4@0 PP 2026-11-10,mix_out,Mixer GEMM: output projection (slabs),critical,136.72905859375,0.00046435546875000003,136.05883374844137
+G4@0 PP 2026-11-10,ar_mix,AllReduce after mixer: exposed,critical,29.15948583984375,3.39539892578125,32.39519570086488
+G4@0 PP 2026-11-10,ffn_gu,FFN dense GEMM: gate/up,critical,579.965916015625,0.000908203125,577.1219559165536
+G4@0 PP 2026-11-10,ffn_act,FFN dense: activation,critical,13.73132861328125,0.0,13.663973344173247
+G4@0 PP 2026-11-10,ffn_down,FFN dense GEMM: down (slabs),critical,307.89302148437497,0.0,306.38273665305155
+G4@0 PP 2026-11-10,moe_router,MoE: router + top-k,critical,0.0,0.0,0.0
+G4@0 PP 2026-11-10,moe_ids,"MoE: ids helper, tile list (repack_tile_off)",critical,0.0,0.0,0.0
+G4@0 PP 2026-11-10,moe_routed,MoE: routed expert GEMM + activation,critical,0.0,0.0,0.0
+G4@0 PP 2026-11-10,moe_shared,MoE: shared expert + gate,critical,0.0,0.0,0.0
+G4@0 PP 2026-11-10,moe_reduce,MoE: weighted reduce + combine,critical,0.0,0.0,0.0
+G4@0 PP 2026-11-10,ar_ffn,AllReduce after FFN: exposed,critical,28.95083447265625,3.35375,32.146123187382415
+G4@0 PP 2026-11-10,out_norm,"Output: last-token rows, final norm (+ softcap)",critical,0.01234375,0.0,0.012283201117479796
+G4@0 PP 2026-11-10,out_head,Output: LM head (last token),critical,0.48335937500000004,0.0,0.4809883880623259
+G4@0 PP 2026-11-10,q8,q8_1 quantize of GEMM inputs,critical,29.76867529296875,1.09046728515625,30.707771511906294
+G4@0 PP 2026-11-10,copy,"Copies H2D/D2H outside AllReduce, exposed",critical,0.037265625,0.02327685546875,0.06024550592394925
+G4@0 PP 2026-11-10,glue,"Glue: crops, copies, other",critical,0.00390625,0.007265625,0.011117074429111461
+G4@0 PP 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),critical,0.0,0.17718701171875,0.1763178693951721
+G4@0 PP 2026-11-10,ar_overlap,"AllReduce overlapped with compute (info, not in total)",critical,287.35197998046874,0.0,
+FN@32K PP 2026-11-10,run_start,"Run start: bench timer start to the first compute kernel (host prep, input upload)",ROCm0,0.0,58.72336083984375,
+FN@32K PP 2026-11-10,start_idle,Ubatch start: host gap before the first compute kernel,ROCm0,0.0,131.8121396484375,
+FN@32K PP 2026-11-10,start_input,"Ubatch start: input upload, embedding",ROCm0,2.51953759765625,19.944289062499998,
+FN@32K PP 2026-11-10,norm,Residual add + norm,ROCm0,0.0,0.0,
+FN@32K PP 2026-11-10,hc,Hyper-connection pre/post with its small GEMMs (Flash Next),ROCm0,268.10654296875,3.06901025390625,
+FN@32K PP 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm0,8.26502880859375,0.005546875,
+FN@32K PP 2026-11-10,mix_in_attn,"Mixer GEMM: attention input projections (q+gate, k, v)",ROCm0,32.059185546875,0.00011279296875,
+FN@32K PP 2026-11-10,mix_in_recr,"Mixer GEMM: GDN input projections (qkv, z, beta/alpha)",ROCm0,113.45986083984374,0.00011718750000000001,
+FN@32K PP 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm0,6.0447041015625,4.3945312500000005e-05,
+FN@32K PP 2026-11-10,attn_fa,Attention: flash attention (batched),ROCm0,437.9236611328125,0.00034472656250000004,
+FN@32K PP 2026-11-10,qsa,Attention: QSA indexer and key pooling (Flash Next),ROCm0,66.05531298828126,0.07062548828125,
+FN@32K PP 2026-11-10,recr_gdn,Recurrent: chunked gated delta net,ROCm0,68.35836865234376,9.27734375e-06,
+FN@32K PP 2026-11-10,recr,"Recurrent: conv, l2 norms, gates, state copies",ROCm0,20.024519042968752,0.215939453125,
+FN@32K PP 2026-11-10,mix_out,Mixer GEMM: output projection (slabs),ROCm0,74.8239248046875,0.0,
+FN@32K PP 2026-11-10,ar_mix,AllReduce after mixer: exposed,ROCm0,54.616437988281255,125.65035546875,
+FN@32K PP 2026-11-10,ffn_gu,FFN dense GEMM: gate/up,ROCm0,0.0,0.0,
+FN@32K PP 2026-11-10,ffn_act,FFN dense: activation,ROCm0,0.0,0.0,
+FN@32K PP 2026-11-10,ffn_down,FFN dense GEMM: down (slabs),ROCm0,0.0,0.0,
+FN@32K PP 2026-11-10,moe_router,MoE: router + top-k,ROCm0,22.94171923828125,0.01870947265625,
+FN@32K PP 2026-11-10,moe_ids,"MoE: ids helper, tile list (repack_tile_off)",ROCm0,32.1359853515625,0.0,
+FN@32K PP 2026-11-10,moe_routed,MoE: routed expert GEMM + activation,ROCm0,489.9650678710937,0.00060107421875,
+FN@32K PP 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm0,50.4990087890625,4.248046875e-05,
+FN@32K PP 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm0,21.38514697265625,0.02109375,
+FN@32K PP 2026-11-10,ar_ffn,AllReduce after FFN: exposed,ROCm0,59.87279296875,96.84572802734374,
+FN@32K PP 2026-11-10,out_norm,"Output: last-token rows, final norm (+ softcap)",ROCm0,0.31632812499999996,0.014921875,
+FN@32K PP 2026-11-10,out_head,Output: LM head (last token),ROCm0,0.572345703125,0.0,
+FN@32K PP 2026-11-10,q8,q8_1 quantize of GEMM inputs,ROCm0,36.67042138671875,0.96171484375,
+FN@32K PP 2026-11-10,copy,"Copies H2D/D2H outside AllReduce, exposed",ROCm0,2.04836669921875,8.145576171875,
+FN@32K PP 2026-11-10,glue,"Glue: crops, copies, other",ROCm0,0.032421875,1.5493818359375,
+FN@32K PP 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm0,0.0,0.0,
+FN@32K PP 2026-11-10,ar_overlap,"AllReduce overlapped with compute (info, not in total)",ROCm0,40.7702744140625,0.0,
+FN@32K PP 2026-11-10,info_gemm_ms,GEMM kernel time (info),ROCm0,987.9385625,,
+FN@32K PP 2026-11-10,info_gemm_calls,GEMM calls per ubatch (info),ROCm0,1135.0,,
+FN@32K PP 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm0,437.924208984375,,
+FN@32K PP 2026-11-10,run_start,"Run start: bench timer start to the first compute kernel (host prep, input upload)",ROCm1,0.0,58.80384619140625,
+FN@32K PP 2026-11-10,start_idle,Ubatch start: host gap before the first compute kernel,ROCm1,0.0,132.17006005859375,
+FN@32K PP 2026-11-10,start_input,"Ubatch start: input upload, embedding",ROCm1,1.3671875,20.07999609375,
+FN@32K PP 2026-11-10,norm,Residual add + norm,ROCm1,0.0,0.0,
+FN@32K PP 2026-11-10,hc,Hyper-connection pre/post with its small GEMMs (Flash Next),ROCm1,256.601359375,3.60513427734375,
+FN@32K PP 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),ROCm1,8.780943359375,0.00234375,
+FN@32K PP 2026-11-10,mix_in_attn,"Mixer GEMM: attention input projections (q+gate, k, v)",ROCm1,35.7913056640625,5.46875e-05,
+FN@32K PP 2026-11-10,mix_in_recr,"Mixer GEMM: GDN input projections (qkv, z, beta/alpha)",ROCm1,126.2265263671875,5.322265625000001e-05,
+FN@32K PP 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",ROCm1,6.604848632812501,0.0,
+FN@32K PP 2026-11-10,attn_fa,Attention: flash attention (batched),ROCm1,532.933423828125,0.00048046875000000005,
+FN@32K PP 2026-11-10,qsa,Attention: QSA indexer and key pooling (Flash Next),ROCm1,73.25020703125,0.058751953125,
+FN@32K PP 2026-11-10,recr_gdn,Recurrent: chunked gated delta net,ROCm1,81.18610791015625,0.0,
+FN@32K PP 2026-11-10,recr,"Recurrent: conv, l2 norms, gates, state copies",ROCm1,21.310957031250002,0.25859423828125,
+FN@32K PP 2026-11-10,mix_out,Mixer GEMM: output projection (slabs),ROCm1,76.34594970703125,1.4648437500000001e-05,
+FN@32K PP 2026-11-10,ar_mix,AllReduce after mixer: exposed,ROCm1,28.9430908203125,10.5627587890625,
+FN@32K PP 2026-11-10,ffn_gu,FFN dense GEMM: gate/up,ROCm1,0.0,0.0,
+FN@32K PP 2026-11-10,ffn_act,FFN dense: activation,ROCm1,0.0,0.0,
+FN@32K PP 2026-11-10,ffn_down,FFN dense GEMM: down (slabs),ROCm1,0.0,0.0,
+FN@32K PP 2026-11-10,moe_router,MoE: router + top-k,ROCm1,27.7837685546875,0.0225830078125,
+FN@32K PP 2026-11-10,moe_ids,"MoE: ids helper, tile list (repack_tile_off)",ROCm1,30.912915527343753,0.0,
+FN@32K PP 2026-11-10,moe_routed,MoE: routed expert GEMM + activation,ROCm1,507.6984760742187,0.0001875,
+FN@32K PP 2026-11-10,moe_shared,MoE: shared expert + gate,ROCm1,53.179731445312505,0.0,
+FN@32K PP 2026-11-10,moe_reduce,MoE: weighted reduce + combine,ROCm1,21.75774462890625,0.012852539062500001,
+FN@32K PP 2026-11-10,ar_ffn,AllReduce after FFN: exposed,ROCm1,58.69308203125,87.90373486328124,
+FN@32K PP 2026-11-10,out_norm,"Output: last-token rows, final norm (+ softcap)",ROCm1,0.289453125,0.015234375,
+FN@32K PP 2026-11-10,out_head,Output: LM head (last token),ROCm1,0.548046875,0.0,
+FN@32K PP 2026-11-10,q8,q8_1 quantize of GEMM inputs,ROCm1,38.40307763671875,0.84327294921875,
+FN@32K PP 2026-11-10,copy,"Copies H2D/D2H outside AllReduce, exposed",ROCm1,3.0717998046874997,9.2018466796875,
+FN@32K PP 2026-11-10,glue,"Glue: crops, copies, other",ROCm1,0.041484375,0.48306640624999997,
+FN@32K PP 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),ROCm1,0.0,0.0,
+FN@32K PP 2026-11-10,ar_overlap,"AllReduce overlapped with compute (info, not in total)",ROCm1,62.530548339843754,0.0,
+FN@32K PP 2026-11-10,info_gemm_ms,GEMM kernel time (info),ROCm1,1020.0090502929688,,
+FN@32K PP 2026-11-10,info_gemm_calls,GEMM calls per ubatch (info),ROCm1,1135.0,,
+FN@32K PP 2026-11-10,info_flash_attn_ms,flash_attn* kernel time (info),ROCm1,532.93356640625,,
+FN@32K PP 2026-11-10,run_start,"Run start: bench timer start to the first compute kernel (host prep, input upload)",critical,0.0,58.80384619140625,57.50445198192103
+FN@32K PP 2026-11-10,start_idle,Ubatch start: host gap before the first compute kernel,critical,0.0,132.17006005859375,129.24948560928928
+FN@32K PP 2026-11-10,start_input,"Ubatch start: input upload, embedding",critical,1.3671875,20.07999609375,20.97326312805846
+FN@32K PP 2026-11-10,norm,Residual add + norm,critical,0.0,0.0,0.0
+FN@32K PP 2026-11-10,hc,Hyper-connection pre/post with its small GEMMs (Flash Next),critical,262.0660229492188,3.44082275390625,259.63991555773356
+FN@32K PP 2026-11-10,ple,Per-layer n-gram embedding (Flash Next),critical,8.780943359375,0.00234375,8.589201974654067
+FN@32K PP 2026-11-10,mix_in_attn,"Mixer GEMM: attention input projections (q+gate, k, v)",critical,35.7913056640625,5.46875e-05,35.000475241104944
+FN@32K PP 2026-11-10,mix_in_recr,"Mixer GEMM: GDN input projections (qkv, z, beta/alpha)",critical,126.24618994140624,4.4921875e-05,123.45655974548882
+FN@32K PP 2026-11-10,attn_misc,"Attention: q/k norm, rope, KV write, gate",critical,6.604848632812501,0.0,6.458900661313025
+FN@32K PP 2026-11-10,attn_fa,Attention: flash attention (batched),critical,532.933423828125,0.00048046875000000005,521.157612878323
+FN@32K PP 2026-11-10,qsa,Attention: QSA indexer and key pooling (Flash Next),critical,73.25020703125,0.058751953125,71.68904391117341
+FN@32K PP 2026-11-10,recr_gdn,Recurrent: chunked gated delta net,critical,80.444734375,0.0,78.66713939098808
+FN@32K PP 2026-11-10,recr,"Recurrent: conv, l2 norms, gates, state copies",critical,21.267447753906247,0.24898535156249998,21.04098242669821
+FN@32K PP 2026-11-10,mix_out,Mixer GEMM: output projection (slabs),critical,77.073166015625,1.4648437500000001e-05,75.37008722463835
+FN@32K PP 2026-11-10,ar_mix,AllReduce after mixer: exposed,critical,27.1389462890625,8.30440869140625,34.66015977795696
+FN@32K PP 2026-11-10,ffn_gu,FFN dense GEMM: gate/up,critical,0.0,0.0,0.0
+FN@32K PP 2026-11-10,ffn_act,FFN dense: activation,critical,0.0,0.0,0.0
+FN@32K PP 2026-11-10,ffn_down,FFN dense GEMM: down (slabs),critical,0.0,0.0,0.0
+FN@32K PP 2026-11-10,moe_router,MoE: router + top-k,critical,25.396765625,0.01960693359375,24.85474454498973
+FN@32K PP 2026-11-10,moe_ids,"MoE: ids helper, tile list (repack_tile_off)",critical,31.56359326171875,0.0,30.866129524715475
+FN@32K PP 2026-11-10,moe_routed,MoE: routed expert GEMM + activation,critical,592.2060605468749,0.0006806640625000001,579.1206922500778
+FN@32K PP 2026-11-10,moe_shared,MoE: shared expert + gate,critical,52.085264648437494,0.0,50.934331577437526
+FN@32K PP 2026-11-10,moe_reduce,MoE: weighted reduce + combine,critical,21.6478505859375,0.02109375,21.190123601930996
+FN@32K PP 2026-11-10,ar_ffn,AllReduce after FFN: exposed,critical,41.18532177734375,9.715037109375,49.775608791583174
+FN@32K PP 2026-11-10,out_norm,"Output: last-token rows, final norm (+ softcap)",critical,0.318828125,0.014921875,0.32637509435175227
+FN@32K PP 2026-11-10,out_head,Output: LM head (last token),critical,0.54359375,0.0,0.5315819069521284
+FN@32K PP 2026-11-10,q8,q8_1 quantize of GEMM inputs,critical,38.218248046875,0.7946796875000001,38.150855341557254
+FN@32K PP 2026-11-10,copy,"Copies H2D/D2H outside AllReduce, exposed",critical,3.0717998046874997,9.2018466796875,12.002434544952639
+FN@32K PP 2026-11-10,glue,"Glue: crops, copies, other",critical,0.041484375,0.48306640624999997,0.512959732502634
+FN@32K PP 2026-11-10,idle,Critical-path rounding (GPU switch at AllReduce ends),critical,0.0,13.14237744140625,12.85196907099717
+FN@32K PP 2026-11-10,ar_overlap,"AllReduce overlapped with compute (info, not in total)",critical,82.43931640625,0.0,

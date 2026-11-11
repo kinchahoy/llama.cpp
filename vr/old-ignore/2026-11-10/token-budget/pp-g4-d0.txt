@@ -1,0 +1,31 @@
+trace: /home/raistlin/.claude/jobs/5a8c59bb/tmp/pp/g4-d0/trace/t_kernel_trace.csv
+model: gemma4, PP 2048 tokens, -b 2048 -ub 2048 depth 0: 1 measured ubatches of 2 in the trace
+ROCm0 (Agent 1): compute stream k4, AllReduce copy streams ['c6', 'c7'], AllReduce per ubatch 120, ubatch cut: smallest boundary gap 27.66 ms, largest other gap 9.19 ms, span 3416.21 ms, kernels/ubatch 2963, GEMM 1083.91 ms/1K (767 calls/ubatch), flash_attn* 170.31 ms/1K
+ROCm1 (Agent 2): compute stream k5, AllReduce copy streams ['c8', 'c9'], AllReduce per ubatch 120, ubatch cut: smallest boundary gap 34.20 ms, largest other gap 9.52 ms, span 3416.21 ms, kernels/ubatch 2973, GEMM 1266.15 ms/1K (767 calls/ubatch), flash_attn* 204.26 ms/1K
+run start (bench timer start to the first compute kernel, critical): 44.21 ms
+llama-bench profiled: 1668.07 ms/1K (599.5 t/s)
+llama-bench unprofiled: 602.5 t/s = 1659.89 ms/1K; scaled = critical x 0.9951
+
+ms per 1K prompt tokens, busy + idle-before
+step                                                                                           ROCm0             ROCm1          critical      sum     %
+Run start: bench timer start to the first compute kernel (host prep, input upload)     0.00 +  21.64     0.00 +  21.59     0.00 +  21.59    21.59   1.3
+Ubatch start: input upload, embedding                                                  0.08 +   0.00     0.08 +   0.00     0.08 +   0.00     0.08   0.0
+Residual add + norm                                                                   22.69 +   0.88    24.55 +   1.09    24.55 +   1.09    25.64   1.5
+Mixer GEMM: attention input projections (q+gate, k, v)                               196.92 +   0.00   241.07 +   0.00   241.07 +   0.00   241.07  14.5
+Attention: q/k norm, rope, KV write, gate                                             34.93 +   0.00    40.62 +   0.01    40.62 +   0.01    40.63   2.4
+Attention: flash attention (batched)                                                 170.31 +   0.00   204.26 +   0.01   204.26 +   0.01   204.27  12.2
+Mixer GEMM: output projection (slabs)                                                124.06 +   0.00   136.73 +   0.00   136.73 +   0.00   136.73   8.2
+AllReduce after mixer: exposed                                                       102.84 +  28.41    29.16 +   3.40    29.16 +   3.40    32.55   2.0
+FFN dense GEMM: gate/up                                                              484.87 +   0.00   579.97 +   0.00   579.97 +   0.00   579.97  34.8
+FFN dense: activation                                                                 12.18 +   0.00    13.73 +   0.00    13.73 +   0.00    13.73   0.8
+FFN dense GEMM: down (slabs)                                                         277.58 +   0.00   307.89 +   0.00   307.89 +   0.00   307.89  18.5
+AllReduce after FFN: exposed                                                          75.63 +  85.89    29.12 +   3.36    28.95 +   3.35    32.30   1.9
+Output: last-token rows, final norm (+ softcap)                                        0.01 +   0.00     0.01 +   0.00     0.01 +   0.00     0.01   0.0
+Output: LM head (last token)                                                           0.48 +   0.00     0.48 +   0.00     0.48 +   0.00     0.48   0.0
+q8_1 quantize of GEMM inputs                                                          26.94 +   1.66    29.77 +   1.09    29.77 +   1.09    30.86   1.8
+Copies H2D/D2H outside AllReduce, exposed                                              0.04 +   0.01     0.04 +   0.02     0.04 +   0.02     0.06   0.0
+Glue: crops, copies, other                                                             0.00 +   0.01     0.00 +   0.01     0.00 +   0.01     0.01   0.0
+Critical-path rounding (GPU switch at AllReduce ends)                                  0.00 +   0.00     0.00 +   0.00     0.00 +   0.18     0.18   0.0
+AllReduce overlapped with compute (info, not in total)                               195.89 +   0.00   287.35 +   0.00   287.35 +   0.00   287.35  17.2
+total                                                                                        1668.07           1668.07           1668.07
+PP t/s profiled 599.5, unprofiled 602.5

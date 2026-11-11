@@ -1,0 +1,39 @@
+trace: /home/raistlin/.claude/jobs/5a8c59bb/tmp/pp/fn-d32k/trace/t_kernel_trace.csv
+model: qwen4exp, PP 2048 tokens, -b 1024 -ub 512 depth 32768: 4 measured ubatches of 72 in the trace
+ROCm0 (Agent 1): compute stream k4, AllReduce copy streams ['c6', 'c7'], AllReduce per ubatch 96, ubatch cut: smallest boundary gap 87.46 ms, largest other gap 4.70 ms, span 4742.65 ms, kernels/ubatch 4454, GEMM 987.94 ms/1K (1135 calls/ubatch), flash_attn* 437.92 ms/1K
+ROCm1 (Agent 2): compute stream k5, AllReduce copy streams ['c8', 'c9'], AllReduce per ubatch 96, ubatch cut: smallest boundary gap 88.47 ms, largest other gap 2.91 ms, span 4742.65 ms, kernels/ubatch 4454, GEMM 1020.01 ms/1K (1135 calls/ubatch), flash_attn* 532.93 ms/1K
+run start (bench timer start to the first compute kernel, critical): 120.43 ms
+llama-bench profiled: 2315.75 ms/1K (431.8 t/s)
+llama-bench unprofiled: 441.6 t/s = 2264.58 ms/1K; scaled = critical x 0.9779
+
+ms per 1K prompt tokens, busy + idle-before
+step                                                                                           ROCm0             ROCm1          critical      sum     %
+Run start: bench timer start to the first compute kernel (host prep, input upload)     0.00 +  58.72     0.00 +  58.80     0.00 +  58.80    58.80   2.5
+Ubatch start: host gap before the first compute kernel                                 0.00 + 131.81     0.00 + 132.17     0.00 + 132.17   132.17   5.7
+Ubatch start: input upload, embedding                                                  2.52 +  19.94     1.37 +  20.08     1.37 +  20.08    21.45   0.9
+Hyper-connection pre/post with its small GEMMs (Flash Next)                          268.11 +   3.07   256.60 +   3.61   262.07 +   3.44   265.51  11.5
+Per-layer n-gram embedding (Flash Next)                                                8.27 +   0.01     8.78 +   0.00     8.78 +   0.00     8.78   0.4
+Mixer GEMM: attention input projections (q+gate, k, v)                                32.06 +   0.00    35.79 +   0.00    35.79 +   0.00    35.79   1.5
+Mixer GEMM: GDN input projections (qkv, z, beta/alpha)                               113.46 +   0.00   126.23 +   0.00   126.25 +   0.00   126.25   5.5
+Attention: q/k norm, rope, KV write, gate                                              6.04 +   0.00     6.60 +   0.00     6.60 +   0.00     6.60   0.3
+Attention: flash attention (batched)                                                 437.92 +   0.00   532.93 +   0.00   532.93 +   0.00   532.93  23.0
+Attention: QSA indexer and key pooling (Flash Next)                                   66.06 +   0.07    73.25 +   0.06    73.25 +   0.06    73.31   3.2
+Recurrent: chunked gated delta net                                                    68.36 +   0.00    81.19 +   0.00    80.44 +   0.00    80.44   3.5
+Recurrent: conv, l2 norms, gates, state copies                                        20.02 +   0.22    21.31 +   0.26    21.27 +   0.25    21.52   0.9
+Mixer GEMM: output projection (slabs)                                                 74.82 +   0.00    76.35 +   0.00    77.07 +   0.00    77.07   3.3
+AllReduce after mixer: exposed                                                        54.62 + 125.65    28.94 +  10.56    27.14 +   8.30    35.44   1.5
+MoE: router + top-k                                                                   22.94 +   0.02    27.78 +   0.02    25.40 +   0.02    25.42   1.1
+MoE: ids helper, tile list (repack_tile_off)                                          32.14 +   0.00    30.91 +   0.00    31.56 +   0.00    31.56   1.4
+MoE: routed expert GEMM + activation                                                 489.97 +   0.00   507.70 +   0.00   592.21 +   0.00   592.21  25.6
+MoE: shared expert + gate                                                             50.50 +   0.00    53.18 +   0.00    52.09 +   0.00    52.09   2.2
+MoE: weighted reduce + combine                                                        21.39 +   0.02    21.76 +   0.01    21.65 +   0.02    21.67   0.9
+AllReduce after FFN: exposed                                                          59.87 +  96.85    58.69 +  87.90    41.19 +   9.72    50.90   2.2
+Output: last-token rows, final norm (+ softcap)                                        0.32 +   0.01     0.29 +   0.02     0.32 +   0.01     0.33   0.0
+Output: LM head (last token)                                                           0.57 +   0.00     0.55 +   0.00     0.54 +   0.00     0.54   0.0
+q8_1 quantize of GEMM inputs                                                          36.67 +   0.96    38.40 +   0.84    38.22 +   0.79    39.01   1.7
+Copies H2D/D2H outside AllReduce, exposed                                              2.05 +   8.15     3.07 +   9.20     3.07 +   9.20    12.27   0.5
+Glue: crops, copies, other                                                             0.03 +   1.55     0.04 +   0.48     0.04 +   0.48     0.52   0.0
+Critical-path rounding (GPU switch at AllReduce ends)                                  0.00 +   0.00     0.00 +   0.00     0.00 +  13.14    13.14   0.6
+AllReduce overlapped with compute (info, not in total)                                40.77 +   0.00    62.53 +   0.00    82.44 +   0.00    82.44   3.6
+total                                                                                        2315.75           2315.75           2315.75
+PP t/s profiled 431.8, unprofiled 441.6
