@@ -13289,21 +13289,17 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
                     test_cases.emplace_back(new test_topk_moe({32, 8, 1, 1}, 8, with_norm, bias_probs, gate, scale_w));
                     test_cases.emplace_back(new test_topk_moe({32, 9, 1, 1}, 8, with_norm, bias_probs, gate, scale_w));
 
+                    // Flash Next: rows 1..8 take the one-warp kernel on gfx906, 9 rows fall back
+                    for (int rows = 1; rows <= 9; rows++) {
+                        test_cases.emplace_back(new test_topk_moe({512, rows, 1, 1}, 10, with_norm, bias_probs, gate, scale_w));
+                    }
+
                     // grouped experts
                     test_cases.emplace_back(new test_topk_moe({128, 1, 1, 1}, 8, with_norm, bias_probs, gate, scale_w, 16));
                     test_cases.emplace_back(new test_topk_moe({256, 22, 1, 1}, 6, with_norm, bias_probs, gate, scale_w, 32));
                     test_cases.emplace_back(new test_topk_moe({256, 7, 1, 1}, 8, with_norm, bias_probs, gate, scale_w, 8)); // DeepSeek V3
                     test_cases.emplace_back(new test_topk_moe({128, 5, 1, 1}, 6, with_norm, bias_probs, gate, scale_w, 8));
                     test_cases.emplace_back(new test_topk_moe({512, 3, 1, 1}, 8, with_norm, bias_probs, gate, scale_w, 4));
-                    test_cases.emplace_back(new test_topk_moe({512, 1, 1, 1}, 10, with_norm, bias_probs, gate, scale_w)); // Flash Next
-                    test_cases.emplace_back(new test_topk_moe({512, 2, 1, 1}, 10, with_norm, bias_probs, gate, scale_w)); // Flash Next
-                    test_cases.emplace_back(new test_topk_moe({512, 3, 1, 1}, 10, with_norm, bias_probs, gate, scale_w)); // Flash Next
-                    test_cases.emplace_back(new test_topk_moe({512, 4, 1, 1}, 10, with_norm, bias_probs, gate, scale_w)); // Flash Next
-                    test_cases.emplace_back(new test_topk_moe({512, 5, 1, 1}, 10, with_norm, bias_probs, gate, scale_w)); // Flash Next
-                    test_cases.emplace_back(new test_topk_moe({512, 6, 1, 1}, 10, with_norm, bias_probs, gate, scale_w)); // Flash Next
-                    test_cases.emplace_back(new test_topk_moe({512, 7, 1, 1}, 10, with_norm, bias_probs, gate, scale_w)); // Flash Next
-                    test_cases.emplace_back(new test_topk_moe({512, 8, 1, 1}, 10, with_norm, bias_probs, gate, scale_w)); // Flash Next
-                    test_cases.emplace_back(new test_topk_moe({512, 9, 1, 1}, 10, with_norm, bias_probs, gate, scale_w)); // Flash Next
                 }
             }
         }

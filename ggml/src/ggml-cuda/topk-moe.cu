@@ -377,28 +377,32 @@ __global__ void topk_moe_cuda(const float *         logits,
 }
 
 #if defined(GGML_USE_HIP)
+// fmaxf for float (same NaN handling as topk_moe_cuda) or min for int
+template <bool is_max, typename T>
+static __device__ __forceinline__ T topk_moe_combine(const T a, const T b) {
+    if constexpr (is_max) {
+        return fmaxf(a, b);
+    } else {
+        return min(a, b);
+    }
+}
+
 // Max or min over a 32-lane logical warp (half of a wave64), same value on every lane.
-// Max and min are exact, so any order gives the same result.
 template <bool is_max, typename T>
 static __device__ __forceinline__ T topk_moe_warp_minmax(T x) {
 #if defined(__GFX9__)
     // DPP: quad xor1, quad xor2, half mirror (8 lanes), mirror (16 lanes), then xor16 through a shuffle
 #define TOPK_MOE_DPP_STEP(ctrl) \
-    { \
-        const T o = (T) __builtin_bit_cast(T, __builtin_amdgcn_mov_dpp(__builtin_bit_cast(int, x), ctrl, 0xF, 0xF, false)); \
-        x = is_max ? (x > o ? x : o) : (x < o ? x : o); \
-    }
+    x = topk_moe_combine<is_max>(x, __builtin_bit_cast(T, __builtin_amdgcn_mov_dpp(__builtin_bit_cast(int, x), ctrl, 0xF, 0xF, false)));
     TOPK_MOE_DPP_STEP(0xB1)
     TOPK_MOE_DPP_STEP(0x4E)
     TOPK_MOE_DPP_STEP(0x141)
     TOPK_MOE_DPP_STEP(0x140)
 #undef TOPK_MOE_DPP_STEP
-    const T o = __shfl_xor_sync(0xFFFFFFFF, x, 16, WARP_SIZE);
-    return is_max ? (x > o ? x : o) : (x < o ? x : o);
+    return topk_moe_combine<is_max>(x, __shfl_xor_sync(0xFFFFFFFF, x, 16, WARP_SIZE));
 #else
     for (int off = WARP_SIZE / 2; off > 0; off >>= 1) {
-        const T o = __shfl_xor_sync(0xFFFFFFFF, x, off, WARP_SIZE);
-        x = is_max ? (x > o ? x : o) : (x < o ? x : o);
+        x = topk_moe_combine<is_max>(x, __shfl_xor_sync(0xFFFFFFFF, x, off, WARP_SIZE));
     }
     return x;
 #endif // defined(__GFX9__)
@@ -406,11 +410,8 @@ static __device__ __forceinline__ T topk_moe_warp_minmax(T x) {
 
 /*
     One 32-lane warp per row (two rows per wave64), no bias, no groups, no delayed softmax, n_used <= 16.
-    Same math as topk_moe_cuda, but:
-    - the wave max is exact, so it is computed with DPP (no ds_bpermute)
-    - the winner is the lowest expert id with value == max, same tie rule as topk_moe_cuda
-    - the selected weights stay in lanes 0..n_used-1, so the sum is the same warp_reduce_sum as topk_moe_cuda
-    - no dynamically indexed register arrays (these go to scratch)
+    Same results as topk_moe_cuda, with the winner chosen by lowest expert id among equal values.
+    The k loop is rolled: for a single wave the cold instruction fetch costs more than the loop overhead.
 */
 template <int n_experts, int n_used>
 __launch_bounds__(TOPK_MOE_ROWS_PER_BLOCK * WARP_SIZE, 1)
