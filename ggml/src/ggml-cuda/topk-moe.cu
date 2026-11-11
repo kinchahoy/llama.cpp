@@ -402,8 +402,7 @@ static __device__ __forceinline__ T topk_moe_warp_minmax(T x) {
     Same math as topk_moe_cuda, but:
     - the wave max is exact, so it is computed with DPP (no ds_bpermute)
     - the winner is the lowest expert id with value == max, same tie rule as topk_moe_cuda
-    - all selected values are uniform in the warp, so the weight sum is a scalar tree
-      that matches the xor butterfly of warp_reduce_sum (zeros past n_used are exact)
+    - the selected weights stay in lanes 0..n_used-1, so the sum is the same warp_reduce_sum as topk_moe_cuda
     - no dynamically indexed register arrays (these go to scratch)
 */
 template <int n_experts, int n_used>
@@ -479,15 +478,11 @@ __global__ void topk_moe_wave_cuda(const float *         logits,
         }
     }
 
-    float w[16];
-#pragma unroll
-    for (int k = 0; k < 16; k++) {
-        w[k] = 0.f;
-    }
     float out_w  = 0.f;
     int   out_id = 0;
 
-#pragma unroll
+    // not unrolled: single-wave kernels are bound by cold instruction fetch
+#pragma unroll 1
     for (int k = 0; k < n_used; k++) {
         float lmax = wt[0];
 #pragma unroll
@@ -510,7 +505,6 @@ __global__ void topk_moe_wave_cuda(const float *         logits,
             }
         }
 
-        w[k] = m;
         if (lane == k) {
             out_w  = m;
             out_id = e;
@@ -518,12 +512,7 @@ __global__ void topk_moe_wave_cuda(const float *         logits,
     }
 
     if (config.with_norm) {
-        float x[8];
-#pragma unroll
-        for (int l = 0; l < 8; l++) {
-            x[l] = w[l] + w[l + 8];
-        }
-        float wt_sum = ((x[0] + x[4]) + (x[2] + x[6])) + ((x[1] + x[5]) + (x[3] + x[7]));
+        float wt_sum = warp_reduce_sum(out_w); // lanes past n_used hold 0
         wt_sum = fmaxf(wt_sum, clamp_val);
         out_w /= wt_sum;
     }
