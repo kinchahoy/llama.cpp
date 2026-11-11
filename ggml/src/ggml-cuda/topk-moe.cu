@@ -132,7 +132,14 @@ __device__ void group_mask_warp_inplace(float (&vals)[experts_per_thread], const
         const float other = __shfl_sync(0xFFFFFFFF, score, g, WARP_SIZE);
         rank += other > score || (other == score && g < lane);
     }
-    const auto keep = __ballot_sync(0xFFFFFFFFULL, lane < n_groups && rank < n_group_used);
+    const bool keep_group = lane < n_groups && rank < n_group_used;
+#if defined(GGML_USE_HIP)
+    // HIP 7 __ballot_sync masks the 64-bit ballot; two 32-lane rows share a wave64, so take the half of this row
+    constexpr bool two_rows = ggml_cuda_get_physical_warp_size() == 2 * WARP_SIZE;
+    const uint64_t keep     = __ballot(keep_group) >> (two_rows ? (threadIdx.y & 1) * WARP_SIZE : 0);
+#else
+    const auto keep = __ballot_sync(0xFFFFFFFFULL, keep_group);
+#endif // defined(GGML_USE_HIP)
 
 #pragma unroll
     for (int i = 0; i < experts_per_thread; i++) {
