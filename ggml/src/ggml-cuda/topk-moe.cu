@@ -370,17 +370,30 @@ __global__ void topk_moe_cuda(const float *         logits,
 }
 
 #if defined(GGML_USE_HIP)
-// Max over a 32-lane logical warp (half of a wave64), same value on every lane. Max is exact, so any order gives the same result.
-static __device__ __forceinline__ float topk_moe_wave_max(float x) {
+// Max or min over a 32-lane logical warp (half of a wave64), same value on every lane.
+// Max and min are exact, so any order gives the same result.
+template <bool is_max, typename T>
+static __device__ __forceinline__ T topk_moe_warp_minmax(T x) {
 #if defined(__GFX9__)
-    // DPP: quad xor1, quad xor2, half mirror (8 lanes), mirror (16 lanes), then xor16 inside the 32-lane half wave
-    x = fmaxf(x, __int_as_float(__builtin_amdgcn_mov_dpp(__float_as_int(x), 0xB1, 0xF, 0xF, false)));
-    x = fmaxf(x, __int_as_float(__builtin_amdgcn_mov_dpp(__float_as_int(x), 0x4E, 0xF, 0xF, false)));
-    x = fmaxf(x, __int_as_float(__builtin_amdgcn_mov_dpp(__float_as_int(x), 0x141, 0xF, 0xF, false)));
-    x = fmaxf(x, __int_as_float(__builtin_amdgcn_mov_dpp(__float_as_int(x), 0x140, 0xF, 0xF, false)));
-    return fmaxf(x, __int_as_float(__builtin_amdgcn_ds_swizzle(__float_as_int(x), 0x401F)));
+    // DPP: quad xor1, quad xor2, half mirror (8 lanes), mirror (16 lanes), then xor16 through a shuffle
+#define TOPK_MOE_DPP_STEP(ctrl) \
+    { \
+        const T o = (T) __builtin_bit_cast(T, __builtin_amdgcn_mov_dpp(__builtin_bit_cast(int, x), ctrl, 0xF, 0xF, false)); \
+        x = is_max ? (x > o ? x : o) : (x < o ? x : o); \
+    }
+    TOPK_MOE_DPP_STEP(0xB1)
+    TOPK_MOE_DPP_STEP(0x4E)
+    TOPK_MOE_DPP_STEP(0x141)
+    TOPK_MOE_DPP_STEP(0x140)
+#undef TOPK_MOE_DPP_STEP
+    const T o = __shfl_xor_sync(0xFFFFFFFF, x, 16, WARP_SIZE);
+    return is_max ? (x > o ? x : o) : (x < o ? x : o);
 #else
-    return warp_reduce_max(x);
+    for (int off = WARP_SIZE / 2; off > 0; off >>= 1) {
+        const T o = __shfl_xor_sync(0xFFFFFFFF, x, off, WARP_SIZE);
+        x = is_max ? (x > o ? x : o) : (x < o ? x : o);
+    }
+    return x;
 #endif // defined(__GFX9__)
 }
 
@@ -435,7 +448,7 @@ __global__ void topk_moe_wave_cuda(const float *         logits,
             for (int i = 1; i < ept; i++) {
                 lmax = fmaxf(lmax, wt[i]);
             }
-            const float max_val = topk_moe_wave_max(lmax);
+            const float max_val = topk_moe_warp_minmax<true>(lmax);
 
             float g[ept];
 #pragma unroll
@@ -481,17 +494,14 @@ __global__ void topk_moe_wave_cuda(const float *         logits,
         for (int i = 1; i < ept; i++) {
             lmax = fmaxf(lmax, wt[i]);
         }
-        const float m = topk_moe_wave_max(lmax);
+        const float m = topk_moe_warp_minmax<true>(lmax);
 
-        int e = 0;
+        int e = INT_MAX;
 #pragma unroll
-        for (int i = ept - 1; i >= 0; i--) {
-            // two logical rows share a wave64: keep the 32 bits of this row
-            const uint64_t b = (__ballot_sync(0xFFFFFFFFULL, wt[i] == m) >> ((threadIdx.y & 1) * 32)) & 0xFFFFFFFFULL;
-            if (b != 0) {
-                e = i * WARP_SIZE + (int) __ffsll((long long) b) - 1;
-            }
+        for (int i = 0; i < ept; i++) {
+            e = wt[i] == m ? min(e, lane + i * WARP_SIZE) : e;
         }
+        e = topk_moe_warp_minmax<false>(e);
 
 #pragma unroll
         for (int i = 0; i < ept; i++) {
