@@ -29,3 +29,5 @@ Verdict: more waves per SIMD does not help. The kernel is VALU/LDS-issue bound, 
 column tile halves weight reuse and x/W LDS amortisation (plus spills). Default stays 0. Not worth repeating:
 TN=1 tiles, 512-thread blocks, VGPR caps below 128. Untried: larger tile (TN=3-4, needs LDS < 32 KB per block
 by shrinking BK), fewer per-(r,n) conversion ops.
+
+Archived code: [gemm-variants.patch](gemm-variants.patch) (V1/V2 behind `GGML_RP_GEMM_VAR`, against `0ca731b29`; not merged). Next approach worth trying: larger tiles (TN 3-4) with a shorter BK to stay under 32 KB LDS, or fewer per-output conversions; reuse [rpgemm.cpp](rpgemm.cpp) for bit-exact checks.

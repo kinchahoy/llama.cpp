@@ -12,3 +12,5 @@
 | 16384 | 87.3 | 882.6 |
 
 Bitonic loses 1.8x to 12x at every real QSA width, so there is no crossover. The 12 radix launches cost about 70-90 us per call. Verdict: drop the code change. The model A/B was not run. The QSA-shaped test cases are kept.
+
+Archived code: [bitonic-one-row.patch](bitonic-one-row.patch) (the tried change against `0ca731b29`; reverted on the branch). Next approach worth trying: a fused single-block radix top-k for one row (keeps the radix work, removes the 12 launches).

@@ -1,0 +1,73 @@
+diff --git a/ggml/src/ggml-cuda/q8_repack/mul-mat.cu b/ggml/src/ggml-cuda/q8_repack/mul-mat.cu
+index 42fdb253c..c4f7ba50a 100644
+--- a/ggml/src/ggml-cuda/q8_repack/mul-mat.cu
++++ b/ggml/src/ggml-cuda/q8_repack/mul-mat.cu
+@@ -22,6 +22,17 @@ static int rp_q8_0_mmv_rows() {
+     return rows;
+ }
+ 
++// Dense Q8_0 GEMM variant for A/B tests. GGML_RP_GEMM_VAR: 0 = 64x128 tile, 256 threads, 2 blocks per CU (default);
++// 1 = 64x64 tile, 256 threads, 3 blocks per CU (84 VGPR cap); 2 = 64x64 tile, 512 threads, 2 blocks per CU (64 VGPR cap).
++static int rp_q8_0_gemm_var() {
++    static const int var = [] {
++        const char * e = getenv("GGML_RP_GEMM_VAR");
++        const int v = e != nullptr ? atoi(e) : 0;
++        return v == 1 || v == 2 ? v : 0;
++    }();
++    return var;
++}
++
+ template <bool HAS_FUSION>
+ static void rp_q8_0_mmv_launch(const uint8_t * w, const block_q8_1 * xq, float * dst_d,
+         const int64_t ne00, const int64_t ne01, const uint8_t * w_gate, const float * x_bias,
+@@ -434,9 +445,21 @@ static void ggml_cuda_mul_mat_repacked_slice(ggml_backend_cuda_context & ctx,
+                         (ne11 + bn - 1) / bn, 1);
+         switch (wtype) {
+             case GGML_TYPE_Q8_0:
+-                mmq_gemm_repacked<false, MMQ_RP_Q8_TN, nrl, GGML_TYPE_Q8_0><<<grid, dim3(64, nrl), 0, stream>>>(
+-                    w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, (uint32_t) ne11,
+-                    nullptr, nullptr, nullptr, nullptr, nullptr, 0, 0, (uint32_t) ne01);
++                if (rp_q8_0_gemm_var() == 1) {
++                    const dim3 grid1((ne01 + mmq_bm - 1) / mmq_bm, (ne11 + 63) / 64, 1);
++                    mmq_gemm_repacked<false, 1, nrl, GGML_TYPE_Q8_0, 3><<<grid1, dim3(64, nrl), 0, stream>>>(
++                        w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, (uint32_t) ne11,
++                        nullptr, nullptr, nullptr, nullptr, nullptr, 0, 0, (uint32_t) ne01);
++                } else if (rp_q8_0_gemm_var() == 2) {
++                    const dim3 grid1((ne01 + mmq_bm - 1) / mmq_bm, (ne11 + 63) / 64, 1);
++                    mmq_gemm_repacked<false, 1, 2 * nrl, GGML_TYPE_Q8_0, 4><<<grid1, dim3(64, 2 * nrl), 0, stream>>>(
++                        w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, (uint32_t) ne11,
++                        nullptr, nullptr, nullptr, nullptr, nullptr, 0, 0, (uint32_t) ne01);
++                } else {
++                    mmq_gemm_repacked<false, MMQ_RP_Q8_TN, nrl, GGML_TYPE_Q8_0><<<grid, dim3(64, nrl), 0, stream>>>(
++                        w, xq, dst_d, (uint32_t) ne00, (uint32_t) ne01, (uint32_t) ne11,
++                        nullptr, nullptr, nullptr, nullptr, nullptr, 0, 0, (uint32_t) ne01);
++                }
+                 break;
+             case GGML_TYPE_MXFP4:
+                 mmq_gemm_repacked<false, MMQ_RP_Q8_TN, nrl, GGML_TYPE_MXFP4><<<grid, dim3(64, nrl), 0, stream>>>(
+diff --git a/ggml/src/ggml-cuda/q8_repack/repack-kernels.cuh b/ggml/src/ggml-cuda/q8_repack/repack-kernels.cuh
+index 044e7be49..ab76558fa 100644
+--- a/ggml/src/ggml-cuda/q8_repack/repack-kernels.cuh
++++ b/ggml/src/ggml-cuda/q8_repack/repack-kernels.cuh
+@@ -607,8 +607,9 @@ static __device__ void mmq_gemm_repacked_impl(
+     }
+     const uint32_t n_main = n_sub & ~(MMQ_RP_Q8_BK - 1u);
+     const bool full_k = n_main == n_sub;
++    // CW == 64 loops guard e >= W_ELM / X_ELM, so extra threads are safe in the unchecked path
+     const bool full_tile = full_m && full_n && full_k &&
+-                           (NTHREADS <= X_ELM) && (NTHREADS <= W_ELM);
++                           (CW == 64 || (NTHREADS <= X_ELM && NTHREADS <= W_ELM));
+ 
+ 
+     auto prefetch_w_checked = [&](const uint32_t sb0) {
+@@ -942,8 +943,8 @@ static __device__ void mmq_gemm_repacked_impl(
+ }
+ 
+ // Launch wrapper: 64-wide waves, tuned for large batches (ne11 >= 128).
+-template <bool HAS_IDS, int TN_, int NRL, ggml_type WT = GGML_TYPE_Q8_0>
+-static __global__ void __launch_bounds__(64 * NRL, 2) mmq_gemm_repacked(
++template <bool HAS_IDS, int TN_, int NRL, ggml_type WT = GGML_TYPE_Q8_0, int MINB = 2>
++static __global__ void __launch_bounds__(64 * NRL, MINB) mmq_gemm_repacked(
+         const uint8_t * __restrict__ wbase, const block_q8_1 * __restrict__ xq,
+         float * __restrict__ y, const uint32_t ne0, const uint32_t ne1,
+         const uint32_t n_tok,

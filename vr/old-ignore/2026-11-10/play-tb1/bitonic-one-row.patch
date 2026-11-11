@@ -1,0 +1,31 @@
+diff --git a/ggml/src/ggml-cuda/top-k.cu b/ggml/src/ggml-cuda/top-k.cu
+index 3df4a18b8..522e468d5 100644
+--- a/ggml/src/ggml-cuda/top-k.cu
++++ b/ggml/src/ggml-cuda/top-k.cu
+@@ -24,6 +24,15 @@
+ #    endif
+ #endif // GGML_CUDA_TOP_K_NCOLS_THRESHOLD_BITONIC_FEW_ROWS
+ 
++// bitonic for a single row up to this width (shared memory permitting, else radix), 0 disables
++#ifndef GGML_CUDA_TOP_K_NCOLS_THRESHOLD_BITONIC_ONE_ROW
++#    ifdef GGML_USE_HIP
++#        define GGML_CUDA_TOP_K_NCOLS_THRESHOLD_BITONIC_ONE_ROW 16384
++#    else
++#        define GGML_CUDA_TOP_K_NCOLS_THRESHOLD_BITONIC_ONE_ROW 0
++#    endif
++#endif // GGML_CUDA_TOP_K_NCOLS_THRESHOLD_BITONIC_ONE_ROW
++
+ #ifdef GGML_CUDA_USE_CUB
+ #    include <cub/cub.cuh>
+ // DeviceTopK has a race condition before CCCL 3.4.3.
+@@ -399,7 +408,9 @@ void ggml_cuda_op_top_k(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+                                   ncols <= GGML_CUDA_TOP_K_NCOLS_THRESHOLD_BITONIC_FEW_ROWS &&
+                                   nrows <= ggml_cuda_info().devices[device].nsm;
+ 
+-    if (bitonic_short || bitonic_few_rows) {
++    const bool bitonic_one_row  = nrows == 1 && ncols <= GGML_CUDA_TOP_K_NCOLS_THRESHOLD_BITONIC_ONE_ROW;
++
++    if (bitonic_short || bitonic_few_rows || bitonic_one_row) {
+         // the padded row must fit in shared memory
+         const int ncols_pad = next_power_of_2(ncols);
+         if (ncols_pad * sizeof(int) <= ggml_cuda_info().devices[device].smpb) {
