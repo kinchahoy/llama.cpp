@@ -6,6 +6,7 @@ Local enhancements for two 32 GiB gfx906 GPUs (MI50/MI60), primarily tested with
 | --- | --- |
 | [Improvements](IMPROVEMENTS.md) | What changed, why it helps, and what to revisit |
 | [Performance](PERFORMANCE.md) | Representative measurements and their limits |
+| [Token budget](TOKEN-BUDGET.md) | Where one decode token goes, step by step, per model (profiled, growing record) |
 | [Hardware guide](HARDWARE-GUIDE.md) | What gfx906 can and cannot do, and which optimization tricks carry over from newer GPUs |
 | [Catch up](how-to-catchup.md) | Merge upstream and run one final validation pass; patch export is optional |
 | [Current patch kit](patches/llama-head-36a0e2ffc/README.md) | Replayable overlay for the `36a0e2ffc` base |
