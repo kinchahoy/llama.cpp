@@ -12,7 +12,7 @@ The rebuild removed multi-stage TP (`-tps`) and the fork-only DeepSeek V4/V4.1, 
 
 Use the normal checkout. The human first commits and pushes the reviewed current state to the personal fork, including any local work that must be kept. Confirm the push succeeded and start with a clean tracked working tree. Agents do not commit or push. Keep unrelated untracked files untouched.
 
-Keep the previous successful build in its original directory with all its shared libraries. Do not rebuild it, copy only its executable, or rename it: build paths can be embedded in library lookup. Set `BASE` to that build; on the first run it is `build-ilp`. Build each candidate in a new directory and keep the last two successful builds for quick comparisons. After acceptance, that candidate becomes the next merge's baseline. Record its path and source identity with the results.
+Keep the previous successful build in its original directory with all its shared libraries. Do not rebuild it, copy only its executable, or rename it: build paths can be embedded in library lookup. Set `BASE` to that build; as of 2026-11-11 it is `build-mslot-ring` (`build-play-b1` is kept as the previous one). Build each candidate in a new directory and keep the last two successful builds for quick comparisons. After acceptance, that candidate becomes the next merge's baseline. Record its path and source identity with the results.
 
 Run from the repository root in Bash, keeping these variables for the later steps:
 
@@ -22,7 +22,7 @@ git config rerere.enabled true
 git config rerere.autoupdate false
 
 OLD_HEAD=$(git rev-parse HEAD)
-BASE="$PWD/build-ilp" # On later merges, use the last accepted candidate build.
+BASE="$PWD/build-mslot-ring" # The last accepted build; update after each accepted merge.
 CAND="$PWD/build-catchup-$(date +%Y%m%d-%H%M%S)"
 OUT="$CAND/validation"
 mkdir -p "$OUT"
