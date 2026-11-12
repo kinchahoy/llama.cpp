@@ -11,6 +11,7 @@ ask() {
 }
 ask qwen27b
 ask flashnext
-grep -hE "n_slots = |rollback currently|speculative decoding will use| E " "$T/router.log" | sort -u | head
+ask flashnext-long
+grep -hE "n_slots = |rollback currently|n_rs_seq  | E " "$T/router.log" | sort -u | head
 kill $R; wait $R 2>/dev/null; sleep 5
 pgrep -af llama-server | grep -v pgrep | head -3

@@ -48,6 +48,32 @@ These limits are worth retrying after the memory or rollback fixes:
 
 Hint for next time: the full-pool attention fallback ("Flash Attention over K/V rows" disabled) likely makes compute buffers scale with the unified pool size (2164 MiB at 262K); that, not the KV itself, appears to limit the pool. Unverified for Flash Next.
 
+## Flash Next 2-slot MTP3 context sweep (after the multi-slot rollback fix)
+
+Build `build-mslot-ring` (fbc067862, see [the rollback record](../2026-11-11-multislot-rollback/README.md)). Flash Next MTP3, Q8_0 sidecar on ROCm1, `-np 2 --kv-unified`, 1024/512. Each pool: 5-prompt serial run, 2 concurrent requests, then one prompt at 90% of the pool. ROCm1 total is 34.34 GB; it holds the draft and runs out first.
+
+| Pool | Split | 1 user TG (ms/step) | 2 users aggregate | Long fill: tokens, PP / TG | ROCm1 free at peak |
+| --- | --- | ---: | ---: | --- | ---: |
+| 131072 | 0.52 | - | - | load failed (draft weights 3317 MiB on ROCm1) | - |
+| 114688 | 0.52 | - | - | load failed (224 MiB on ROCm1) | - |
+| 98304 | 0.52 | - | - | load failed (135 MiB on ROCm1) | - |
+| 98304 | 0.56 | - | - | loaded; 50 MiB runtime allocation on ROCm1 failed at the first request (abort) | - |
+| 81920 | 0.52 / 0.55 | 67.6 / 68.9 (45.3 / 44.4) | 36.1 / 36.4 | 73757, 342 / 36.6 | 0.03 GB |
+| 73728 | 0.52 | 65.6 (46.8) | 35.4 | 66384, 347 / 42.4 | 0.16 GB |
+| 65536 | 0.52 | 67.6 (45.3) | 36.1 | 59011, 359 / 44.1 | 0.37 GB |
+
+The `flashnext` preset uses 65536, the largest pool with a margin for runtime scratch allocations (the 98K crash was a 50 MiB one). Split 0.55 or 0.56 left memory use unchanged; tensor split moves in coarse steps here. Long-fill TG includes the draft's prompt catch-up (SP4), so it is lower than steady state.
+
+Final presets (vr/server/models.ini, router check on build-mslot-ring: all load and answer):
+
+| Preset | Slots / pool | 1 user TG | N users aggregate | PP (server) | Longest verified prompt |
+| --- | --- | ---: | ---: | ---: | --- |
+| `qwen27b` MTP2 | 4 / 262144 | about 65 | 4: about 41 | about 590 | 200K |
+| `flashnext` MTP3 | 2 / 65536 | about 67 | 2: about 36 | about 480 | 59K |
+| `flashnext-long` no draft | 4 / 131072 | about 48 | 4: about 41 | about 500 | 120K |
+
+Retry ideas for a larger MTP pool: move the draft to ROCm0 with a split that frees ROCm0 (earlier 4-slot attempt at 64K left only 10 MiB there), shrink `spec-draft-n-ubatch` or target `-ub` to cut compute buffers (costs PP), or load the sidecar weights at lower precision.
+
 ## Files
 
-`raw/`: harness (`run.sh`, `conc.py`, `longfill*.py`, `all*.sh`, `routercheck.sh`), result text and server logs (prompt-progress lines removed).
+`raw/`: harness (`run.sh`, `run2.sh`, `conc.py`, `longfill*.py`, `all*.sh`, `sweep*.sh`, `routercheck.sh`), result text and server logs (prompt-progress lines removed).

@@ -1,0 +1,40 @@
+== sw_np2mtp_131072
+   FAILED to start:
+0.54.464.070 E ggml_backend_cuda_buffer_type_alloc_buffer: allocating 3317.02 MiB on device 1: cudaMalloc failed: out of memory
+0.54.464.073 E ggml_backend_buft_alloc_buffer_n_default: failed to allocate ROCm1_Repacked buffer of size 3478147328
+0.54.544.677 E llama_model_load: error loading model: unable to allocate ROCm1_Repacked buffer
+0.54.544.688 E llama_model_load_from_file_impl: failed to load model
+0.54.544.691 E common_speculative_init_result: failed to load draft model, '/home/raistlin/.cache/huggingface/hub/models--unsloth--Qwen3.8-Flash-Next-GGUF/snapshots/d96201194f103c906994f283f504209dc8d2a10c/mtp-Qwen3.8-Flash-Next-Q8_0.gguf'
+== sw_np2mtp_114688
+   FAILED to start:
+0.19.737.974 E ggml_backend_cuda_buffer_type_alloc_buffer: allocating 224.00 MiB on device 1: cudaMalloc failed: out of memory
+0.19.737.976 E ggml_backend_buft_alloc_buffer_n_default: failed to allocate ROCm1 buffer of size 234881024
+0.19.738.960 E llama_init_from_model: failed to initialize the context: failed to allocate buffer for kv cache
+0.19.738.964 E common_speculative_init_result: failed to create MTP context
+0.19.738.970 E srv    load_model: failed to create MTP context
+== sw_np2mtp_98304
+   FAILED to start:
+0.19.917.348 E ggml_backend_cuda_buffer_type_alloc_buffer: allocating 134.67 MiB on device 1: cudaMalloc failed: out of memory
+0.19.917.355 E ggml_gallocr_reserve_n_impl: failed to allocate ROCm1 buffer of size 141211264
+0.19.917.357 E graph_reserve: failed to allocate compute buffers
+0.19.919.857 E llama_init_from_model: failed to initialize the context: failed to allocate compute pp buffers
+0.19.919.862 E common_speculative_init_result: failed to create MTP context
+== sw_np2mtp_81920
+  p1.txt tg 64.3 acc 0.640 ms/step 44.53 pp 406
+  p2.txt tg 79.6 acc 0.912 ms/step 45.75 pp 486
+  p3.txt tg 73.4 acc 0.814 ms/step 45.74 pp 451
+  p4.txt tg 55.1 acc 0.495 ms/step 44.53 pp 69
+  p5.txt tg 65.5 acc 0.684 ms/step 45.82 pp 88
+MEAN tg 67.57 acc 0.709 ms/step 45.27
+CONC 2: per-stream tg 38.9 46.4 | aggregate gen 36.1 t/s (incl prefill, wall 14.2s)
+LONGFILL prompt 73757 tok, pp 341.6 t/s, tg 36.6 t/s, wall 218s
+ANSWER:   <think> The user asks me to name three of the source files shown above (they start with `// FILE:`) and describe in one sentence what each does.  Looking at the code, I can see three files marked with `// FILE:`: 1. `llama-adapter.cpp` 2
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 32352342016
+   GPU[1]		: VRAM Total Used Memory (B): 34309074944
