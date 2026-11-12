@@ -1,0 +1,172 @@
+#include "llama-context.h"
+
+#include "ggml.h"
+#include "gguf.h"
+#include "llama-arch.h"
+#include "llama-graph.h"
+#include "llama-impl.h"
+#include "llama-batch.h"
+#include "llama-io.h"
+#include "llama-memory.h"
+#include "llama-mmap.h"
+#include "llama-model.h"
+#include "llama-moe-cache.h"
+#include "llama-ext.h"
+#include "llama-sampler.h"
+#include "llama.h"
+
+#include "../ggml/src/ggml-backend-sched-impl.h"
+
+#include <algorithm>
+#include <cinttypes>
+#include <cmath>
+#include <cstring>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+
+//
+// llama_context
+//
+
+// check that each folded weight in the graph gets its Hadamard transform, and each latent lookup gets the inverse
+// without this check, an arch that skips the transform helpers loads and computes wrong results
+static void llama_verify_hadamard_graph(
+        ggml_cgraph * gf,
+        const llama_hadamard_rotations & rotations,
+        const llama_hadamard_rotations & inverses,
+        const llama_moe_cache * moe_cache) {
+    // the MoE cache gives the matmul a copy of the expert weights, so the copy also needs the transform of its source
+    llama_hadamard_rotations forward = rotations;
+    for (const auto & [w, t] : rotations) {
+        if (const ggml_tensor * cached = moe_cache ? moe_cache->get_experts(w) : nullptr) {
+            forward.emplace(cached, t);
+        }
+    }
+
+    auto unwrap = [](const ggml_tensor * t) {
+        while (t && (t->op == GGML_OP_RESHAPE || t->op == GGML_OP_VIEW)) {
+            t = t->src[0];
+        }
+        return t;
+    };
+
+    std::map<const ggml_tensor *, bool> lookups; // get_rows results of latent tables
+
+    for (int i = 0; i < ggml_graph_n_nodes(gf); ++i) {
+        const ggml_tensor * node = ggml_graph_node(gf, i);
+
+        if (node->op == GGML_OP_GET_ROWS && inverses.count(node->src[0])) {
+            lookups.emplace(node, false);
+            continue;
+        }
+
+        if (node->op != GGML_OP_MUL_MAT && node->op != GGML_OP_MUL_MAT_ID) {
+            continue;
+        }
+
+        if (node->op == GGML_OP_MUL_MAT && ((const int32_t *) node->op_params)[1] == GGML_HINT_SRC0_IS_HADAMARD) {
+            const auto lk = lookups.find(unwrap(node->src[1]));
+            if (lk != lookups.end()) {
+                lk->second = true;
+            }
+            continue;
+        }
+
+        const auto it = forward.find(node->src[0]);
+        if (it == forward.end()) {
+            if (inverses.count(node->src[0])) {
+                throw std::runtime_error(format(
+                    "Hadamard-latent table '%s' is used as a head without a forward transform", node->src[0]->name));
+            }
+            continue;
+        }
+        const ggml_tensor * src = unwrap(node->src[1]);
+        const bool transformed = src && src->op == GGML_OP_MUL_MAT &&
+            ((const int32_t *) src->op_params)[1] == GGML_HINT_SRC0_IS_HADAMARD &&
+            src->src[0] == it->second.rot;
+        if (!transformed) {
+            throw std::runtime_error(format(
+                "Hadamard-folded weight '%s' is consumed without its activation transform; "
+                "this graph's matmul path does not support prism.hadamard folding",
+                node->src[0]->name));
+        }
+    }
+
+    for (const auto & [node, ok] : lookups) {
+        if (!ok) {
+            for (int i = 0; i < ggml_graph_n_nodes(gf); ++i) {
+                const ggml_tensor * n2 = ggml_graph_node(gf, i);
+                for (int s = 0; s < GGML_MAX_SRC && n2->src[s]; ++s) {
+                    if (unwrap(n2->src[s]) == node) {
+                        LLAMA_LOG_WARN("%s: latent lookup '%s' consumed by op=%s name='%s' src%d hint=%d\n",
+                                __func__, node->name, ggml_op_name(n2->op), n2->name, s,
+                                ((const int32_t *) n2->op_params)[1]);
+                    }
+                }
+            }
+            throw std::runtime_error(format(
+                "Hadamard-latent table '%s' is read without the inverse transform",
+                node->src[0]->name));
+        }
+    }
+}
+
+static llm_graph_type ctx_type_to_graph_type(llama_context_type ctx_type) {
+    switch (ctx_type) {
+        case LLAMA_CONTEXT_TYPE_DEFAULT: return LLM_GRAPH_TYPE_DEFAULT;
+        case LLAMA_CONTEXT_TYPE_MTP    : return LLM_GRAPH_TYPE_DECODER_MTP;
+    }
+    throw std::runtime_error("Unsupported ctx type");
+}
+
+struct llm_fused_op_probe {
+    llm_fused_op op;
+    const char * name;
+    uint32_t n_tokens_per_seq;
+};
+
+static const llm_fused_op_probe llm_fused_op_flash_attn_probe = {
+    /*.op               =*/ LLM_FUSED_OP_FLASH_ATTN,
+    /*.name             =*/ "Flash Attention",
+    /*.n_tokens_per_seq =*/ 1,
+};
+
+static const llm_fused_op_probe llm_fused_op_flash_attn_kv_rows_probe = {
+    /*.op               =*/ LLM_FUSED_OP_FLASH_ATTN_KV_ROWS,
+    /*.name             =*/ "Flash Attention over K/V rows",
+    /*.n_tokens_per_seq =*/ 1,
+};
+
+static const llm_fused_op_probe llm_fused_op_gdn_ar_probe = {
+    /*.op               =*/ LLM_FUSED_OP_GDN_AR,
+    /*.name             =*/ "fused Gated Delta Net (autoregressive)",
+    /*.n_tokens_per_seq =*/ 1,
+};
+
+static const llm_fused_op_probe llm_fused_op_gdn_ch_probe = {
+    /*.op               =*/ LLM_FUSED_OP_GDN_CH,
+    /*.name             =*/ "fused Gated Delta Net (chunked)",
+    /*.n_tokens_per_seq =*/ 16,
+};
+
+static const llm_fused_op_probe llm_fused_op_lid_probe = {
+    /*.op               =*/ LLM_FUSED_OP_LIGHTNING_INDEXER,
+    /*.name             =*/ "Lightning Indexer",
+    /*.n_tokens_per_seq =*/ 1,
+};
+
+static const llm_fused_op_probe llm_fused_op_dsv4_hc_pre_probe = {
+    /*.op               =*/ LLM_FUSED_OP_DSV4_HC_PRE,
+    /*.name             =*/ "fused DeepSeek V4 HC pre",
+    /*.n_tokens_per_seq =*/ 1,
+};
+
+static const llm_fused_op_probe llm_fused_op_dsv4_hc_comb_probe = {
+    /*.op               =*/ LLM_FUSED_OP_DSV4_HC_COMB,
+    /*.name             =*/ "fused DeepSeek V4 HC comb",
+    /*.n_tokens_per_seq =*/ 1,
+};
+
+static const llm_fused_op_probe l

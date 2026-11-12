@@ -1,0 +1,39 @@
+== fnG_np4_nospec_160k_ts47
+  p1.txt tg 48.1 acc 0.000 ms/step 20.70 pp 480
+  p2.txt tg 48.5 acc 0.000 ms/step 20.54 pp 531
+  p3.txt tg 48.4 acc 0.000 ms/step 20.58 pp 494
+  p4.txt tg 49.0 acc 0.000 ms/step 20.32 pp 71
+  p5.txt tg 49.2 acc 0.000 ms/step 20.24 pp 89
+MEAN tg 48.65 acc 0.000 ms/step 20.48
+CONC 4: per-stream tg 15.6 23.0 15.6 23.2 | aggregate gen 41.0 t/s (incl prefill, wall 25.0s)
+LONGFILL prompt 150029 tok, pp 257.0 t/s, tg 0.0 t/s, wall 585s
+ANSWER: 
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 31707721728
+   GPU[1]		: VRAM Total Used Memory (B): 34190135296
+== fnH_np4_nospec_128k_ts47
+  p1.txt tg 47.5 acc 0.000 ms/step 20.95 pp 448
+  p2.txt tg 48.4 acc 0.000 ms/step 20.57 pp 529
+  p3.txt tg 48.1 acc 0.000 ms/step 20.73 pp 491
+  p4.txt tg 49.3 acc 0.000 ms/step 20.21 pp 69
+  p5.txt tg 47.9 acc 0.000 ms/step 20.78 pp 89
+MEAN tg 48.25 acc 0.000 ms/step 20.65
+CONC 4: per-stream tg 15.5 22.9 15.5 23.2 | aggregate gen 40.7 t/s (incl prefill, wall 25.1s)
+LONGFILL prompt 120029 tok, pp 287.6 t/s, tg 0.0 t/s, wall 419s
+ANSWER: 
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 31657766912
+   GPU[1]		: VRAM Total Used Memory (B): 33718870016
+== qG_np4_mtp_262k_fill
+  p1.txt tg 68.8 acc 0.861 ms/step 39.00 pp 503
+  p2.txt tg 67.5 acc 0.906 ms/step 41.03 pp 599
+  p3.txt tg 54.2 acc 0.641 ms/step 41.64 pp 595
+  p4.txt tg 56.8 acc 0.701 ms/step 41.54 pp 83
+  p5.txt tg 61.1 acc 0.775 ms/step 41.34 pp 108
+MEAN tg 61.70 acc 0.777 ms/step 40.91
+CONC 4: per-stream tg 14.9 22.0 19.3 21.6 | aggregate gen 40.2 t/s (incl prefill, wall 25.5s)
+LONGFILL prompt 200029 tok, pp 218.9 t/s, tg 28.3 t/s, wall 919s
+ANSWER:   <think> The user wants me to name three source files that start with "// FILE:" and briefly describe what each does in one sentence.  Looking through the code, I can see several files marked with "// FILE:":  1. `// FILE: llama-adapter.cpp` - Handles adapter implementations (control vectors and LoRA adapters) for modifying model behavior. 2. `// FILE: llama-arch.cpp` - Defines architecture names
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 33049247744
+   GPU[1]		: VRAM Total Used Memory (B): 33042423808

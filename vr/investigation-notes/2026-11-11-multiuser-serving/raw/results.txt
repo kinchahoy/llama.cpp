@@ -1,0 +1,67 @@
+== fnA_np1_spec
+  p1.txt tg 55.9 acc 0.640 ms/step 51.26 pp 434
+  p2.txt tg 77.2 acc 0.912 ms/step 47.20 pp 490
+  p3.txt tg 70.6 acc 0.814 ms/step 47.51 pp 457
+  p4.txt tg 51.3 acc 0.495 ms/step 47.79 pp 66
+  p5.txt tg 64.1 acc 0.684 ms/step 46.80 pp 87
+MEAN tg 63.82 acc 0.709 ms/step 48.11
+CONC 2: per-stream tg 62.5 78.4 | aggregate gen 34.6 t/s (incl prefill, wall 14.8s)
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 30601703424
+   GPU[1]		: VRAM Total Used Memory (B): 32991121408
+== fnB_np2_spec
+   0.26.583.722 W llama_context: qwen4exp recurrent rollback currently requires n_seq_max=1; clamping n_rs_seq to 0
+  p1.txt tg 28.6 acc 0.716 ms/step 84.93 pp 449
+  p2.txt tg 46.3 acc 0.949 ms/step 77.60 pp 503
+  p3.txt tg 35.2 acc 0.844 ms/step 82.26 pp 475
+  p4.txt tg 21.4 acc 0.508 ms/step 88.85 pp 73
+  p5.txt tg 30.0 acc 0.726 ms/step 83.37 pp 91
+MEAN tg 32.30 acc 0.749 ms/step 83.40
+CONC 2: per-stream tg 16.6 20.3 | aggregate gen 22.4 t/s (incl prefill, wall 22.9s)
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 30515879936
+   GPU[1]		: VRAM Total Used Memory (B): 32975163392
+== fnC_np2_nospec
+  p1.txt tg 49.2 acc 0.000 ms/step 20.26 pp 499
+  p2.txt tg 49.5 acc 0.000 ms/step 20.14 pp 552
+  p3.txt tg 50.0 acc 0.000 ms/step 19.91 pp 520
+  p4.txt tg 50.7 acc 0.000 ms/step 19.65 pp 73
+  p5.txt tg 50.3 acc 0.000 ms/step 19.79 pp 95
+MEAN tg 49.93 acc 0.000 ms/step 19.95
+CONC 2: per-stream tg 34.8 35.5 | aggregate gen 35.9 t/s (incl prefill, wall 14.3s)
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 30508498944
+   GPU[1]		: VRAM Total Used Memory (B): 29243363328
+== fnD_np4_nospec_100k
+  p1.txt tg 49.7 acc 0.000 ms/step 20.04 pp 499
+  p2.txt tg 49.7 acc 0.000 ms/step 20.04 pp 556
+  p3.txt tg 50.0 acc 0.000 ms/step 19.94 pp 520
+  p4.txt tg 50.9 acc 0.000 ms/step 19.55 pp 72
+  p5.txt tg 50.8 acc 0.000 ms/step 19.60 pp 94
+MEAN tg 50.22 acc 0.000 ms/step 19.83
+CONC 4: per-stream tg 23.3 18.0 13.9 23.0 | aggregate gen 41.2 t/s (incl prefill, wall 24.8s)
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 33010868224
+   GPU[1]		: VRAM Total Used Memory (B): 30888980480
+== qE_np4_mtp_262k
+  p1.txt tg 68.4 acc 0.861 ms/step 39.23 pp 584
+  p2.txt tg 71.8 acc 0.906 ms/step 38.60 pp 602
+  p3.txt tg 59.0 acc 0.641 ms/step 38.24 pp 598
+  p4.txt tg 61.9 acc 0.701 ms/step 38.17 pp 83
+  p5.txt tg 66.8 acc 0.775 ms/step 37.79 pp 106
+MEAN tg 65.58 acc 0.777 ms/step 38.41
+CONC 4: per-stream tg 22.1 22.4 19.6 15.2 | aggregate gen 41.2 t/s (incl prefill, wall 24.8s)
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 32943357952
+   GPU[1]		: VRAM Total Used Memory (B): 33026756608
+== qF_np4_nospec_262k
+  p1.txt tg 37.1 acc 0.000 ms/step 26.85 pp 655
+  p2.txt tg 36.7 acc 0.000 ms/step 27.11 pp 657
+  p3.txt tg 33.7 acc 0.000 ms/step 29.55 pp 619
+  p4.txt tg 33.1 acc 0.000 ms/step 30.12 pp 57
+  p5.txt tg 32.9 acc 0.000 ms/step 30.25 pp 30
+MEAN tg 34.71 acc 0.000 ms/step 28.78
+CONC 4: per-stream tg 23.9 23.6 21.7 16.4 | aggregate gen 43.9 t/s (incl prefill, wall 23.3s)
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 28434726912
+   GPU[1]		: VRAM Total Used Memory (B): 28473507840

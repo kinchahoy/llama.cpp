@@ -1,0 +1,1 @@
+LF=longfill2.py FILL=150000 ./run.sh fnL_160k_ts49_fill150k 4 -- -ngl 999 -dev ROCm0,ROCm1 -sm tensor -fa on -t 20 --fit off -ctk f16 -ctv f16 -m /home/raistlin/models/flashnext/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00004.gguf -b 1024 -ub 512 -np 4 --kv-unified -ts 0.49,0.51 -c 163840

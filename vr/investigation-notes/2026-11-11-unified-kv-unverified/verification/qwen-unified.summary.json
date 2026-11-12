@@ -1,0 +1,59 @@
+{
+  "performance_exit": 0,
+  "isolation": [
+    {
+      "wave": "concurrent",
+      "results": [
+        {
+          "prompt": 0,
+          "slot": 0,
+          "text_equal_serial": false,
+          "token_prefix_equal": 91,
+          "token_count": 128,
+          "probability_rows": 128,
+          "non_argmax_rows": [],
+          "predicted": 128
+        },
+        {
+          "prompt": 1,
+          "slot": 1,
+          "text_equal_serial": false,
+          "token_prefix_equal": 1,
+          "token_count": 128,
+          "probability_rows": 128,
+          "non_argmax_rows": [],
+          "predicted": 128
+        }
+      ]
+    },
+    {
+      "wave": "swapped",
+      "results": [
+        {
+          "prompt": 0,
+          "slot": 1,
+          "text_equal_serial": false,
+          "token_prefix_equal": 91,
+          "token_count": 128,
+          "probability_rows": 128,
+          "non_argmax_rows": [],
+          "predicted": 128
+        },
+        {
+          "prompt": 1,
+          "slot": 0,
+          "text_equal_serial": true,
+          "token_prefix_equal": 128,
+          "token_count": 128,
+          "probability_rows": 128,
+          "non_argmax_rows": [],
+          "predicted": 128
+        }
+      ]
+    }
+  ],
+  "health_after": {
+    "status": "ok"
+  },
+  "status": "completed"
+}
