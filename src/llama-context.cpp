@@ -209,13 +209,6 @@ llama_context::llama_context(
         LLAMA_LOG_DEBUG("%s: n_rs_seq=%u requested but model does not support recurrent partial rollback; clamping to 0\n",
                         __func__, cparams.n_rs_seq);
         cparams.n_rs_seq = 0;
-    } else if (cparams.n_rs_seq > 0 && model.arch == LLM_ARCH_QWEN4EXP && cparams.n_seq_max > 1) {
-        // The snapshot ring currently has no cross-sequence plane-copy planner.
-        // Keep multi-slot Qwen4exp on the no-rollback behavior instead of using the unproven plane-indexed path.
-        LLAMA_LOG_WARN(
-                "%s: qwen4exp recurrent rollback currently requires n_seq_max=1; clamping n_rs_seq to 0\n",
-                __func__);
-        cparams.n_rs_seq = 0;
     }
 
     cparams.n_threads               = params.n_threads;

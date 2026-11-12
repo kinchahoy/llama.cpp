@@ -343,6 +343,12 @@ void llama_memory_recurrent::seq_cp(llama_seq_id seq_id_src, llama_seq_id seq_id
 
             cell_src.seq_id.insert(seq_id_dst);
             tail_dst.tail = tail_src.tail;
+
+            // a pending rollback of the source is part of its logical state
+            if (!ring_enabled && (uint32_t) seq_id_src < n_seq_max && (uint32_t) seq_id_dst < n_seq_max) {
+                rs_idx[seq_id_dst]    = rs_idx[seq_id_src];
+                rs_target[seq_id_dst] = rs_target[seq_id_src];
+            }
         }
     }
 }
@@ -819,6 +825,9 @@ bool llama_memory_recurrent::find_slot(const llama_ubatch & ubatch) {
             std::swap(dst_cell.pos, src_cell.pos);
             std::swap(dst_cell.src, src_cell.src);
             std::swap(dst_cell.seq_id, src_cell.seq_id);
+
+            // only the current state row follows a displaced sequence, not its rollback planes
+            src_cell.rs_max = 0;
 
             // swap tails
             for (uint32_t j = 0; j < size; ++j) {
