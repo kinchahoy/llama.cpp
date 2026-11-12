@@ -1,0 +1,353 @@
+== u384_np2mtp_98304
+Traceback (most recent call last):
+  File "/home/raistlin/infer/vrversion-llama.cpp/vr/scripts/spec_accept.py", line 12, in <module>
+    t = json.load(urllib.request.urlopen(req, timeout=900))["timings"]
+                  ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/usr/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/usr/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/usr/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 1325, in do_open
+    r = h.getresponse()
+  File "/usr/lib/python3.14/http/client.py", line 1459, in getresponse
+    response.begin()
+    ~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/http/client.py", line 336, in begin
+    version, status, reason = self._read_status()
+                              ~~~~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/http/client.py", line 305, in _read_status
+    raise RemoteDisconnected("Remote end closed connection without"
+                             " response")
+http.client.RemoteDisconnected: Remote end closed connection without response
+Exception in thread Thread-1 (run):
+Exception in thread Thread-2 (run):
+Traceback (most recent call last):
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1122, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1066, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1032, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/usr/lib/python3.14/http/client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ConnectionRefusedError: [Errno 111] Connection refused
+  File "/usr/lib/python3.14/http/client.py", line 1122, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1066, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/http/client.py", line 1032, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/usr/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+  File "/usr/lib/python3.14/threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+ConnectionRefusedError: [Errno 111] Connection refused
+  File "/usr/lib/python3.14/threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<harness dir>/./conc.py", line 10, in run
+    res[i] = json.load(urllib.request.urlopen(req, timeout=1800))["timings"]
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+
+During handling of the above exception, another exception occurred:
+
+  File "/usr/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/usr/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 111] Connection refused>
+  File "/usr/lib/python3.14/threading.py", line 1082, in _bootstrap_inner
+    self._context.run(self.run)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/usr/lib/python3.14/threading.py", line 1024, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<harness dir>/./conc.py", line 10, in run
+    res[i] = json.load(urllib.request.urlopen(req, timeout=1800))["timings"]
+                       ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/usr/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/usr/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/usr/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 111] Connection refused>
+Traceback (most recent call last):
+  File "<harness dir>/./conc.py", line 13, in <module>
+    tot = sum(r["predicted_n"] for r in res)
+  File "<harness dir>/./conc.py", line 13, in <genexpr>
+    tot = sum(r["predicted_n"] for r in res)
+              ~^^^^^^^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1122, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1066, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/http/client.py", line 1032, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/usr/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 111] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<harness dir>/./longfill2.py", line 12, in <module>
+    n = len(post("/tokenize", {"content": text})["tokens"])
+            ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<harness dir>/./longfill2.py", line 6, in post
+    return json.load(urllib.request.urlopen(r, timeout=to))
+                     ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/usr/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/usr/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/usr/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 111] Connection refused>
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1122, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1066, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/http/client.py", line 1032, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/usr/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 111] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<harness dir>/./conclong.py", line 18, in <module>
+    prompts = [build(s) for s in sets]
+               ~~~~~^^^
+  File "<harness dir>/./conclong.py", line 14, in build
+    toks = post("/tokenize", {"content": text})["tokens"][:each]
+           ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<harness dir>/./conclong.py", line 7, in post
+    return json.load(urllib.request.urlopen(r, timeout=to))
+                     ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/usr/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/usr/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/usr/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 111] Connection refused>
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 32409452544
+   GPU[1]		: VRAM Total Used Memory (B): 34130636800
+./run3.sh: line 22: 494343 Segmentation fault         (core dumped) $REPO/${BUILD_DIR:-build-play-b1}/bin/llama-server --offline --host 127.0.0.1 --port $PORT --metrics "$@" > $OUT/$NAME.log 2>&1
+== u384_np2mtp_94208
+  p1.txt tg 60.2 acc 0.651 ms/step 48.13 pp 422
+  p2.txt tg 76.0 acc 0.894 ms/step 47.25 pp 482
+  p3.txt tg 72.0 acc 0.814 ms/step 46.57 pp 470
+  p4.txt tg 53.8 acc 0.495 ms/step 45.60 pp 73
+  p5.txt tg 65.4 acc 0.684 ms/step 45.85 pp 87
+MEAN tg 65.49 acc 0.708 ms/step 46.68
+CONC 2: per-stream tg 34.0 44.9 | aggregate gen 36.0 t/s (incl prefill, wall 14.2s)
+LONGFILL prompt 84816 tok, pp 315.4 t/s, tg 35.2 t/s, wall 271s
+ANSWER:   <think> The user is asking me to name three of the source files shown above (identified by `// FILE:` comments) and describe in one sentence what each does.  Looking at the code, I can identify these files: 1. `llama-adapter.cpp` - handles LoRA adapters and control
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+CONCLONG 0 ERROR <HTTPError 500: 'Internal Server Error'>
+CONCLONG 1 ERROR <HTTPError 500: 'Internal Server Error'>
+CONCLONG wall 44s
+HEALTH {"status":"ok"}
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 32595230720
+   GPU[1]		: VRAM Total Used Memory (B): 34299650048
+== u384_np2mtp_90112
+  p1.txt tg 64.7 acc 0.651 ms/step 44.75 pp 463
+  p2.txt tg 77.6 acc 0.894 ms/step 46.27 pp 481
+  p3.txt tg 72.5 acc 0.814 ms/step 46.28 pp 466
+  p4.txt tg 47.8 acc 0.495 ms/step 51.31 pp 70
+  p5.txt tg 60.9 acc 0.684 ms/step 49.26 pp 61
+MEAN tg 64.71 acc 0.708 ms/step 47.58
+CONC 2: per-stream tg 33.4 46.2 | aggregate gen 34.8 t/s (incl prefill, wall 14.7s)
+LONGFILL prompt 81129 tok, pp 321.5 t/s, tg 33.6 t/s, wall 255s
+ANSWER:   <think> The user is asking me to name three of the source files shown in the code above (identified by `// FILE:` comments) and describe what each does in one sentence.  Looking at the code, I can see three files marked with `// FILE:` comments:  1. `// FILE:
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+CONCLONG 0 ERROR <HTTPError 500: 'Internal Server Error'>
+CONCLONG 1 ERROR <HTTPError 500: 'Internal Server Error'>
+CONCLONG wall 42s
+HEALTH {"status":"ok"}
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 32482787328
+   GPU[1]		: VRAM Total Used Memory (B): 34304761856
+== u384_np2mtp_86016
+  p1.txt tg 59.9 acc 0.651 ms/step 48.39 pp 446
+  p2.txt tg 77.9 acc 0.894 ms/step 46.10 pp 498
+  p3.txt tg 72.5 acc 0.814 ms/step 46.26 pp 467
+  p4.txt tg 55.0 acc 0.495 ms/step 44.62 pp 69
+  p5.txt tg 67.1 acc 0.684 ms/step 44.69 pp 88
+MEAN tg 66.48 acc 0.708 ms/step 46.01
+CONC 2: per-stream tg 33.6 46.5 | aggregate gen 35.0 t/s (incl prefill, wall 14.6s)
+LONGFILL prompt 77443 tok, pp 322.7 t/s, tg 36.4 t/s, wall 242s
+ANSWER:   <think> The user is asking me to name three of the source files shown in the provided code (which start with `// FILE:`) and describe in one sentence what each does.  Looking at the code, I can see three files marked with `// FILE:` comments:  1. `// FILE:
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+CONCLONG 0 ERROR <HTTPError 500: 'Internal Server Error'>
+CONCLONG 1 ERROR <HTTPError 500: 'Internal Server Error'>
+CONCLONG wall 38s
+HEALTH {"status":"ok"}
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 32367321088
+   GPU[1]		: VRAM Total Used Memory (B): 34307330048

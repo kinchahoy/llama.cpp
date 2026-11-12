@@ -1,0 +1,36 @@
+== pr_d0_65536_0.44,0.56
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 33967468544
+   GPU[1]		: VRAM Total Used Memory (B): 31426228224
+== pr_d0_65536_0.40,0.60
+   FAILED to start:
+0.17.152.675 E ggml_backend_cuda_buffer_type_alloc_buffer: allocating 1152.00 MiB on device 1: cudaMalloc failed: out of memory
+0.17.152.677 E ggml_backend_buft_alloc_buffer_n_default: failed to allocate ROCm1 buffer of size 1207959552
+0.17.152.678 E ggml_backend_meta_buffer_type_alloc_buffer_n: failed to allocate the ROCm1 slice 1 of a meta buffer
+0.17.158.918 E llama_init_from_model: failed to initialize the context: failed to allocate buffer for kv cache
+0.17.158.924 E cmn  common_init_: failed to create context with model '/home/raistlin/models/flashnext/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00004.gguf'
+== pr_d0_81920_0.44,0.56
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 34264367104
+   GPU[1]		: VRAM Total Used Memory (B): 31899635712
+== pr_d0_81920_0.40,0.60
+   FAILED to start:
+0.17.318.009 E ggml_backend_cuda_buffer_type_alloc_buffer: allocating 1440.00 MiB on device 1: cudaMalloc failed: out of memory
+0.17.318.011 E ggml_backend_buft_alloc_buffer_n_default: failed to allocate ROCm1 buffer of size 1509949440
+0.17.318.011 E ggml_backend_meta_buffer_type_alloc_buffer_n: failed to allocate the ROCm1 slice 1 of a meta buffer
+0.17.324.027 E llama_init_from_model: failed to initialize the context: failed to allocate buffer for kv cache
+0.17.324.033 E cmn  common_init_: failed to create context with model '/home/raistlin/models/flashnext/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00004.gguf'
+== pr_d0_98304_0.40,0.60
+   FAILED to start:
+0.17.101.330 E ggml_backend_cuda_buffer_type_alloc_buffer: allocating 1728.00 MiB on device 1: cudaMalloc failed: out of memory
+0.17.101.333 E ggml_backend_buft_alloc_buffer_n_default: failed to allocate ROCm1 buffer of size 1811939328
+0.17.101.333 E ggml_backend_meta_buffer_type_alloc_buffer_n: failed to allocate the ROCm1 slice 1 of a meta buffer
+0.17.107.802 E llama_init_from_model: failed to initialize the context: failed to allocate buffer for kv cache
+0.17.107.808 E cmn  common_init_: failed to create context with model '/home/raistlin/models/flashnext/UD-IQ3_XXS/Qwen3.8-Flash-Next-UD-IQ3_XXS-00001-of-00004.gguf'
+== pr_d0_98304_0.36,0.64
+   FAILED to start:
+0.01.208.103 E ggml_backend_cuda_buffer_type_alloc_buffer: allocating 17623.06 MiB on device 1: cudaMalloc failed: out of memory
+0.01.208.106 E ggml_backend_buft_alloc_buffer_n_default: failed to allocate ROCm1_Repacked buffer of size 18479121536
+0.01.208.106 E ggml_backend_meta_buffer_type_alloc_buffer_n: failed to allocate the ROCm1_Repacked slice 1 of a meta buffer
+0.01.942.684 E llama_model_load: error loading model: unable to allocate Meta(ROCm0_Repacked,ROCm1_Repacked) buffer
+0.01.942.692 E llama_model_load_from_file_impl: failed to load model

@@ -64,16 +64,47 @@ Build `build-mslot-ring` (fbc067862, see [the rollback record](../2026-11-11-mul
 
 The `flashnext` preset uses 65536, the largest pool with a margin for runtime scratch allocations (the 98K crash was a 50 MiB one). Split 0.55 or 0.56 left memory use unchanged; tensor split moves in coarse steps here. Long-fill TG includes the draft's prompt catch-up (SP4), so it is lower than steady state.
 
-Final presets (vr/server/models.ini, router check on build-mslot-ring: all load and answer):
+Final presets (vr/server/models.ini, updated by the ubatch section below; router check on build-mslot-ring: all load and answer):
 
 | Preset | Slots / pool | 1 user TG | N users aggregate | PP (server) | Longest verified prompt |
 | --- | --- | ---: | ---: | ---: | --- |
 | `qwen27b` MTP2 | 4 / 262144 | about 65 | 4: about 41 | about 590 | 200K |
-| `flashnext` MTP3 | 2 / 65536 | about 67 | 2: about 36 | about 480 | 59K |
+| `flashnext` MTP3, ubatch 384 | 2 / 90112 | about 65 | 2: about 35 | about 470 | 81K single; 2 x 30K at once |
 | `flashnext-long` no draft | 4 / 131072 | about 48 | 4: about 41 | about 500 | 120K |
 
-Retry ideas for a larger MTP pool: move the draft to ROCm0 with a split that frees ROCm0 (earlier 4-slot attempt at 64K left only 10 MiB there), shrink `spec-draft-n-ubatch` or target `-ub` to cut compute buffers (costs PP), or load the sidecar weights at lower precision.
+## Larger Flash Next MTP pool: draft placement and ubatch
+
+The user accepted a tight VRAM margin in exchange for more context, but not a PP loss.
+
+Draft on ROCm0 did not work (load-only probes, `probe.sh`): split 0.44/0.56 just moves the squeeze to ROCm0 (64K: 0.37 GB free on ROCm0; 80K: 0.08 GB after load alone), and 0.40/0.60 or 0.36/0.64 fail to load on ROCm1 at 64-98K. Tensor split moves memory in coarse steps (about 2.5 GB), so the 3+ GB free in total cannot be balanced. Same finding as PERFORMANCE.md D2.
+
+Flash Next PP2048, llama-bench, no draft, build-mslot-ring (`ub256.sh`, `ubmid.sh`):
+
+| ubatch | PP d0 | PP @ d32768 |
+| ---: | ---: | ---: |
+| 256 | 534.5 +- 0.9 | 388.8 +- 11.8 |
+| 384 | 599.6 +- 2.3 | 430.2 +- 13.3 |
+| 448 | 534.2 +- 2.0 | 405.6 +- 0.7 |
+| 512 | 598.2 +- 3.3 | 434.0 +- 6.9 |
+
+ubatch 384 keeps the PP of 512; 448 is not monotonic (likely kernel tile sizes). Server runs, 2 slots MTP3, draft ROCm1, split 0.52/0.48:
+
+| ubatch / pool | Short-prompt PP | 1 user TG (ms/step) | 2 users aggregate | Long fill: tokens, PP / TG | 2 x 30K at once (fresh server) |
+| --- | ---: | ---: | ---: | --- | --- |
+| 256 / 98304 | 383-420 | 63.8 (48.2) | 34.2 | 88502, 294 / 35.5 | not run |
+| 256 / 81920 | 393-442 | 66.4 (46.1) | 35.0 | 73757, 310 / 37.0 | not run |
+| 384 / 98304 | - | - | - | server died during the first short requests, no error logged | - |
+| 384 / 94208 | 422-482 | 65.5 (46.7) | 36.0 | 84816, 315 / 35.2 | both answered; PP 418 / 295, TG 1.0 / 41.7 |
+| 384 / 90112 (preset) | 463-481 | 64.7 (47.6) | 34.8 | 81129, 322 / 33.6 | both answered; PP 377 / 289, TG 1.0 / 42.2 |
+| 384 / 86016 | 446-498 | 66.5 (46.0) | 35.0 | 77443, 323 / 36.4 | not run clean |
+
+ROCm1 shows about 34.30 GB used after every run from 86K to 94K, so after a run the reading reflects memory the backend keeps reserved, not true headroom. 90112 is one step below the failing 98K.
+
+Two serving behaviors, found by the concurrent long tests:
+
+- A slot that receives a new, unrelated prompt keeps its old tokens until its own prefill starts, and only one prompt prefills at a time. With an earlier 77K conversation still in slot 1, two new prompts made the pool overflow and both requests failed with HTTP 500 "Context size has been exceeded" (`u384_np2mtp_*` logs). `--cache-idle-slots` and `try_clear_idle_slots` only clear idle slots, not ones that were just given a task. A fix would trim a slot's non-reusable tokens when its task is launched. Follow-up messages that reuse their slot's prefix are not affected.
+- While one user prefills a long prompt, the other user's generation drops to about 1 t/s (one token per prefill batch) until the prefill finishes. A smaller `batch-size` would interleave more often at some PP cost; untested.
 
 ## Files
 
-`raw/`: harness (`run.sh`, `run2.sh`, `conc.py`, `longfill*.py`, `all*.sh`, `sweep*.sh`, `routercheck.sh`), result text and server logs (prompt-progress lines removed).
+`raw/`: harness (`run.sh`, `run2.sh`, `run3.sh`, `conc.py`, `conclong.py`, `longfill*.py`, `all*.sh`, `sweep*.sh`, `probe.sh`, `ub256.sh`, `ubmid.sh`, `ub384sweep.sh`, `clean384.sh`, `routercheck.sh`), result text and server logs (prompt-progress lines removed).

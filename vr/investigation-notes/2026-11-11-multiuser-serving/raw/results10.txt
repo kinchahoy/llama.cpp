@@ -1,0 +1,45 @@
+== ub256_np2mtp_98304
+  p1.txt tg 55.3 acc 0.663 ms/step 53.01 pp 383
+  p2.txt tg 77.5 acc 0.881 ms/step 46.33 pp 420
+  p3.txt tg 67.1 acc 0.814 ms/step 49.97 pp 417
+  p4.txt tg 53.6 acc 0.495 ms/step 45.78 pp 66
+  p5.txt tg 65.6 acc 0.684 ms/step 45.74 pp 90
+MEAN tg 63.82 acc 0.707 ms/step 48.17
+CONC 2: per-stream tg 37.5 47.5 | aggregate gen 34.2 t/s (incl prefill, wall 15.0s)
+LONGFILL prompt 88502 tok, pp 294.3 t/s, tg 35.5 t/s, wall 303s
+ANSWER:   <think> The user is asking me to name three of the source files shown in the provided code (identified by `// FILE:` comments) and describe what each does in one sentence.  Looking at the code, I can see three files marked with `// FILE:` comments:  1. `// FILE:
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 32486567936
+   GPU[1]		: VRAM Total Used Memory (B): 34318749696
+== ub256_np2mtp_81920
+  p1.txt tg 63.0 acc 0.663 ms/step 46.55 pp 393
+  p2.txt tg 74.9 acc 0.881 ms/step 47.94 pp 442
+  p3.txt tg 72.8 acc 0.814 ms/step 46.10 pp 416
+  p4.txt tg 54.7 acc 0.495 ms/step 44.83 pp 72
+  p5.txt tg 66.7 acc 0.684 ms/step 44.97 pp 86
+MEAN tg 66.41 acc 0.707 ms/step 46.08
+CONC 2: per-stream tg 37.8 47.9 | aggregate gen 35.0 t/s (incl prefill, wall 14.6s)
+LONGFILL prompt 73757 tok, pp 309.5 t/s, tg 37.0 t/s, wall 240s
+ANSWER:   <think> The user asks me to name three of the source files shown above (they start with `// FILE:`) and describe in one sentence what each does.  Looking at the code, I can see three files marked with `// FILE:`: 1. `llama-adapter.cpp` 2
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+  TOP: []
+WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).
+   GPU[0]		: VRAM Total Used Memory (B): 32046645248
+   GPU[1]		: VRAM Total Used Memory (B): 34011856896
+== llama-bench FN PP ub256 vs ub512 (build-mslot-ring)
+| model                          |       size |     params | backend    | ngl | threads | n_batch | n_ubatch |     sm |  fa | dev          | ts           |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ------: | ------: | -------: | -----: | --: | ------------ | ------------ | --------------: | -------------------: |
+| qwen4exp A3B IQ3_XXS - 3.0625 bpw | 101.71 GiB |   176.94 B | ROCm       | 999 |      20 |    1024 |      256 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    |          pp2048 |        534.45 ± 0.90 |
+| qwen4exp A3B IQ3_XXS - 3.0625 bpw | 101.71 GiB |   176.94 B | ROCm       | 999 |      20 |    1024 |      256 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    | pp2048 @ d32768 |       388.81 ± 11.75 |
+| qwen4exp A3B IQ3_XXS - 3.0625 bpw | 101.71 GiB |   176.94 B | ROCm       | 999 |      20 |    1024 |      512 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    |          pp2048 |        598.19 ± 3.33 |
+| qwen4exp A3B IQ3_XXS - 3.0625 bpw | 101.71 GiB |   176.94 B | ROCm       | 999 |      20 |    1024 |      512 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    | pp2048 @ d32768 |        433.97 ± 6.87 |
