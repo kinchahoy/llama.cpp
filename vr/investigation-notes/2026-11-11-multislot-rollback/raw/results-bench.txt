@@ -1,0 +1,12 @@
+== build-play-b1 27B
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | ROCm       | 999 |      20 |     2048 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    |          pp2048 |        702.07 ± 0.63 |
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | ROCm       | 999 |      20 |     2048 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    |           tg128 |         36.00 ± 1.54 |
+== build-play-b1 Flash Next
+| qwen4exp A3B IQ3_XXS - 3.0625 bpw | 101.71 GiB |   176.94 B | ROCm       | 999 |      20 |    1024 | tensor |   1 | ROCm0/ROCm1  | 0.52/0.48    |          pp2048 |        606.88 ± 6.20 |
+| qwen4exp A3B IQ3_XXS - 3.0625 bpw | 101.71 GiB |   176.94 B | ROCm       | 999 |      20 |    1024 | tensor |   1 | ROCm0/ROCm1  | 0.52/0.48    |           tg128 |         49.05 ± 1.82 |
+== build-mslot-ring 27B
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | ROCm       | 999 |      20 |     2048 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    |          pp2048 |        705.48 ± 0.33 |
+| qwen35 27B Q8_0                |  27.04 GiB |    27.32 B | ROCm       | 999 |      20 |     2048 | tensor |   1 | ROCm0/ROCm1  | 1.00/1.00    |           tg128 |         37.73 ± 0.15 |
+== build-mslot-ring Flash Next
+| qwen4exp A3B IQ3_XXS - 3.0625 bpw | 101.71 GiB |   176.94 B | ROCm       | 999 |      20 |    1024 | tensor |   1 | ROCm0/ROCm1  | 0.52/0.48    |          pp2048 |        609.07 ± 1.17 |
+| qwen4exp A3B IQ3_XXS - 3.0625 bpw | 101.71 GiB |   176.94 B | ROCm       | 999 |      20 |    1024 | tensor |   1 | ROCm0/ROCm1  | 0.52/0.48    |           tg128 |         50.48 ± 0.29 |

@@ -2,7 +2,7 @@
 
 2026-11-11. Build `build-play-b1` (dc9c4e367 runtime). Two gfx906 GPUs, tensor parallel, F16 KV. Results feed the presets in [vr/server/models.ini](../../server/models.ini).
 
-In short: Qwen 27B can serve 4 users with MTP2 and a 262K shared context with no speed loss. Flash Next cannot use its MTP draft with more than one user yet: our fork's fast rollback only supports one slot, and the fallback halves speed. Flash Next therefore serves 4 users without a draft, with a 128K shared context.
+In short: Qwen 27B can serve 4 users with MTP2 and a 262K shared context with no speed loss. Flash Next cannot use its MTP draft with more than one user yet: our fork's fast rollback only supports one slot, and the fallback halves speed. Flash Next therefore serves 4 users without a draft, with a 128K shared context. (The rollback limit was fixed later the same day; see the update below.)
 
 ## Diagnosis: Flash Next with several slots
 
@@ -16,7 +16,7 @@ Isolating run: same placement (draft ROCm1, split 0.52/0.48), 32K, 1024/512, onl
 | 2 slots unified, MTP3 | 0 (checkpoints) | 32.3 | 83.4 | 0.75 |
 | 2 slots unified, no draft | - | 49.9 | 20.0 | - |
 
-Fix direction (not attempted): the ring in `llama_memory_recurrent` already keeps per-sequence `plane_head`, `valid_depth` and `ring_valid`. It lacks handling for `seq_cp` (server `copy_prompt_to` / `copy_state_to`) and for `find_slot` moving a sequence to another cell. Resetting the destination ring (depth 1, current plane only) on copy or move would be a conservative first version. The qwen4exp graph only writes conv snapshots when `uses_ring()` (`build_conv_state_at`), so removing the guard without the ring would roll back SSM state but not conv state. Expected gain if fixed: Flash Next multi-user back to about 64 t/s for a single active user.
+Update, same day: fixed in [the multi-slot rollback notes](../2026-11-11-multislot-rollback/README.md). The clamp is gone; with several slots qwen4exp uses the plane-indexed snapshot path that Qwen 27B already uses (it does write conv rollback slots there, through `build_conv_state_store`), and `seq_cp` / `find_slot` got two small fixes. Flash Next with 2 slots and MTP3 now gives 67-69 t/s for one user (44-46 ms/step). The rows below are the pre-fix measurements.
 
 ## Results
 

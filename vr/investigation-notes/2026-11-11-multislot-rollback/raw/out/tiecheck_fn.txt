@@ -1,0 +1,50 @@
+== tie_srv (/home/raistlin/infer/vrversion-llama.cpp/build-mslot-ring)
+--- new np2 MTP3 (A) vs new np2 no-draft (B)
+serial_p0_s0          [0] diff@217  A tok 57766 p=0.362  B tok 364 p=0.314  top=57766:0.362, 364:0.314, 68741:0.107
+serial_p1_s1          [0] diff@2  A tok 262 p=0.000  B tok 76 p=0.260  top=76:0.260, 510:0.094, 1911:0.088
+serial_p2_s0_reuse    [0] same
+serial_p0_s1_swap     [0] diff@217  A tok 57766 p=0.362  B tok 364 p=0.314  top=57766:0.362, 364:0.314, 68741:0.107
+conc_p0s0_p1s1        [0] diff@246  A tok 12654 p=0.429  B tok 7170 p=0.330  top=12654:0.429, 7170:0.330, 39210:0.083
+conc_p0s0_p1s1        [1] diff@0  A tok 4120 p=0.394  B tok 20465 p=0.215  top=4120:0.394, 198:0.229, 20465:0.215
+conc_p1s0_p0s1_swap   [0] diff@141  A tok 697 p=0.134  B tok 788 p=0.129  top=697:0.134, 788:0.129, 1824:0.060
+conc_p1s0_p0s1_swap   [1] diff@17  A tok 90448 p=0.510  B tok 11382 p=0.472  top=90448:0.510, 11382:0.472, 653:0.002
+conc_p2s0_p2s1_same   [0] same
+conc_p2s0_p2s1_same   [1] same
+cache_p1_s0_a         [0] diff@69  A tok 22009 p=0.453  B tok 697 p=0.470  top=697:0.470, 22009:0.453, 47460:0.034
+cache_p1_s0_b         [0] diff@69  A tok 22009 p=0.453  B tok 697 p=0.470  top=697:0.470, 22009:0.453, 47460:0.034
+cache_p1x_s0_c        [0] diff@163  A tok 15092 p=0.263  B tok 10206 p=0.307  top=10206:0.307, 15092:0.263, 4618:0.156
+ncmpl2_p0             [0] diff@246  A tok 7170 p=0.330  B tok 12654 p=0.429  top=12654:0.429, 7170:0.330, 39210:0.083
+ncmpl2_p0             [1] diff@253  A tok 198 p=0.482  B tok 321 p=0.329  top=198:0.482, 321:0.329, 11:0.091
+--- new np2 MTP3 (A) vs old np2 MTP3 checkpoints (B)
+serial_p0_s0          [0] diff@233  A tok 1459 p=0.363  B tok 4565 p=0.312  top=1459:0.363, 4565:0.312, 1144:0.138
+serial_p1_s1          [0] same
+serial_p2_s0_reuse    [0] same
+serial_p0_s1_swap     [0] diff@233  A tok 1459 p=0.363  B tok 4565 p=0.312  top=1459:0.363, 4565:0.312, 1144:0.138
+conc_p0s0_p1s1        [0] diff@253  A tok 198 p=0.482  B tok 321 p=0.329  top=198:0.482, 321:0.329, 11:0.091
+conc_p0s0_p1s1        [1] diff@161  A tok 47460 p=0.128  B tok 49830 p=0.132  top=49830:0.132, 47460:0.128, 16551:0.094
+conc_p1s0_p0s1_swap   [0] diff@141  A tok 697 p=0.134  B tok 788 p=0.129  top=697:0.134, 788:0.129, 1824:0.060
+conc_p1s0_p0s1_swap   [1] diff@233  A tok 4565 p=0.312  B tok 1459 p=0.363  top=1459:0.363, 4565:0.312, 1144:0.138
+conc_p2s0_p2s1_same   [0] same
+conc_p2s0_p2s1_same   [1] same
+cache_p1_s0_a         [0] same
+cache_p1_s0_b         [0] same
+cache_p1x_s0_c        [0] diff@163  A tok 15092 p=0.263  B tok 10206 p=0.307  top=10206:0.307, 15092:0.263, 4618:0.156
+ncmpl2_p0             [0] diff@17  A tok 90448 p=0.510  B tok 11382 p=0.472  top=90448:0.510, 11382:0.472, 653:0.002
+ncmpl2_p0             [1] diff@17  A tok 90448 p=0.510  B tok 11382 p=0.472  top=90448:0.510, 11382:0.472, 653:0.002
+--- old np1 MTP3 (A) vs old np1 no-draft (B)
+serial_p0_s0          [0] diff@217  A tok 57766 p=0.362  B tok 364 p=0.314  top=57766:0.362, 364:0.314, 68741:0.107
+serial_p1_s1          [0] diff@2  A tok 262 p=0.000  B tok 76 p=0.260  top=76:0.260, 510:0.094, 1911:0.088
+serial_p2_s0_reuse    [0] same
+serial_p0_s1_swap     [0] diff@217  A tok 57766 p=0.362  B tok 364 p=0.314  top=57766:0.362, 364:0.314, 68741:0.107
+conc_p0s0_p1s1        [0] diff@217  A tok 57766 p=0.362  B tok 364 p=0.314  top=57766:0.362, 364:0.314, 68741:0.107
+conc_p0s0_p1s1        [1] diff@2  A tok 262 p=0.000  B tok 76 p=0.260  top=76:0.260, 510:0.094, 1911:0.088
+conc_p1s0_p0s1_swap   [0] diff@2  A tok 262 p=0.000  B tok 76 p=0.260  top=76:0.260, 510:0.094, 1911:0.088
+conc_p1s0_p0s1_swap   [1] diff@217  A tok 57766 p=0.362  B tok 364 p=0.314  top=57766:0.362, 364:0.314, 68741:0.107
+conc_p2s0_p2s1_same   [0] same
+conc_p2s0_p2s1_same   [1] same
+cache_p1_s0_a         [0] diff@2  A tok 262 p=0.000  B tok 76 p=0.260  top=76:0.260, 510:0.094, 1911:0.088
+cache_p1_s0_b         [0] diff@2  A tok 262 p=0.000  B tok 76 p=0.260  top=76:0.260, 510:0.094, 1911:0.088
+cache_p1x_s0_c        [0] diff@55  A tok 11 p=0.446  B tok 318 p=0.456  top=318:0.456, 11:0.446, 18583:0.068
+   GPU[0]		: VRAM Total Used Memory (B): 30401724416
+   GPU[1]		: VRAM Total Used Memory (B): 29172666368
+   WARN       1 0.15.962.973 W seq_rm: refusing rollback seq 0: pending=0 (rs_idx=0 target=-1) rollback=1 limit=0
