@@ -67,7 +67,7 @@ A guide for judging an optimization from another project, organized by hardware 
 
 ## 9. Interconnect
 
-- This board: no peer access (one card on CPU lanes, one on chipset lanes), so AllReduce is host-staged over PCIe. The MI60 is ~20% faster than the MI50. gfx906 supports xGMI bridges, but this rig doesn't have one.
+- This board: no peer access, so AllReduce is host-staged over PCIe. ROCm0 is the MI60 (64 CUs, bus 03, CPU lanes); ROCm1 is the MI50 (60 CUs, bus 87, chipset lanes shared over DMI). The MI60 is 10-20% faster and has the better host link, so give it the hot work and the host uploads. `lspci` names the cards wrongly; check CUs with `rocminfo`. gfx906 supports xGMI bridges, but this rig doesn't have one.
 - Others: 3090 NVLink bridge or P2P; R9700/5090 PCIe P2P (vllm-radiance uses a custom P2P all-reduce).
 - Depends on it: custom P2P all-reduce, fine-grained tensor parallel, expert parallel traffic.
 - On gfx906 here: fewer, larger exchanges and overlap (slabs, duplex copies, parallel lanes). Uneven `-ts` can give 2-3%. Quantized all-reduce is lossy, so we don't use it.
