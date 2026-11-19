@@ -277,6 +277,27 @@ With 10 uniform picks, the busier GPU averages 6.23 whole experts against today'
 
 Newest first. Full commands, identities and raw data are in the linked [old-ignore](old-ignore/README.md) folders.
 
+### 2026-11-18 catch-up to official edec462cc
+
+Build `build-catchup-20261118-134459` (merge 992b4580f, final d7ea110cb) against `build-kvrows-20261116`, same binaries layout, cooled below 60C, order base/new/new/base. Raw data: `build-catchup-20261118-134459/validation/`.
+
+| Model | Test | base | new | change |
+| --- | --- | ---: | ---: | ---: |
+| Qwen3.8-27B Q8_0 | PP2048 (llama-bench r2) | 715.2 / 709.1 | 713.3 / 711.9 | 0.0% |
+| Qwen3.8-27B Q8_0 | TG128 | 37.91 / 37.89 | 37.97 / 37.89 | +0.1% |
+| Qwen3.8-27B Q8_0 | MTP2 server 5-prompt mean | 65.40 t/s, 39.11 ms/step, acc 0.797 | 66.11-66.26 t/s, 38.59-38.68 ms/step, acc 0.797 | +1.1% |
+| Flash Next UD-IQ3_XXS | PP2048 (-b 1024 -ub 512) | 663.7 / 664.3 | 671.9 / 672.9 | +1.3% |
+| Flash Next UD-IQ3_XXS | TG128 | 50.50 / 50.73 | 51.16 / 50.24 | 0.0% |
+| Flash Next UD-IQ3_XXS | MTP3 server 5-prompt mean | 59.17 / 61.00 t/s, 50.87 / 49.31 ms/step, acc 0.682 | 59.14 / 60.05 t/s, 49.68 / 48.94 ms/step, acc 0.660 | ms/step -1.3% |
+| 27B, 4 users x 16K (batched-bench) | PP / 4-way TG | 577.9 / 82.6 | 572.9 / 81.4 | -0.9% / noise |
+| Flash Next, 4 users x 16K | PP / 4-way TG | 474.1 / 83.5 | 478.7 / 84.5 | +1.0% / +1.2% |
+
+TP check pass at n 1 and 2048; 27B greedy text correct. Flash Next greedy text changed (acceptance 0.682 -> 0.660 on the same prompts) while 27B did not; the likely cause is upstream GCN stream-k MMQ (#30022) changing the sum order of the IQ prefill matmuls (27B prefill uses the repacked GEMM). Not verified; a PPL/KLD A/B would settle it.
+
+Merge notes: upstream #31617 removed the HIP shim that took 32-bit masks in raw `__shfl_*_sync`; 7 fork calls now use `ggml_cuda_shfl*`. The generic top-k MoE kernel is now 64-lane on gfx906; the fork's with_norm sum order is kept (bit-identical for n_expert_used <= 32). gfx906 keeps row-first MMQ for dense and MoE.
+
+pi adapter (harness-hub Qwen3.8-27B-pi-adapted, F16 LoRA on 27B Q8_0): runtime `--lora` aborts under `-sm tensor` (`ggml-backend-meta.cpp:900`, no split rule for `lora_a`/`lora_b`); `-sm layer` asks for a 47 GB compute buffer on ROCm0 and fails. Not fixed yet.
+
 ### 2026-11-06 F2, P4, toolchain check and acceptance-aware speculative runs
 
 Land the first two Fable-review kernels, check a suspected 27B MTP2 regression, and measure speculative modes without acceptance noise. Kind: A/B experiment and profile.
