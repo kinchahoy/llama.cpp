@@ -129,6 +129,7 @@ Each row is one specific implementation that lost, not a verdict on the idea. Ro
 | M1 | DFlash device feature rows (`LLAMA_DFLASH_DEV=1`) on 27B tensor split | 2026-11-10: 128 vs 55 ms/step. Under `-sm tensor` the feature buffer is a mirrored meta tensor, so the scheduler copies 200 MiB to the single-GPU draft each step. [Record](old-ignore/2026-11-10/exp-spec/README.md) |
 | - | MTP device rows (`LLAMA_MTP_DEV_ROWS=1`) on 27B tensor split | 2026-11-10: engages, 40.6 vs 40.6 ms/step, same output, but it disables deferred prefill, so long-prompt TTFT +18%. [Record](old-ignore/2026-11-10/exp-spec/README.md) |
 | - | Oct 12 smaller items: MTP fused catch-up (already overlapped with sampling), nc unroll 2, `GGML_RP_NC_FUSION`, MTP `p-min` (TG 55 -> 29-31), DFlash mirrored output head | Each measured in the [Oct 12 work log](old-ignore/2026-10-12/notes/2026-10-12-work-status.md) |
+| SP1a | Lift the `-sm tensor` refusal of backend sampling (`LLAMA_TP_BACKEND_SAMPLING=1`) and let the meta backend gather the split logits | 2026-11-18, 27B MTP2: aborts at load. Sampler sums over the split vocab become tiny PARTIAL tensors; the AllReduce declines them (was an assert, now a fallback, kept) and `get_tensor_async` cannot read PARTIAL back. Needs a small-PARTIAL reduction or split-aware top-k/argmax (SP1 proper). [Record](old-ignore/2026-11-18/sp1-tp-backend-sampling/README.md), [patch](old-ignore/2026-11-18/sp1-tp-backend-sampling/tp-backend-sampling-switch.patch) |
 
 ### Not shown (test could not show the effect)
 

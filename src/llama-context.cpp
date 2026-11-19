@@ -1988,13 +1988,7 @@ bool llama_context::set_sampler(llama_seq_id seq_id, llama_sampler * sampler) {
 
     LLAMA_LOG_DEBUG("%s: seq_id = %d, sampler = %p\n", __func__, (int) seq_id, (void *) sampler);
 
-    // experimental: LLAMA_TP_BACKEND_SAMPLING=1 keeps backend sampling on the split logits (meta backend gathers rows)
-    static const bool tp_backend_sampling = [] {
-        const char * e = getenv("LLAMA_TP_BACKEND_SAMPLING");
-        return e != nullptr && atoi(e) != 0;
-    }();
-
-    if (sampler && model.split_mode() == LLAMA_SPLIT_MODE_TENSOR && !tp_backend_sampling) {
+    if (sampler && model.split_mode() == LLAMA_SPLIT_MODE_TENSOR) {
         static bool warned = false;
         if (!warned) {
             LLAMA_LOG_WARN("%s: backend sampling not supported with SPLIT_MODE_TENSOR; using CPU\n", __func__);
